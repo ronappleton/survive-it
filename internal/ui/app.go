@@ -158,9 +158,7 @@ func checkUpdateCmd(currentVersion string) tea.Cmd {
 		// Tiny delay so the UI visibly switches to busy state.
 		time.Sleep(150 * time.Millisecond)
 
-		res, err := update.Check(update.CheckParams{
-			CurrentVersion: currentVersion,
-		})
+		res, err := update.Apply(currentVersion)
 		if err != nil {
 			return updateResultMsg{err: err}
 		}
