@@ -1,0 +1,62 @@
+name: autotag-patch
+
+on:
+  push:
+    branches: ["master"]
+
+permissions:
+  contents: write
+
+jobs:
+  tag_patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Skip if commit message requests it
+        run: |
+          MSG="$(git log -1 --pretty=%B)"
+          echo "$MSG" | grep -qi '\[skip release\]' && exit 78 || exit 0
+
+      - name: Skip if HEAD already has a semver tag
+        id: already
+        run: |
+          TAGS="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          if [ -n "$TAGS" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "Already tagged: $TAGS"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next patch tag
+        if: steps.already.outputs.already == 'false'
+        id: next
+        run: |
+          set -e
+          LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+          if [ -z "$LATEST" ]; then
+            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VER="${LATEST#v}"
+          MAJOR="$(echo "$VER" | cut -d. -f1)"
+          MINOR="$(echo "$VER" | cut -d. -f2)"
+          PATCH="$(echo "$VER" | cut -d. -f3)"
+          PATCH=$((PATCH + 1))
+
+          echo "tag=v${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: steps.already.outputs.already == 'false'
+        run: |
+          TAG="${{ steps.next.outputs.tag }}"
+          echo "Creating tag: $TAG"
+          git tag "$TAG"
+          git push origin "$TAG"

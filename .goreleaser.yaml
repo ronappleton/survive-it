@@ -41,7 +41,6 @@ checksum:
 
 release:
   draft: false
-  prerelease: auto
   mode: replace
 
 changelog:

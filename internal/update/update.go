@@ -133,10 +133,8 @@ func checkAndMaybeUpdate(p UpdateParams) (string, error) {
 // ---- GitHub release API ----
 
 type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Draft      bool          `json:"draft"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
+	TagName string        `json:"tag_name"`
+	Assets  []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
@@ -145,9 +143,7 @@ type githubAsset struct {
 }
 
 func fetchLatestRelease(ctx context.Context, repo string) (*githubRelease, error) {
-	// IMPORTANT: /releases/latest ignores prereleases and will 404 if you only have alphas.
-	url := fmt.Sprintf("%s/repos/%s/releases?per_page=20", githubAPI, repo)
-
+	url := fmt.Sprintf("%s/repos/%s/releases/latest", githubAPI, repo)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
@@ -156,29 +152,19 @@ func fetchLatestRelease(ctx context.Context, repo string) (*githubRelease, error
 		return nil, err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("github releases list: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("github latest release: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 
-	var rels []githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
+	var rel githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
 		return nil, err
 	}
-
-	// Pick the newest non-draft release. Allow prereleases (alpha) for now.
-	for _, r := range rels {
-		if r.Draft {
-			continue
-		}
-		if r.TagName == "" {
-			continue
-		}
-		return &r, nil
+	if rel.TagName == "" {
+		return nil, errors.New("latest release has no tag_name")
 	}
-
-	return nil, errors.New("no suitable releases found")
+	return &rel, nil
 }
 
 func findAssetURL(rel *githubRelease, name string) (string, error) {
