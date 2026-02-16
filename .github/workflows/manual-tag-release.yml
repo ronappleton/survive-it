@@ -1,10 +1,10 @@
-name: tag-release
+name: manual-tag-release
 
 on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "major, minor, patch (ignored if version is set)"
+        description: "Bump part (major/minor/patch). Ignored if 'version' is set."
         required: true
         default: "minor"
         type: choice
@@ -18,10 +18,12 @@ permissions:
   contents: write
 
 jobs:
-  tag:
+  tag_and_release:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -34,6 +36,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # If explicit version provided, validate and use it.
           if [ -n "${{ inputs.version }}" ]; then
             V="${{ inputs.version }}"
             echo "$V" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null
@@ -41,6 +44,7 @@ jobs:
             exit 0
           fi
 
+          # Latest semver tag; if none, start at v0.1.0
           LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
           if [ -z "$LATEST" ]; then
             echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
@@ -61,13 +65,39 @@ jobs:
           echo "tag=v${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
 
       - name: Fail if tag exists
+        shell: bash
         run: |
+          set -e
           TAG="${{ steps.compute.outputs.tag }}"
-          git rev-parse "$TAG" >/dev/null 2>&1 && { echo "Tag exists: $TAG"; exit 1; } || true
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG"
+            exit 1
+          fi
 
       - name: Create and push tag
+        shell: bash
         run: |
+          set -euo pipefail
           TAG="${{ steps.compute.outputs.tag }}"
           echo "Creating tag: $TAG"
+
+          git config user.name "survive-it-bot"
+          git config user.email "survive-it-bot@users.noreply.github.com"
+
           git tag "$TAG"
           git push origin "$TAG"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser (publish release)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
