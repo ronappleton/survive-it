@@ -8,6 +8,7 @@ import (
 	"github.com/appengine-ltd/survive-it/internal/game"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/appengine-ltd/survive-it/internal/update"
 )
@@ -211,11 +212,13 @@ func (m menuModel) viewRun() string {
 		h = 35
 	}
 
+	paneW := max(30, w-3)
+
 	box := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
-		Width(w - 1) // leave 1 column margin to avoid right-edge scroll
+		Width(paneW)
 
 	// Render header first (auto height)
 	header := box.Render(m.headerText())
@@ -230,9 +233,13 @@ func (m menuModel) viewRun() string {
 		bodyHeight = 3
 	}
 
-	body := box.Height(bodyHeight).Render(m.bodyText())
+	body := box.Height(bodyHeight).Render(m.bodyText(paneW))
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+func trunc(s string, w int) string {
+	return ansi.Truncate(s, w, "…")
 }
 
 func (m menuModel) viewMenu() string {
@@ -306,20 +313,23 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT") + dimGreen.Render("  run\n"))
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
+	b.WriteString(brightGreen.Render("SURVIVE IT") + brightGreen.Render("  run\n"))
+	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
 	return b.String()
 }
 
-func (m menuModel) bodyText() string {
+func (m menuModel) bodyText(w int) string {
 	var b strings.Builder
 	b.WriteString(green.Render("Players:\n"))
 	for _, p := range m.run.Players {
-		b.WriteString(fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n",
-			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale,
-		))
+		b.WriteString(trunc(fmt.Sprintf(
+			" - %s [%s/%s] E:%d H:%d M:%d\n",
+			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale),
+			w,
+		),
+		)
 	}
 	return b.String()
 }
@@ -333,14 +343,14 @@ func (m menuModel) footerText() string {
 	}
 
 	if m.status != "" {
-		b.WriteString(green.Render(m.status))
+		b.WriteString(brightGreen.Render(m.status))
 	}
 
 	if out.Status != game.RunOutcomeOngoing || m.status != "" {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back"))
+	b.WriteString(brightGreen.Render("Enter: next day\nq/esc: back"))
 	return b.String()
 }
 
