@@ -77,7 +77,8 @@ func newMenuModel(cfg AppConfig) menuModel {
 }
 
 func (m menuModel) Init() tea.Cmd {
-	return resizeTerminalBestEffort(120, 35)
+	// Approximate 1024x768 using typical terminal cells at ~8x16 px.
+	return resizeTerminalBestEffort(128, 48)
 }
 
 type updateResultMsg struct {
