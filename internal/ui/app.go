@@ -211,7 +211,6 @@ func (m menuModel) viewRun() string {
 		h = 35
 	}
 
-	// margin avoids right-edge clipping in some terminals
 	paneW := max(20, w-2)
 
 	box := lipgloss.NewStyle().
@@ -223,8 +222,8 @@ func (m menuModel) viewRun() string {
 	header := box.Render(m.headerText())
 	footer := box.Render(m.footerText())
 
-	usedHeight := lipgloss.Height(header) + lipgloss.Height(footer)
-	bodyH := max(5, h-usedHeight)
+	used := lipgloss.Height(header) + lipgloss.Height(footer)
+	bodyH := max(5, h-used-1)
 
 	body := box.Height(bodyH).Render(m.bodyText())
 
@@ -295,18 +294,17 @@ func applyUpdateCmd(currentVersion string) tea.Cmd {
 }
 
 func (m menuModel) headerText() string {
-	season, ok := m.run.CurrentSeason() // make sure you changed this to pointer receiver
+	season, ok := m.run.CurrentSeason()
 	seasonStr := "unknown"
 	if ok {
 		seasonStr = string(season)
 	}
 
-	b := strings.Builder{}
+	var b strings.Builder
 	b.WriteString(brightGreen.Render("SURVIVE IT") + dimGreen.Render("  run\n"))
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s\n",
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
-
 	return b.String()
 }
 
@@ -325,17 +323,22 @@ func (m menuModel) bodyText() string {
 }
 
 func (m menuModel) footerText() string {
-	b := strings.Builder{}
-	out := m.run.EvaluateRun()
+	var b strings.Builder
 
+	out := m.run.EvaluateRun()
 	if out.Status != game.RunOutcomeOngoing {
-		b.WriteString("\n" + brightGreen.Render(string(out.Status)) + "\n")
+		b.WriteString(brightGreen.Render(string(out.Status)) + " ")
 	}
 
 	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+		b.WriteString(green.Render(m.status))
 	}
 
+	if out.Status != game.RunOutcomeOngoing || m.status != "" {
+		b.WriteString("\n")
+	}
+
+	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back"))
 	return b.String()
 }
 
