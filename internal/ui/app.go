@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -56,10 +58,14 @@ type menuItem int
 
 const (
 	itemStart menuItem = iota
+	itemLoadRun
+	itemSaveRun
 	itemCheckUpdate
 	itemInstallUpdate
 	itemQuit
 )
+
+const defaultSaveFile = "survive-it-save.json"
 
 type menuModel struct {
 	w, h   int
@@ -90,6 +96,12 @@ func (m menuModel) Init() tea.Cmd {
 type updateResultMsg struct {
 	status string
 	err    error
+}
+
+type savedRun struct {
+	FormatVersion int           `json:"format_version"`
+	SavedAt       time.Time     `json:"saved_at"`
+	Run           game.RunState `json:"run"`
 }
 
 func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -150,8 +162,39 @@ func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = ""
 		}
 		return m, nil
+	case "s":
+		if m.run == nil {
+			m.status = "No active run to save."
+			return m, nil
+		}
+		if err := saveRunToFile(defaultSaveFile, *m.run); err != nil {
+			m.status = fmt.Sprintf("Save failed: %v", err)
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Saved run to %s", defaultSaveFile)
+		return m, nil
+	case "l":
+		state, err := loadRunFromFile(defaultSaveFile)
+		if err != nil {
+			m.status = fmt.Sprintf("Load failed: %v", err)
+			return m, nil
+		}
+		m.run = &state
+		m.status = fmt.Sprintf("Loaded run from %s", defaultSaveFile)
+		return m, nil
 	}
 	return m, nil
+}
+
+func menuItems() []string {
+	return []string{
+		"Start",
+		"Load Run",
+		"Save Run",
+		"Check for updates",
+		"Install Update",
+		"Quit",
+	}
 }
 
 func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -159,14 +202,15 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Ignore input while update check runs.
 		return m, nil
 	}
+	itemCount := len(menuItems())
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "up", "k":
-		m.idx = (m.idx + 2) % 4
+		m.idx = wrapIndex(m.idx, -1, itemCount)
 		return m, nil
 	case "down", "j":
-		m.idx = (m.idx + 1) % 4
+		m.idx = wrapIndex(m.idx, 1, itemCount)
 		return m, nil
 	case "enter":
 		switch menuItem(m.idx) {
@@ -174,6 +218,27 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setup = newSetupState()
 			m.screen = screenSetup
 			m.status = ""
+			return m, nil
+		case itemLoadRun:
+			state, err := loadRunFromFile(defaultSaveFile)
+			if err != nil {
+				m.status = fmt.Sprintf("Load failed: %v", err)
+				return m, nil
+			}
+			m.run = &state
+			m.screen = screenRun
+			m.status = fmt.Sprintf("Loaded run from %s", defaultSaveFile)
+			return m, nil
+		case itemSaveRun:
+			if m.run == nil {
+				m.status = "No active run to save."
+				return m, nil
+			}
+			if err := saveRunToFile(defaultSaveFile, *m.run); err != nil {
+				m.status = fmt.Sprintf("Save failed: %v", err)
+				return m, nil
+			}
+			m.status = fmt.Sprintf("Saved run to %s", defaultSaveFile)
 			return m, nil
 		case itemCheckUpdate:
 			if m.cfg.NoUpdate {
@@ -374,8 +439,11 @@ func (m menuModel) viewSetup() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("NEW RUN WIZARD\n"))
-	b.WriteString(dimGreen.Render("Choose options, then select Start Run") + "\n")
+	b.WriteString(lipgloss.JoinVertical(
+		lipgloss.Left,
+		brightGreen.Render("NEW RUN WIZARD"),
+		dimGreen.Render("Choose options, then select Start Run"),
+	) + "\n")
 	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
 	for i, row := range rows {
@@ -454,18 +522,18 @@ func (m menuModel) viewRun() string {
 }
 
 func (m menuModel) viewMenu() string {
-	title := brightGreen.Render("SURVIVE IT\n") + dimGreen.Render("  alpha")
+	title := lipgloss.JoinVertical(
+		lipgloss.Left,
+		brightGreen.Render("SURVIVE IT"),
+		dimGreen.Render("alpha"),
+	)
 	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
 
-	items := []string{
-		"Start",
-		"Check for updates",
-		"Install Update",
-		"Quit",
-	}
+	items := menuItems()
 
 	var b strings.Builder
-	b.WriteString(title + "\n" + ver + "\n")
+	b.WriteString(title + "\n")
+	b.WriteString(ver + "\n")
 	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
 	for i, it := range items {
@@ -524,10 +592,12 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT!"))
-	b.WriteString("\n")
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d",
-		modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day)))
+	b.WriteString(lipgloss.JoinVertical(
+		lipgloss.Left,
+		brightGreen.Render("SURVIVE IT!"),
+		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d",
+			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day)),
+	))
 	return b.String()
 }
 
@@ -593,8 +663,41 @@ func (m menuModel) footerText() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(brightGreen.Render("[enter] next day  [q/esc] back"))
+	b.WriteString(brightGreen.Render("[enter] next day  [s] save  [l] load  [q/esc] back"))
 	return b.String()
+}
+
+func saveRunToFile(path string, run game.RunState) error {
+	payload := savedRun{
+		FormatVersion: 1,
+		SavedAt:       time.Now().UTC(),
+		Run:           run,
+	}
+
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0o644)
+}
+
+func loadRunFromFile(path string) (game.RunState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return game.RunState{}, err
+	}
+
+	var payload savedRun
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return game.RunState{}, err
+	}
+
+	if err := payload.Run.Config.Validate(); err != nil {
+		return game.RunState{}, fmt.Errorf("invalid saved run config: %w", err)
+	}
+
+	return payload.Run, nil
 }
 
 func resizeTerminalBestEffort(cols, rows int) tea.Cmd {
