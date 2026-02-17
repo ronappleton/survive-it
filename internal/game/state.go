@@ -2,15 +2,9 @@ package game
 
 import (
 	"fmt"
-	"go/doc"
 	"math/rand/v2"
+	"time"
 )
-
-type PlayerState struct {
-	Energy    int
-	Hydration int
-	Morale    int
-}
 
 type RunState struct {
 	Config      RunConfig
@@ -21,16 +15,44 @@ type RunState struct {
 }
 
 func NewRunState(config RunConfig) (RunState, error) {
-	var valid = config.Validate()
-	if valid != nil {
-		return RunState{}, valid
+	resolvedConfig := config
+
+	if err := resolvedConfig.Validate(); err != nil {
+		return RunState{}, err
 	}
 
-	if config.ScenarioID == ScenarioRandomID {
-		config.ScenarioID = BuiltInScenarios()[rand.Int64()%int64(len(BuiltInScenarios()))].ID
+	if resolvedConfig.Seed == 0 {
+		resolvedConfig.Seed = time.Now().UnixNano()
 	}
 
-	config.Scenario =
+	scenarios := BuiltInScenarios()
 
-	return RunState{Config: config}
+	if resolvedConfig.ScenarioID == ScenarioRandomID {
+		rng := rand.New(rand.NewPCG(uint64(resolvedConfig.Seed), uint64(resolvedConfig.Seed^0x9e3779b97f4a7c15)))
+		resolvedConfig.ScenarioID = scenarios[rng.IntN(len(scenarios))].ID
+	}
+
+	scenario, found := GetScenario(scenarios, resolvedConfig.ScenarioID)
+
+	if !found {
+		return RunState{}, fmt.Errorf("scenario not found: %s", resolvedConfig.ScenarioID)
+	}
+
+	return RunState{
+		Config:      resolvedConfig,
+		Scenario:    scenario,
+		SeasonSetID: scenario.DefaultSeasonSetID,
+		Day:         1,
+		Players:     CreatePlayers(resolvedConfig),
+	}, nil
+}
+
+func GetScenario(scenarios []Scenario, id ScenarioID) (Scenario, bool) {
+	for _, scenario := range scenarios {
+		if scenario.ID == id {
+			return scenario, true
+		}
+	}
+
+	return Scenario{}, false
 }
