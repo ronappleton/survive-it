@@ -13,9 +13,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -122,12 +124,11 @@ func checkAndMaybeUpdate(p UpdateParams) (string, error) {
 		return "", err
 	}
 
-	// Replace current executable
 	if err := replaceSelf(newBinPath); err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("Updated to %s (%s).", rel.TagName, assetName), nil
+	return "", Restart()
 }
 
 // ---- GitHub release API ----
@@ -407,4 +408,25 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+func Restart() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command(exe, os.Args[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		os.Exit(0)
+		return nil
+	}
+
+	return syscall.Exec(exe, os.Args, os.Environ())
 }
