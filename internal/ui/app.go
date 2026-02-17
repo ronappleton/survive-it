@@ -202,33 +202,31 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) viewRun() string {
+	w := m.w
+	h := m.h
+	if w <= 0 {
+		w = 120
+	}
+	if h <= 0 {
+		h = 35
+	}
+
+	// margin avoids right-edge clipping in some terminals
+	paneW := max(20, w-2)
+
 	headerH := 5
 	footerH := 3
-	bodyH := max(0, m.h-headerH-footerH)
+	bodyH := max(5, h-headerH-footerH-2) // -2 safety for borders/margins
 
-	header := lipgloss.NewStyle().
-		Height(headerH).
-		Width(m.w).
+	box := lipgloss.NewStyle().
+		Width(paneW).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
-		Padding(0, 1).
-		Render(m.headerText())
+		Padding(0, 1)
 
-	body := lipgloss.NewStyle().
-		Height(bodyH).
-		Width(m.w).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("2")).
-		Padding(0, 1).
-		Render(m.bodyText())
-
-	footer := lipgloss.NewStyle().
-		Height(footerH).
-		Width(m.w).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("2")).
-		Padding(0, 1).
-		Render(m.footerText())
+	header := box.Height(headerH).Render(m.headerText())
+	body := box.Height(bodyH).Render(m.bodyText())
+	footer := box.Height(footerH).Render(m.footerText())
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
