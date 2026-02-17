@@ -30,6 +30,7 @@ const (
 	SeasonSetAloneDefaultID  = "alone_default"
 	SeasonSetWetDefaultID    = "wet_default"
 	SeasonSetWinterDefaultID = "winter_default"
+	SeasonSetDryDefaultID    = "dry_default"
 )
 
 type SeasonSetID string
@@ -38,6 +39,7 @@ const (
 	SeasonAutumn = "autumn"
 	SeasonWinter = "winter"
 	SeasonWet    = "wet"
+	SeasonDry    = "dry"
 )
 
 type Season struct {
