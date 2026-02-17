@@ -2,9 +2,12 @@ package ui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +75,8 @@ const (
 const (
 	defaultCustomScenariosFile = "survive-it-scenarios.json"
 	saveSlotCount              = 3
+	maxSaveFileBytes           = 2 << 20
+	maxScenarioFileBytes       = 2 << 20
 )
 
 type menuModel struct {
@@ -770,10 +775,16 @@ func loadSlotMetadata(slot int) saveSlotMeta {
 		Path: path,
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readDataFile(path, maxSaveFileBytes)
 	if err != nil {
-		meta.Exists = false
-		meta.Summary = "Empty"
+		if errors.Is(err, os.ErrNotExist) {
+			meta.Exists = false
+			meta.Summary = "Empty"
+			return meta
+		}
+		meta.Exists = true
+		meta.Summary = "Unreadable save"
+		meta.ErrDetail = err.Error()
 		return meta
 	}
 
@@ -1479,6 +1490,10 @@ func (m menuModel) footerText() string {
 }
 
 func saveRunToFile(path string, run game.RunState) error {
+	if err := validateDataFilePath(path); err != nil {
+		return err
+	}
+
 	payload := savedRun{
 		FormatVersion: 1,
 		SavedAt:       time.Now().UTC(),
@@ -1489,16 +1504,55 @@ func saveRunToFile(path string, run game.RunState) error {
 	if err != nil {
 		return err
 	}
+	if len(data) > maxSaveFileBytes {
+		return fmt.Errorf("save data exceeds %d bytes", maxSaveFileBytes)
+	}
 
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func savePathForSlot(slot int) string {
 	return fmt.Sprintf("survive-it-save-%d.json", slot)
 }
 
+func validateDataFilePath(path string) error {
+	clean := filepath.Clean(path)
+	if filepath.IsAbs(clean) || strings.Contains(clean, string(filepath.Separator)) {
+		return fmt.Errorf("invalid data file path: %s", path)
+	}
+
+	if clean == defaultCustomScenariosFile {
+		return nil
+	}
+
+	for slot := 1; slot <= saveSlotCount; slot++ {
+		if clean == savePathForSlot(slot) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unsupported data file path: %s", path)
+}
+
+func readDataFile(path string, maxBytes int) ([]byte, error) {
+	if err := validateDataFilePath(path); err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > int64(maxBytes) {
+		return nil, fmt.Errorf("data file exceeds %d bytes: %s", maxBytes, path)
+	}
+
+	// #nosec G304 -- path is restricted to a fixed allow-list by validateDataFilePath.
+	return os.ReadFile(path)
+}
+
 func loadRunFromFile(path string, availableScenarios []game.Scenario) (game.RunState, error) {
-	data, err := os.ReadFile(path)
+	data, err := readDataFile(path, maxSaveFileBytes)
 	if err != nil {
 		return game.RunState{}, err
 	}
@@ -1525,7 +1579,7 @@ func loadRunFromFile(path string, availableScenarios []game.Scenario) (game.RunS
 }
 
 func loadCustomScenarios(path string) ([]customScenarioRecord, error) {
-	data, err := os.ReadFile(path)
+	data, err := readDataFile(path, maxScenarioFileBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -1558,6 +1612,10 @@ func loadCustomScenarios(path string) ([]customScenarioRecord, error) {
 }
 
 func saveCustomScenarios(path string, scenarios []customScenarioRecord) error {
+	if err := validateDataFilePath(path); err != nil {
+		return err
+	}
+
 	library := customScenarioLibrary{
 		FormatVersion: 1,
 		Custom:        scenarios,
@@ -1567,8 +1625,11 @@ func saveCustomScenarios(path string, scenarios []customScenarioRecord) error {
 	if err != nil {
 		return err
 	}
+	if len(data) > maxScenarioFileBytes {
+		return fmt.Errorf("scenario data exceeds %d bytes", maxScenarioFileBytes)
+	}
 
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func makeCustomScenarioID(name string, existing []game.Scenario) game.ScenarioID {
@@ -1682,9 +1743,7 @@ func newRunStateWithScenarios(config game.RunConfig, scenarios []game.Scenario) 
 	}
 
 	if resolvedConfig.ScenarioID == game.ScenarioRandomID {
-		seed1 := uint64(resolvedConfig.Seed)
-		seed2 := seed1 ^ uint64(0x9e3779b97f4a7c15)
-		rng := rand.New(rand.NewPCG(seed1, seed2))
+		rng := seededRNG(resolvedConfig.Seed)
 		resolvedConfig.ScenarioID = scenarios[rng.IntN(len(scenarios))].ID
 	}
 
@@ -1700,6 +1759,18 @@ func newRunStateWithScenarios(config game.RunConfig, scenarios []game.Scenario) 
 		Day:         1,
 		Players:     game.CreatePlayers(resolvedConfig),
 	}, nil
+}
+
+func seededRNG(seed int64) *rand.Rand {
+	// Non-cryptographic PRNG is intentional for deterministic simulation behavior.
+	// #nosec G404
+	return rand.New(rand.NewPCG(seedWord(seed, "a"), seedWord(seed, "b")))
+}
+
+func seedWord(seed int64, salt string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s", seed, salt)))
+	return h.Sum64()
 }
 
 func resizeTerminalBestEffort(cols, rows int) tea.Cmd {
