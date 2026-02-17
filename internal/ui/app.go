@@ -216,13 +216,14 @@ func (m menuModel) viewRun() string {
 
 	box := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
 		Background(lipgloss.Color("#7D56F4")).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
 		PaddingTop(2).
 		PaddingLeft(4).
 		Width(paneW)
+
+	box.Render("")
 
 	// Render header first (auto height)
 	header := box.Render(m.headerText())
@@ -317,7 +318,7 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT"))
+	b.WriteString(brightGreen.Render("SURVIVE IT\n"))
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
