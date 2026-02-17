@@ -61,6 +61,7 @@ const (
 )
 
 type menuModel struct {
+	w, h   int
 	cfg    AppConfig
 	idx    int
 	screen screen
@@ -76,8 +77,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 }
 
 func (m menuModel) Init() tea.Cmd {
-	// Alpha1: keep update check opt-in via menu.
-	return nil
+	return resizeTerminalBestEffort(120, 35)
 }
 
 type updateResultMsg struct {
@@ -101,6 +101,11 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = msg.status
+
+		return m, nil
+	case tea.WindowSizeMsg:
+		m.w = msg.Width
+		m.h = msg.Height
 
 		return m, nil
 	}
@@ -197,43 +202,35 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) viewRun() string {
-	if m.run == nil {
-		return "No run."
-	}
+	headerH := 5
+	footerH := 3
+	bodyH := max(0, m.h-headerH-footerH)
 
-	season, ok := m.run.CurrentSeason() // make sure you changed this to pointer receiver
-	seasonStr := "unknown"
-	if ok {
-		seasonStr = string(season)
-	}
+	header := lipgloss.NewStyle().
+		Height(headerH).
+		Width(m.w).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Render(m.headerText())
 
-	out := m.run.EvaluateRun()
+	body := lipgloss.NewStyle().
+		Height(bodyH).
+		Width(m.w).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Render(m.bodyText())
 
-	b := strings.Builder{}
-	b.WriteString(brightGreen.Render("SURVIVE IT") + dimGreen.Render("  run\n"))
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s\n",
-		m.run.Day, m.run.Scenario.Name, seasonStr,
-	)))
-	b.WriteString(border.Render("----------------------------------------") + "\n")
+	footer := lipgloss.NewStyle().
+		Height(footerH).
+		Width(m.w).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Render(m.footerText())
 
-	b.WriteString(green.Render("Players:\n"))
-	for _, p := range m.run.Players {
-		b.WriteString(fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n",
-			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale,
-		))
-	}
-
-	b.WriteString(border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back\n"))
-
-	if out.Status != game.RunOutcomeOngoing {
-		b.WriteString("\n" + brightGreen.Render(string(out.Status)) + "\n")
-	}
-	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
-	}
-
-	return b.String()
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
 func (m menuModel) viewMenu() string {
@@ -296,5 +293,57 @@ func applyUpdateCmd(currentVersion string) tea.Cmd {
 			return updateResultMsg{err: err}
 		}
 		return updateResultMsg{status: res}
+	}
+}
+
+func (m menuModel) headerText() string {
+	season, ok := m.run.CurrentSeason() // make sure you changed this to pointer receiver
+	seasonStr := "unknown"
+	if ok {
+		seasonStr = string(season)
+	}
+
+	b := strings.Builder{}
+	b.WriteString(brightGreen.Render("SURVIVE IT") + dimGreen.Render("  run\n"))
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s\n",
+		m.run.Day, m.run.Scenario.Name, seasonStr,
+	)))
+
+	return b.String()
+}
+
+func (m menuModel) bodyText() string {
+	b := strings.Builder{}
+	b.WriteString(green.Render("Players:\n"))
+	for _, p := range m.run.Players {
+		b.WriteString(fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n",
+			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale,
+		))
+	}
+	b.WriteString(border.Render("----------------------------------------") + "\n")
+	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back\n"))
+
+	return b.String()
+}
+
+func (m menuModel) footerText() string {
+	b := strings.Builder{}
+	out := m.run.EvaluateRun()
+
+	if out.Status != game.RunOutcomeOngoing {
+		b.WriteString("\n" + brightGreen.Render(string(out.Status)) + "\n")
+	}
+
+	if m.status != "" {
+		b.WriteString("\n" + green.Render(m.status) + "\n")
+	}
+
+	return b.String()
+}
+
+func resizeTerminalBestEffort(cols, rows int) tea.Cmd {
+	return func() tea.Msg {
+		fmt.Printf("\x1b[8;%d;%dt", rows, cols) // CSI 8; rows; cols t
+		return nil
 	}
 }
