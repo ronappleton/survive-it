@@ -214,19 +214,19 @@ func (m menuModel) viewRun() string {
 	// margin avoids right-edge clipping in some terminals
 	paneW := max(20, w-2)
 
-	headerH := 5
-	footerH := 3
-	bodyH := max(5, h-headerH-footerH-2) // -2 safety for borders/margins
-
 	box := lipgloss.NewStyle().
 		Width(paneW).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1)
 
-	header := box.Height(headerH).Render(m.headerText())
+	header := box.Render(m.headerText())
+	footer := box.Render(m.footerText())
+
+	usedHeight := lipgloss.Height(header) + lipgloss.Height(footer)
+	bodyH := max(5, h-usedHeight)
+
 	body := box.Height(bodyH).Render(m.bodyText())
-	footer := box.Height(footerH).Render(m.footerText())
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
