@@ -211,21 +211,26 @@ func (m menuModel) viewRun() string {
 		h = 35
 	}
 
-	paneW := max(20, w-2)
-
 	box := lipgloss.NewStyle().
-		Width(paneW).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(w - 1) // leave 1 column margin to avoid right-edge scroll
 
+	// Render header first (auto height)
 	header := box.Render(m.headerText())
+
+	// Render footer first (auto height)
 	footer := box.Render(m.footerText())
 
-	used := lipgloss.Height(header) + lipgloss.Height(footer)
-	bodyH := max(5, h-used-1)
+	usedHeight := lipgloss.Height(header) + lipgloss.Height(footer)
 
-	body := box.Height(bodyH).Render(m.bodyText())
+	bodyHeight := h - usedHeight
+	if bodyHeight < 3 {
+		bodyHeight = 3
+	}
+
+	body := box.Height(bodyHeight).Render(m.bodyText())
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
@@ -309,16 +314,13 @@ func (m menuModel) headerText() string {
 }
 
 func (m menuModel) bodyText() string {
-	b := strings.Builder{}
+	var b strings.Builder
 	b.WriteString(green.Render("Players:\n"))
 	for _, p := range m.run.Players {
 		b.WriteString(fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n",
 			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale,
 		))
 	}
-	b.WriteString(border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back\n"))
-
 	return b.String()
 }
 
