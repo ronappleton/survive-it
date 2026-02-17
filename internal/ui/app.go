@@ -2040,6 +2040,7 @@ func indexOfInt(values []int, target int) int {
 func validateRunConfigWithScenarios(c game.RunConfig, scenarios []game.Scenario) error {
 	switch c.Mode {
 	case game.ModeNakedAndAfraid:
+	case game.ModeNakedAndAfraidXL:
 	case game.ModeAlone:
 	default:
 		return fmt.Errorf("invalid mode: %s", c.Mode)
@@ -2060,6 +2061,16 @@ func validateRunConfigWithScenarios(c game.RunConfig, scenarios []game.Scenario)
 	}
 	if !found {
 		return fmt.Errorf("scenario not found: %s", c.ScenarioID)
+	}
+
+	if c.ScenarioID != game.ScenarioRandomID {
+		scenario, ok := game.GetScenario(scenarios, c.ScenarioID)
+		if !ok {
+			return fmt.Errorf("scenario not found: %s", c.ScenarioID)
+		}
+		if !scenarioSupportsMode(scenario, c.Mode) {
+			return fmt.Errorf("scenario %s does not support mode %s", c.ScenarioID, c.Mode)
+		}
 	}
 
 	if !c.RunLength.IsValid() {

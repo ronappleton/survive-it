@@ -162,3 +162,29 @@ func TestReadDataFileSizeLimit(t *testing.T) {
 		t.Fatalf("abs path: %v", err)
 	}
 }
+
+func TestValidateRunConfigWithScenariosAcceptsXLMode(t *testing.T) {
+	cfg := game.RunConfig{
+		Mode:        game.ModeNakedAndAfraidXL,
+		ScenarioID:  "naaxl_colombia_40",
+		PlayerCount: 4,
+		RunLength:   game.RunLength{Days: 40},
+	}
+
+	if err := validateRunConfigWithScenarios(cfg, game.BuiltInScenarios()); err != nil {
+		t.Fatalf("expected XL mode config to validate, got error: %v", err)
+	}
+}
+
+func TestValidateRunConfigWithScenariosRejectsWrongModeScenarioPair(t *testing.T) {
+	cfg := game.RunConfig{
+		Mode:        game.ModeAlone,
+		ScenarioID:  "naaxl_colombia_40",
+		PlayerCount: 1,
+		RunLength:   game.RunLength{Days: 60},
+	}
+
+	if err := validateRunConfigWithScenarios(cfg, game.BuiltInScenarios()); err == nil {
+		t.Fatalf("expected mode/scenario mismatch to fail validation")
+	}
+}
