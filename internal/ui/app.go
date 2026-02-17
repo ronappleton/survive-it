@@ -202,27 +202,41 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) viewRun() string {
-	box := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
+	totalHeight := m.h
+	if totalHeight < 20 {
+		totalHeight = 20
+	}
+
+	totalWidth := m.w
+	if totalWidth < 60 {
+		totalWidth = 60
+	}
+
+	headerHeight := 5
+	footerHeight := 5
+	bodyHeight := totalHeight - headerHeight - footerHeight
+
+	paneStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
-		PaddingTop(2).
-		PaddingLeft(4).
-		Width(24).
-		Height(32)
+		Padding(0, 1).
+		Width(totalWidth - 4)
 
-	box.Render("")
+	header := paneStyle.Copy().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Height(headerHeight).
+		Render(m.headerText())
+	body := paneStyle.Copy().
+		Foreground(lipgloss.Color("10")).
+		Height(bodyHeight).
+		Render(m.bodyText())
+	footer := paneStyle.Copy().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Height(footerHeight).
+		Render(m.footerText())
 
-	// Render header first (auto height)
-	header := box.Render(m.headerText())
-
-	// Render footer first (auto height)
-	footer := box.Render(m.footerText())
-
-	m.bodyText()
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
 func (m menuModel) viewMenu() string {
@@ -297,31 +311,71 @@ func (m menuModel) headerText() string {
 
 	var b strings.Builder
 	b.WriteString(brightGreen.Render("SURVIVE IT"))
-	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
-		m.run.Day, m.run.Scenario.Name, seasonStr,
+	b.WriteString("\n")
+	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  Mode: %s  |  Season: %s",
+		m.run.Day, modeLabel(m.run.Config.Mode), seasonStr,
 	)))
+	b.WriteString("\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Scenario: %s  |  Players: %d", m.run.Scenario.Name, len(m.run.Players))))
 	return b.String()
 }
 
-func (m menuModel) bodyText() {
-	var b strings.Builder
-	b.WriteString(green.Render("Players:\n\n"))
-	b.WriteString("")
-	rows := make([]string, 0, len(m.run.Players))
-	for _, p := range m.run.Players {
-		rows = append(rows, fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n", p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale))
+func modeLabel(mode game.GameMode) string {
+	switch mode {
+	case game.ModeAlone:
+		return "Alone"
+	case game.ModeNakedAndAfraid:
+		return "Naked and Afraid"
+	default:
+		return string(mode)
+	}
+}
+
+func (m menuModel) bodyText() string {
+	if len(m.run.Players) == 0 {
+		return dimGreen.Render("No players loaded.")
 	}
 
-	t := table.New().Border(lipgloss.NormalBorder()).Row(rows...)
-	t.Render()
+	rows := make([][]string, 0, len(m.run.Players))
+	for _, p := range m.run.Players {
+		rows = append(rows, []string{
+			p.Name,
+			string(p.Sex),
+			string(p.BodyType),
+			fmt.Sprintf("%d", p.Energy),
+			fmt.Sprintf("%d", p.Hydration),
+			fmt.Sprintf("%d", p.Morale),
+		})
+	}
+
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(border).
+		BorderHeader(true).
+		BorderRow(false).
+		Headers("Player", "Sex", "Body", "Energy", "Hydration", "Morale").
+		Rows(rows...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return brightGreen.Bold(true)
+			}
+			return green
+		})
+
+	return green.Render("Players") + "\n" + t.Render()
 }
 
 func (m menuModel) footerText() string {
 	var b strings.Builder
 
+	b.WriteString(brightGreen.Render("Input"))
+	b.WriteString("\n")
+	b.WriteString(dimGreen.Render("> "))
+
 	out := m.run.EvaluateRun()
 	if out.Status != game.RunOutcomeOngoing {
-		b.WriteString(brightGreen.Render(string(out.Status)) + " ")
+		b.WriteString(brightGreen.Render(string(out.Status)))
+		b.WriteString("  ")
 	}
 
 	if m.status != "" {
@@ -332,7 +386,7 @@ func (m menuModel) footerText() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(brightGreen.Render("Enter: next day\nq/esc: back"))
+	b.WriteString(brightGreen.Render("[enter] next day  [q/esc] back"))
 	return b.String()
 }
 
