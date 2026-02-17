@@ -233,7 +233,7 @@ func (m menuModel) viewRun() string {
 		bodyHeight = 3
 	}
 
-	body := box.Height(bodyHeight).Render(m.bodyText(paneW))
+	body := box.Height(max(4, bodyHeight)).Render(m.bodyText(paneW))
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
@@ -313,7 +313,8 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("\nSURVIVE IT") + brightGreen.Render("  run\n"))
+	b.WriteString(brightGreen.Render("\nSURVIVE IT\n"))
+	b.WriteString(brightGreen.Render("-------------"))
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
@@ -322,7 +323,7 @@ func (m menuModel) headerText() string {
 
 func (m menuModel) bodyText(w int) string {
 	var b strings.Builder
-	b.WriteString(green.Render("Players:\n"))
+	b.WriteString(green.Render("Players:\n\n"))
 	for _, p := range m.run.Players {
 		b.WriteString(trunc(fmt.Sprintf(
 			" - %s [%s/%s] E:%d H:%d M:%d\n",
