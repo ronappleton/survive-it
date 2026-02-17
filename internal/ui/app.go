@@ -313,7 +313,7 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT") + brightGreen.Render("  run\n"))
+	b.WriteString(brightGreen.Render("\nSURVIVE IT") + brightGreen.Render("  run\n"))
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
