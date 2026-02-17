@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,7 +86,7 @@ type menuModel struct {
 	run             *game.RunState
 	runInput        string
 	activeSaveSlot  int
-	customScenarios []game.Scenario
+	customScenarios []customScenarioRecord
 	loadReturn      screen
 	status          string
 	busy            bool
@@ -122,9 +123,16 @@ type savedRun struct {
 	Run           game.RunState `json:"run"`
 }
 
+type customScenarioRecord struct {
+	Scenario      game.Scenario `json:"scenario"`
+	PreferredMode game.GameMode `json:"preferred_mode"`
+	Notes         string        `json:"notes,omitempty"`
+}
+
 type customScenarioLibrary struct {
-	FormatVersion int             `json:"format_version"`
-	Scenarios     []game.Scenario `json:"scenarios"`
+	FormatVersion int                    `json:"format_version"`
+	Custom        []customScenarioRecord `json:"custom,omitempty"`
+	Scenarios     []game.Scenario        `json:"scenarios,omitempty"` // legacy v1 support
 }
 
 func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -368,11 +376,18 @@ type loadRunState struct {
 }
 
 type scenarioBuilderState struct {
-	cursor           int
-	name             string
-	biomeIdx         int
-	defaultDaysIdx   int
-	seasonProfileIdx int
+	cursor         int
+	selectedIdx    int // 0 = new, 1..N = existing custom scenario index+1
+	name           string
+	modeIdx        int
+	biomeIdx       int
+	useCustomDays  bool
+	defaultDaysIdx int
+	customDays     string
+	seasonSetID    string
+	phaseCountIdx  int
+	phaseSeason    [4]int
+	phaseDays      [4]string
 }
 
 type runLengthOption struct {
@@ -404,13 +419,21 @@ func newLoadRunState() loadRunState {
 }
 
 func newScenarioBuilderState() scenarioBuilderState {
-	return scenarioBuilderState{
-		cursor:           0,
-		name:             "",
-		biomeIdx:         0,
-		defaultDaysIdx:   1,
-		seasonProfileIdx: 0,
+	s := scenarioBuilderState{
+		cursor:         0,
+		selectedIdx:    0,
+		name:           "",
+		modeIdx:        0,
+		biomeIdx:       0,
+		useCustomDays:  false,
+		defaultDaysIdx: 1,
+		customDays:     "60",
+		seasonSetID:    "custom_profile",
+		phaseCountIdx:  1, // 2 phases by default
 	}
+	s.phaseSeason = [4]int{0, 2, 2, 2}
+	s.phaseDays = [4]string{"14", "0", "0", "0"}
+	return s
 }
 
 func setupModes() []game.GameMode {
@@ -461,43 +484,69 @@ func builderDefaultDays() []int {
 	return []int{7, 14, 30, 60, 90}
 }
 
-func builderSeasonProfiles() []struct {
-	label string
-	set   game.SeasonSet
-} {
-	return []struct {
-		label string
-		set   game.SeasonSet
-	}{
-		{
-			label: "Autumn -> Winter",
-			set: game.SeasonSet{
-				ID: game.SeasonSetAloneDefaultID,
-				Phases: []game.SeasonPhase{
-					{Season: game.SeasonAutumn, Days: 14},
-					{Season: game.SeasonWinter, Days: 0},
-				},
-			},
-		},
-		{
-			label: "Wet",
-			set: game.SeasonSet{
-				ID: game.SeasonSetWetDefaultID,
-				Phases: []game.SeasonPhase{
-					{Season: game.SeasonWet, Days: 0},
-				},
-			},
-		},
-		{
-			label: "Winter",
-			set: game.SeasonSet{
-				ID: game.SeasonSetWinterDefaultID,
-				Phases: []game.SeasonPhase{
-					{Season: game.SeasonWinter, Days: 0},
-				},
-			},
-		},
+func builderSeasonOptions() []game.SeasonID {
+	return []game.SeasonID{game.SeasonAutumn, game.SeasonWinter, game.SeasonWet}
+}
+
+func builderSeasonLabel(id game.SeasonID) string {
+	switch id {
+	case game.SeasonAutumn:
+		return "Autumn"
+	case game.SeasonWinter:
+		return "Winter"
+	case game.SeasonWet:
+		return "Wet"
+	default:
+		return string(id)
 	}
+}
+
+func builderScenarioChoices(custom []customScenarioRecord) []string {
+	choices := []string{"New Scenario"}
+	for _, record := range custom {
+		choices = append(choices, record.Scenario.Name)
+	}
+	return choices
+}
+
+func selectedModeIndex(mode game.GameMode) int {
+	modes := setupModes()
+	for i, m := range modes {
+		if m == mode {
+			return i
+		}
+	}
+	return 0
+}
+
+func selectedBiomeIndex(biome string) int {
+	biomes := builderBiomes()
+	for i, b := range biomes {
+		if strings.EqualFold(biome, b) {
+			return i
+		}
+	}
+	return 0
+}
+
+func sanitizeSeasonSetID(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return "custom_profile"
+	}
+	replacer := strings.NewReplacer(
+		" ", "_",
+		"-", "_",
+		".", "_",
+		"/", "_",
+		"\\", "_",
+	)
+	value = replacer.Replace(value)
+	value = strings.Trim(value, "_")
+	if value == "" {
+		return "custom_profile"
+	}
+	return value
 }
 
 func wrapIndex(current, delta, size int) int {
@@ -552,6 +601,10 @@ func (m menuModel) adjustSetupChoice(delta int) menuModel {
 		m.setup.modeIdx = wrapIndex(m.setup.modeIdx, delta, len(setupModes()))
 	case 1:
 		m.setup.scenarioIdx = wrapIndex(m.setup.scenarioIdx, delta, len(scenarios))
+		mode, found := m.preferredModeForScenario(scenarios[m.setup.scenarioIdx].id)
+		if found {
+			m.setup.modeIdx = selectedModeIndex(mode)
+		}
 	case 2:
 		m.setup.playerCountIdx = wrapIndex(m.setup.playerCountIdx, delta, len(setupPlayerCounts()))
 	case 3:
@@ -645,8 +698,19 @@ func (m menuModel) viewSetup() string {
 
 func (m menuModel) availableScenarios() []game.Scenario {
 	scenarios := append([]game.Scenario{}, game.BuiltInScenarios()...)
-	scenarios = append(scenarios, m.customScenarios...)
+	for _, record := range m.customScenarios {
+		scenarios = append(scenarios, record.Scenario)
+	}
 	return scenarios
+}
+
+func (m menuModel) preferredModeForScenario(id game.ScenarioID) (game.GameMode, bool) {
+	for _, record := range m.customScenarios {
+		if record.Scenario.ID == id {
+			return record.PreferredMode, true
+		}
+	}
+	return "", false
 }
 
 func isCustomScenarioID(id game.ScenarioID) bool {
@@ -768,7 +832,7 @@ func (m menuModel) viewLoadRun() string {
 }
 
 func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const rowCount = 6 // name, biome, days, season, save, cancel
+	const rowCount = 20
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -789,28 +853,27 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.adjustScenarioBuilderChoice(1)
 		return m, nil
 	case "backspace", "ctrl+h":
-		if m.build.cursor == 0 && len(m.build.name) > 0 {
-			m.build.name = m.build.name[:len(m.build.name)-1]
-			return m, nil
-		}
+		m = m.backspaceScenarioBuilderText()
+		return m, nil
 	case "enter":
 		switch m.build.cursor {
-		case 4:
+		case 17:
 			return m.saveScenarioFromBuilder()
-		case 5:
+		case 18:
+			return m.deleteScenarioFromBuilder()
+		case 19:
 			m.screen = screenMenu
 			return m, nil
-		case 0:
-			m.build.name += " "
-			return m, nil
 		default:
-			m = m.adjustScenarioBuilderChoice(1)
+			if m.scenarioBuilderRowSupportsCycle(m.build.cursor) {
+				m = m.adjustScenarioBuilderChoice(1)
+			}
 			return m, nil
 		}
 	}
 
-	if m.build.cursor == 0 && len(msg.Runes) > 0 {
-		m.build.name += string(msg.Runes)
+	if len(msg.Runes) > 0 {
+		m = m.appendScenarioBuilderText(msg.Runes)
 		return m, nil
 	}
 
@@ -818,13 +881,30 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
+	seasonOptions := builderSeasonOptions()
+	scenarioChoices := builderScenarioChoices(m.customScenarios)
 	switch m.build.cursor {
-	case 1:
-		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
+	case 0:
+		next := wrapIndex(m.build.selectedIdx, delta, len(scenarioChoices))
+		m = m.loadScenarioBuilderSelection(next)
 	case 2:
-		m.build.defaultDaysIdx = wrapIndex(m.build.defaultDaysIdx, delta, len(builderDefaultDays()))
+		m.build.modeIdx = wrapIndex(m.build.modeIdx, delta, len(setupModes()))
 	case 3:
-		m.build.seasonProfileIdx = wrapIndex(m.build.seasonProfileIdx, delta, len(builderSeasonProfiles()))
+		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
+	case 4:
+		m.build.useCustomDays = !m.build.useCustomDays
+	case 5:
+		m.build.defaultDaysIdx = wrapIndex(m.build.defaultDaysIdx, delta, len(builderDefaultDays()))
+	case 8:
+		m.build.phaseCountIdx = wrapIndex(m.build.phaseCountIdx, delta, 4)
+	case 9:
+		m.build.phaseSeason[0] = wrapIndex(m.build.phaseSeason[0], delta, len(seasonOptions))
+	case 11:
+		m.build.phaseSeason[1] = wrapIndex(m.build.phaseSeason[1], delta, len(seasonOptions))
+	case 13:
+		m.build.phaseSeason[2] = wrapIndex(m.build.phaseSeason[2], delta, len(seasonOptions))
+	case 15:
+		m.build.phaseSeason[3] = wrapIndex(m.build.phaseSeason[3], delta, len(seasonOptions))
 	}
 
 	return m
@@ -837,55 +917,297 @@ func (m menuModel) saveScenarioFromBuilder() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	seasonProfiles := builderSeasonProfiles()
-	profile := seasonProfiles[m.build.seasonProfileIdx]
-	scenarioID := makeCustomScenarioID(name, m.availableScenarios())
+	defaultDays := builderDefaultDays()[m.build.defaultDaysIdx]
+	if m.build.useCustomDays {
+		v, err := parseNonNegativeInt(m.build.customDays)
+		if err != nil || v < 1 {
+			m.status = "Custom default days must be a number >= 1."
+			return m, nil
+		}
+		defaultDays = v
+	}
 
-	newScenario := game.Scenario{
+	phaseCount := m.build.phaseCountIdx + 1
+	seasonOptions := builderSeasonOptions()
+	phases := make([]game.SeasonPhase, 0, phaseCount)
+	for i := 0; i < phaseCount; i++ {
+		days, err := parseNonNegativeInt(m.build.phaseDays[i])
+		if err != nil {
+			m.status = fmt.Sprintf("Phase %d days must be a number >= 0.", i+1)
+			return m, nil
+		}
+		if i < phaseCount-1 && days == 0 {
+			m.status = fmt.Sprintf("Phase %d cannot be 0 unless it is the last phase.", i+1)
+			return m, nil
+		}
+		phases = append(phases, game.SeasonPhase{
+			Season: seasonOptions[m.build.phaseSeason[i]],
+			Days:   days,
+		})
+	}
+
+	seasonSetID := game.SeasonSetID(sanitizeSeasonSetID(m.build.seasonSetID))
+	if seasonSetID == "" {
+		seasonSetID = game.SeasonSetID("custom_profile")
+	}
+
+	scenarioID := game.ScenarioID("")
+	if m.build.selectedIdx == 0 {
+		scenarioID = makeCustomScenarioID(name, m.availableScenarios())
+	} else {
+		scenarioID = m.customScenarios[m.build.selectedIdx-1].Scenario.ID
+	}
+
+	scenario := game.Scenario{
 		ID:          scenarioID,
 		Name:        name,
 		Biome:       builderBiomes()[m.build.biomeIdx],
-		DefaultDays: builderDefaultDays()[m.build.defaultDaysIdx],
+		DefaultDays: defaultDays,
 		IssuedKit:   game.IssuedKit{},
 		SeasonSets: []game.SeasonSet{
-			profile.set,
+			{
+				ID:     seasonSetID,
+				Phases: phases,
+			},
 		},
-		DefaultSeasonSetID: profile.set.ID,
+		DefaultSeasonSetID: seasonSetID,
 	}
 
-	updated := append(append([]game.Scenario{}, m.customScenarios...), newScenario)
+	record := customScenarioRecord{
+		Scenario:      scenario,
+		PreferredMode: setupModes()[m.build.modeIdx],
+	}
+
+	updated := append([]customScenarioRecord{}, m.customScenarios...)
+	if m.build.selectedIdx == 0 {
+		updated = append(updated, record)
+		m.build.selectedIdx = len(updated)
+	} else {
+		updated[m.build.selectedIdx-1] = record
+	}
+
 	if err := saveCustomScenarios(defaultCustomScenariosFile, updated); err != nil {
 		m.status = fmt.Sprintf("Failed to save scenario: %v", err)
 		return m, nil
 	}
 
 	m.customScenarios = updated
-	m.status = fmt.Sprintf("Saved custom scenario: %s", newScenario.Name)
-	m.screen = screenMenu
+	m.status = fmt.Sprintf("Saved scenario: %s", scenario.Name)
+	m = m.loadScenarioBuilderSelection(m.build.selectedIdx)
 	return m, nil
 }
 
+func (m menuModel) deleteScenarioFromBuilder() (tea.Model, tea.Cmd) {
+	if m.build.selectedIdx == 0 {
+		m.status = "Select an existing scenario to delete."
+		return m, nil
+	}
+
+	idx := m.build.selectedIdx - 1
+	updated := append([]customScenarioRecord{}, m.customScenarios[:idx]...)
+	updated = append(updated, m.customScenarios[idx+1:]...)
+
+	if err := saveCustomScenarios(defaultCustomScenariosFile, updated); err != nil {
+		m.status = fmt.Sprintf("Failed to delete scenario: %v", err)
+		return m, nil
+	}
+
+	m.customScenarios = updated
+	m.build = newScenarioBuilderState()
+	m.status = "Scenario deleted."
+	return m, nil
+}
+
+func (m menuModel) scenarioBuilderRowSupportsCycle(row int) bool {
+	switch row {
+	case 0, 2, 3, 4, 5, 8, 9, 11, 13, 15:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m menuModel) appendScenarioBuilderText(runes []rune) menuModel {
+	text := string(runes)
+	switch m.build.cursor {
+	case 1:
+		m.build.name += text
+	case 6:
+		for _, r := range runes {
+			if r >= '0' && r <= '9' {
+				m.build.customDays += string(r)
+			}
+		}
+	case 7:
+		for _, r := range runes {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+				m.build.seasonSetID += string(r)
+			}
+		}
+	case 10:
+		for _, r := range runes {
+			if r >= '0' && r <= '9' {
+				m.build.phaseDays[0] += string(r)
+			}
+		}
+	case 12:
+		for _, r := range runes {
+			if r >= '0' && r <= '9' {
+				m.build.phaseDays[1] += string(r)
+			}
+		}
+	case 14:
+		for _, r := range runes {
+			if r >= '0' && r <= '9' {
+				m.build.phaseDays[2] += string(r)
+			}
+		}
+	case 16:
+		for _, r := range runes {
+			if r >= '0' && r <= '9' {
+				m.build.phaseDays[3] += string(r)
+			}
+		}
+	}
+
+	return m
+}
+
+func (m menuModel) backspaceScenarioBuilderText() menuModel {
+	backspace := func(s string) string {
+		if len(s) == 0 {
+			return s
+		}
+		return s[:len(s)-1]
+	}
+
+	switch m.build.cursor {
+	case 1:
+		m.build.name = backspace(m.build.name)
+	case 6:
+		m.build.customDays = backspace(m.build.customDays)
+	case 7:
+		m.build.seasonSetID = backspace(m.build.seasonSetID)
+	case 10:
+		m.build.phaseDays[0] = backspace(m.build.phaseDays[0])
+	case 12:
+		m.build.phaseDays[1] = backspace(m.build.phaseDays[1])
+	case 14:
+		m.build.phaseDays[2] = backspace(m.build.phaseDays[2])
+	case 16:
+		m.build.phaseDays[3] = backspace(m.build.phaseDays[3])
+	}
+
+	return m
+}
+
+func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
+	cursor := m.build.cursor
+	loaded := newScenarioBuilderState()
+	loaded.cursor = cursor
+	loaded.selectedIdx = selected
+
+	if selected == 0 {
+		m.build = loaded
+		return m
+	}
+
+	if selected-1 < 0 || selected-1 >= len(m.customScenarios) {
+		m.build = loaded
+		return m
+	}
+
+	record := m.customScenarios[selected-1]
+	loaded.name = record.Scenario.Name
+	loaded.modeIdx = selectedModeIndex(record.PreferredMode)
+	loaded.biomeIdx = selectedBiomeIndex(record.Scenario.Biome)
+
+	if idx := indexOfInt(builderDefaultDays(), record.Scenario.DefaultDays); idx >= 0 {
+		loaded.useCustomDays = false
+		loaded.defaultDaysIdx = idx
+		loaded.customDays = fmt.Sprintf("%d", record.Scenario.DefaultDays)
+	} else {
+		loaded.useCustomDays = true
+		loaded.customDays = fmt.Sprintf("%d", record.Scenario.DefaultDays)
+	}
+
+	loaded.seasonSetID = sanitizeSeasonSetID(string(record.Scenario.DefaultSeasonSetID))
+	if loaded.seasonSetID == "" {
+		loaded.seasonSetID = "custom_profile"
+	}
+
+	set := game.SeasonSet{}
+	found := false
+	for _, seasonSet := range record.Scenario.SeasonSets {
+		if seasonSet.ID == record.Scenario.DefaultSeasonSetID {
+			set = seasonSet
+			found = true
+			break
+		}
+	}
+	if !found && len(record.Scenario.SeasonSets) > 0 {
+		set = record.Scenario.SeasonSets[0]
+	}
+
+	phaseCount := len(set.Phases)
+	if phaseCount < 1 {
+		phaseCount = 1
+	}
+	if phaseCount > 4 {
+		phaseCount = 4
+	}
+	loaded.phaseCountIdx = phaseCount - 1
+
+	for i := 0; i < 4; i++ {
+		if i < len(set.Phases) {
+			loaded.phaseSeason[i] = selectedSeasonIndex(set.Phases[i].Season)
+			loaded.phaseDays[i] = fmt.Sprintf("%d", set.Phases[i].Days)
+		}
+	}
+
+	m.build = loaded
+	return m
+}
+
 func (m menuModel) viewScenarioBuilder() string {
-	biomes := builderBiomes()
-	days := builderDefaultDays()
-	seasonProfiles := builderSeasonProfiles()
+	scenarioChoices := builderScenarioChoices(m.customScenarios)
+	seasonOptions := builderSeasonOptions()
+	phaseCount := m.build.phaseCountIdx + 1
+	selectedScenarioIdx := m.build.selectedIdx
+	if selectedScenarioIdx < 0 || selectedScenarioIdx >= len(scenarioChoices) {
+		selectedScenarioIdx = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(brightGreen.Render("SCENARIO BUILDER / EDITOR") + "\n")
+	b.WriteString(dimGreen.Render("Create or edit scenarios with full season profile control") + "\n")
+	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
 	rows := []struct {
 		label string
 		value string
 	}{
+		{label: "Scenario", value: scenarioChoices[selectedScenarioIdx]},
 		{label: "Name", value: m.build.name},
-		{label: "Biome", value: biomes[m.build.biomeIdx]},
-		{label: "Default Days", value: fmt.Sprintf("%d", days[m.build.defaultDaysIdx])},
-		{label: "Season Profile", value: seasonProfiles[m.build.seasonProfileIdx].label},
+		{label: "Game Mode", value: modeLabel(setupModes()[m.build.modeIdx])},
+		{label: "Biome", value: builderBiomes()[m.build.biomeIdx]},
+		{label: "Days Mode", value: map[bool]string{true: "Custom", false: "Preset"}[m.build.useCustomDays]},
+		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])},
+		{label: "Days Custom", value: m.build.customDays},
+		{label: "Season Profile ID", value: m.build.seasonSetID},
+		{label: "Phase Count", value: fmt.Sprintf("%d", phaseCount)},
+		{label: "Phase 1 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[0]])},
+		{label: "Phase 1 Days", value: m.build.phaseDays[0]},
+		{label: "Phase 2 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[1]])},
+		{label: "Phase 2 Days", value: m.build.phaseDays[1]},
+		{label: "Phase 3 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[2]])},
+		{label: "Phase 3 Days", value: m.build.phaseDays[2]},
+		{label: "Phase 4 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[3]])},
+		{label: "Phase 4 Days", value: m.build.phaseDays[3]},
 		{label: "Save Scenario", value: ""},
+		{label: "Delete Scenario", value: ""},
 		{label: "Cancel", value: ""},
 	}
-
-	var b strings.Builder
-	b.WriteString(brightGreen.Render("SCENARIO BUILDER") + "\n")
-	b.WriteString(dimGreen.Render("Create a custom scenario for the run wizard") + "\n")
-	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
 	for i, row := range rows {
 		cursor := "  "
@@ -895,20 +1217,50 @@ func (m menuModel) viewScenarioBuilder() string {
 			lineStyle = brightGreen
 		}
 
+		active := true
+		switch i {
+		case 5:
+			active = !m.build.useCustomDays
+		case 6:
+			active = m.build.useCustomDays
+		case 11, 12:
+			active = phaseCount >= 2
+		case 13, 14:
+			active = phaseCount >= 3
+		case 15, 16:
+			active = phaseCount >= 4
+		case 18:
+			active = m.build.selectedIdx > 0
+		}
+
+		if !active {
+			lineStyle = dimGreen
+		}
+
 		if row.value == "" {
 			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
 			continue
 		}
 
 		value := row.value
-		if i == 0 && strings.TrimSpace(value) == "" {
+		if i == 1 && strings.TrimSpace(value) == "" {
 			value = "<type name>"
+		}
+		if i == 6 && strings.TrimSpace(value) == "" {
+			value = "<type days>"
+		}
+		if i == 7 && strings.TrimSpace(value) == "" {
+			value = "<profile_id>"
+		}
+		if (i == 10 || i == 12 || i == 14 || i == 16) && strings.TrimSpace(value) == "" {
+			value = "0"
 		}
 		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-14s %s", row.label+":", value)) + "\n")
 	}
 
 	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  type name  Enter select  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  type in text fields  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("Phase days: 0 means until end (only valid on the last phase)") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
@@ -1172,7 +1524,7 @@ func loadRunFromFile(path string, availableScenarios []game.Scenario) (game.RunS
 	return payload.Run, nil
 }
 
-func loadCustomScenarios(path string) ([]game.Scenario, error) {
+func loadCustomScenarios(path string) ([]customScenarioRecord, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1186,13 +1538,29 @@ func loadCustomScenarios(path string) ([]game.Scenario, error) {
 		return nil, err
 	}
 
-	return library.Scenarios, nil
+	if len(library.Custom) > 0 {
+		return library.Custom, nil
+	}
+
+	// Legacy format support.
+	if len(library.Scenarios) > 0 {
+		records := make([]customScenarioRecord, 0, len(library.Scenarios))
+		for _, scenario := range library.Scenarios {
+			records = append(records, customScenarioRecord{
+				Scenario:      scenario,
+				PreferredMode: game.ModeAlone,
+			})
+		}
+		return records, nil
+	}
+
+	return nil, nil
 }
 
-func saveCustomScenarios(path string, scenarios []game.Scenario) error {
+func saveCustomScenarios(path string, scenarios []customScenarioRecord) error {
 	library := customScenarioLibrary{
 		FormatVersion: 1,
-		Scenarios:     scenarios,
+		Custom:        scenarios,
 	}
 
 	data, err := json.MarshalIndent(library, "", "  ")
@@ -1233,6 +1601,41 @@ func makeCustomScenarioID(name string, existing []game.Scenario) game.ScenarioID
 			return next
 		}
 	}
+}
+
+func parseNonNegativeInt(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, fmt.Errorf("empty")
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("negative")
+	}
+	return parsed, nil
+}
+
+func selectedSeasonIndex(season game.SeasonID) int {
+	options := builderSeasonOptions()
+	for i, option := range options {
+		if option == season {
+			return i
+		}
+	}
+	return 0
+}
+
+func indexOfInt(values []int, target int) int {
+	for i, value := range values {
+		if value == target {
+			return i
+		}
+	}
+	return -1
 }
 
 func validateRunConfigWithScenarios(c game.RunConfig, scenarios []game.Scenario) error {
