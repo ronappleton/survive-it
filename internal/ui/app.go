@@ -27,6 +27,7 @@ type screen int
 
 const (
 	screenMenu screen = iota
+	screenSetup
 	screenRun
 )
 
@@ -65,6 +66,7 @@ type menuModel struct {
 	cfg    AppConfig
 	idx    int
 	screen screen
+	setup  setupState
 
 	run    *game.RunState
 	status string
@@ -73,7 +75,11 @@ type menuModel struct {
 }
 
 func newMenuModel(cfg AppConfig) menuModel {
-	return menuModel{cfg: cfg, idx: 0}
+	return menuModel{
+		cfg:   cfg,
+		idx:   0,
+		setup: newSetupState(),
+	}
 }
 
 func (m menuModel) Init() tea.Cmd {
@@ -91,6 +97,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.screen == screenRun {
 			return m.updateRun(msg)
+		}
+		if m.screen == screenSetup {
+			return m.updateSetup(msg)
 		}
 
 		return m.updateMenu(msg)
@@ -115,6 +124,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) View() string {
+	if m.screen == screenSetup {
+		return m.viewSetup()
+	}
 	if m.screen == screenRun {
 		return m.viewRun()
 	}
@@ -159,23 +171,8 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch menuItem(m.idx) {
 		case itemStart:
-			cfg := game.RunConfig{
-				Mode:        game.ModeAlone,          // or ModeNakedAndAfraid later via setup
-				ScenarioID:  game.ScenarioRandomID,   // quick-start
-				PlayerCount: 2,                       // quick-start
-				RunLength:   game.RunLength{Days: 7}, // or OpenEnded: true
-				Seed:        0,                       // auto-gen
-				Players:     nil,                     // auto-gen names
-			}
-
-			state, err := game.NewRunState(cfg)
-			if err != nil {
-				m.status = fmt.Sprintf("Failed to start: %v", err)
-				return m, nil
-			}
-
-			m.run = &state
-			m.screen = screenRun
+			m.setup = newSetupState()
+			m.screen = screenSetup
 			m.status = ""
 			return m, nil
 		case itemCheckUpdate:
@@ -200,6 +197,210 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+type setupScenarioOption struct {
+	id    game.ScenarioID
+	label string
+}
+
+type runLengthOption struct {
+	label     string
+	openEnded bool
+	days      int
+}
+
+type setupState struct {
+	cursor         int
+	modeIdx        int
+	scenarioIdx    int
+	playerCountIdx int
+	runLengthIdx   int
+}
+
+func newSetupState() setupState {
+	return setupState{
+		cursor:         0,
+		modeIdx:        0,
+		scenarioIdx:    0,
+		playerCountIdx: 1, // 2 players by default
+		runLengthIdx:   0,
+	}
+}
+
+func setupModes() []game.GameMode {
+	return []game.GameMode{
+		game.ModeAlone,
+		game.ModeNakedAndAfraid,
+	}
+}
+
+func setupScenarioOptions() []setupScenarioOption {
+	options := []setupScenarioOption{
+		{id: game.ScenarioRandomID, label: "Random"},
+	}
+
+	for _, scenario := range game.BuiltInScenarios() {
+		options = append(options, setupScenarioOption{
+			id:    scenario.ID,
+			label: scenario.Name,
+		})
+	}
+
+	return options
+}
+
+func setupPlayerCounts() []int {
+	return []int{1, 2, 3, 4, 5, 6, 7, 8}
+}
+
+func setupRunLengths() []runLengthOption {
+	return []runLengthOption{
+		{label: "7 days", days: 7},
+		{label: "14 days", days: 14},
+		{label: "30 days", days: 30},
+		{label: "60 days", days: 60},
+		{label: "Open ended", openEnded: true},
+	}
+}
+
+func wrapIndex(current, delta, size int) int {
+	next := current + delta
+	for next < 0 {
+		next += size
+	}
+	return next % size
+}
+
+func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	const rowCount = 6 // mode, scenario, players, run length, start, cancel
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "q", "esc":
+		m.screen = screenMenu
+		return m, nil
+	case "up", "k":
+		m.setup.cursor = wrapIndex(m.setup.cursor, -1, rowCount)
+		return m, nil
+	case "down", "j":
+		m.setup.cursor = wrapIndex(m.setup.cursor, 1, rowCount)
+		return m, nil
+	case "left", "h":
+		m = m.adjustSetupChoice(-1)
+		return m, nil
+	case "right", "l":
+		m = m.adjustSetupChoice(1)
+		return m, nil
+	case "enter":
+		switch m.setup.cursor {
+		case 4:
+			return m.startRunFromSetup()
+		case 5:
+			m.screen = screenMenu
+			return m, nil
+		default:
+			m = m.adjustSetupChoice(1)
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
+func (m menuModel) adjustSetupChoice(delta int) menuModel {
+	switch m.setup.cursor {
+	case 0:
+		m.setup.modeIdx = wrapIndex(m.setup.modeIdx, delta, len(setupModes()))
+	case 1:
+		m.setup.scenarioIdx = wrapIndex(m.setup.scenarioIdx, delta, len(setupScenarioOptions()))
+	case 2:
+		m.setup.playerCountIdx = wrapIndex(m.setup.playerCountIdx, delta, len(setupPlayerCounts()))
+	case 3:
+		m.setup.runLengthIdx = wrapIndex(m.setup.runLengthIdx, delta, len(setupRunLengths()))
+	}
+
+	return m
+}
+
+func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
+	modes := setupModes()
+	scenarios := setupScenarioOptions()
+	playerCounts := setupPlayerCounts()
+	runLengths := setupRunLengths()
+
+	runLength := runLengths[m.setup.runLengthIdx]
+	cfg := game.RunConfig{
+		Mode:        modes[m.setup.modeIdx],
+		ScenarioID:  scenarios[m.setup.scenarioIdx].id,
+		PlayerCount: playerCounts[m.setup.playerCountIdx],
+		RunLength: game.RunLength{
+			OpenEnded: runLength.openEnded,
+			Days:      runLength.days,
+		},
+		Seed:    0,
+		Players: nil,
+	}
+
+	state, err := game.NewRunState(cfg)
+	if err != nil {
+		m.status = fmt.Sprintf("Failed to start: %v", err)
+		return m, nil
+	}
+
+	m.run = &state
+	m.screen = screenRun
+	m.status = ""
+	return m, nil
+}
+
+func (m menuModel) viewSetup() string {
+	modes := setupModes()
+	scenarios := setupScenarioOptions()
+	playerCounts := setupPlayerCounts()
+	runLengths := setupRunLengths()
+
+	rows := []struct {
+		label string
+		value string
+	}{
+		{label: "Mode", value: modeLabel(modes[m.setup.modeIdx])},
+		{label: "Scenario", value: scenarios[m.setup.scenarioIdx].label},
+		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
+		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
+		{label: "Start Run", value: ""},
+		{label: "Cancel", value: ""},
+	}
+
+	var b strings.Builder
+	b.WriteString(brightGreen.Render("NEW RUN WIZARD\n"))
+	b.WriteString(dimGreen.Render("Choose options, then select Start Run") + "\n")
+	b.WriteString(border.Render("----------------------------------------") + "\n\n")
+
+	for i, row := range rows {
+		cursor := "  "
+		lineStyle := green
+		if i == m.setup.cursor {
+			cursor = "> "
+			lineStyle = brightGreen
+		}
+
+		if row.value == "" {
+			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			continue
+		}
+
+		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-10s %s", row.label+":", row.value)) + "\n")
+	}
+
+	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  esc back") + "\n")
+	if m.status != "" {
+		b.WriteString("\n" + green.Render(m.status) + "\n")
+	}
+
+	return b.String()
 }
 
 func (m menuModel) viewRun() string {
@@ -257,7 +458,7 @@ func (m menuModel) viewMenu() string {
 	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
 
 	items := []string{
-		"Start (quick run)",
+		"Start",
 		"Check for updates",
 		"Install Update",
 		"Quit",
