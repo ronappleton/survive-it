@@ -70,7 +70,7 @@ func checkAndMaybeUpdate(p UpdateParams) (string, error) {
 		if latest == current {
 			return fmt.Sprintf("Up to date (v%s).", latest), nil
 		}
-		// dev builds: always say what latest is
+		// dev builds: always say what the latest is
 		return fmt.Sprintf("Latest release is v%s.", latest), nil
 	}
 

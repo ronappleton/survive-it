@@ -71,10 +71,9 @@ type PlayerConfig struct {
 func CreatePlayers(cfg RunConfig) []PlayerState {
 	players := make([]PlayerState, cfg.PlayerCount)
 
-	rng := rand.New(rand.NewPCG(
-		uint64(cfg.Seed),
-		uint64(cfg.Seed^0x9e3779b97f4a7c15),
-	))
+	seed1 := uint64(cfg.Seed)
+	seed2 := seed1 ^ uint64(0x9e3779b97f4a7c15)
+	rng := rand.New(rand.NewPCG(seed1, seed2))
 
 	used := make(map[string]int)
 

@@ -28,7 +28,9 @@ func NewRunState(config RunConfig) (RunState, error) {
 	scenarios := BuiltInScenarios()
 
 	if resolvedConfig.ScenarioID == ScenarioRandomID {
-		rng := rand.New(rand.NewPCG(uint64(resolvedConfig.Seed), uint64(resolvedConfig.Seed^0x9e3779b97f4a7c15)))
+		seed1 := uint64(resolvedConfig.Seed)
+		seed2 := seed1 ^ uint64(0x9e3779b97f4a7c15)
+		rng := rand.New(rand.NewPCG(seed1, seed2))
 		resolvedConfig.ScenarioID = scenarios[rng.IntN(len(scenarios))].ID
 	}
 

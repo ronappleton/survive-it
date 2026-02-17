@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/appengine-ltd/survive-it/internal/game"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -20,6 +22,13 @@ type AppConfig struct {
 type App struct {
 	cfg AppConfig
 }
+
+type screen int
+
+const (
+	screenMenu screen = iota
+	screenRun
+)
 
 func NewApp(cfg AppConfig) *App {
 	return &App{cfg: cfg}
@@ -47,15 +56,19 @@ type menuItem int
 const (
 	itemStart menuItem = iota
 	itemCheckUpdate
+	itemInstallUpdate
 	itemQuit
 )
 
 type menuModel struct {
-	cfg AppConfig
-	idx int
+	cfg    AppConfig
+	idx    int
+	screen screen
 
+	run    *game.RunState
 	status string
 	busy   bool
+	err    string
 }
 
 func newMenuModel(cfg AppConfig) menuModel {
@@ -75,44 +88,20 @@ type updateResultMsg struct {
 func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if m.busy {
-			// Ignore input while update check runs.
-			return m, nil
+		if m.screen == screenRun {
+			return m.updateRun(msg)
 		}
 
-		switch msg.String() {
-		case "ctrl+c", "q":
-			return m, tea.Quit
-		case "up", "k":
-			m.idx = (m.idx + 2) % 3
-			return m, nil
-		case "down", "j":
-			m.idx = (m.idx + 1) % 3
-			return m, nil
-		case "enter":
-			switch menuItem(m.idx) {
-			case itemStart:
-				m.status = "Game loop not implemented yet (alpha1)."
-				return m, nil
-			case itemCheckUpdate:
-				if m.cfg.NoUpdate {
-					m.status = "Update checks disabled (--no-update)."
-					return m, nil
-				}
-				m.busy = true
-				m.status = "Checking for updates…"
-				return m, checkUpdateCmd(m.cfg.Version)
-			case itemQuit:
-				return m, tea.Quit
-			}
-		}
+		return m.updateMenu(msg)
 	case updateResultMsg:
 		m.busy = false
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Update check failed: %v", msg.err)
+
 			return m, nil
 		}
 		m.status = msg.status
+
 		return m, nil
 	}
 
@@ -120,18 +109,147 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) View() string {
-	title := brightGreen.Render("SURVIVE IT") + dimGreen.Render("  alpha1")
+	if m.screen == screenRun {
+		return m.viewRun()
+	}
+	return m.viewMenu()
+}
+
+func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		m.screen = screenMenu
+		return m, nil
+
+	case "enter", "n":
+		m.run.AdvanceDay()
+		out := m.run.EvaluateRun()
+		if out.Status == game.RunOutcomeCritical {
+			m.status = fmt.Sprintf("CRITICAL: %v", out.CriticalPlayerIDs)
+		} else if out.Status == game.RunOutcomeCompleted {
+			m.status = "COMPLETED"
+		} else {
+			m.status = ""
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.busy {
+		// Ignore input while update check runs.
+		return m, nil
+	}
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "up", "k":
+		m.idx = (m.idx + 2) % 4
+		return m, nil
+	case "down", "j":
+		m.idx = (m.idx + 1) % 4
+		return m, nil
+	case "enter":
+		switch menuItem(m.idx) {
+		case itemStart:
+			cfg := game.RunConfig{
+				Mode:        game.ModeAlone,          // or ModeNakedAndAfraid later via setup
+				ScenarioID:  game.ScenarioRandomID,   // quick-start
+				PlayerCount: 2,                       // quick-start
+				RunLength:   game.RunLength{Days: 7}, // or OpenEnded: true
+				Seed:        0,                       // auto-gen
+				Players:     nil,                     // auto-gen names
+			}
+
+			state, err := game.NewRunState(cfg)
+			if err != nil {
+				m.status = fmt.Sprintf("Failed to start: %v", err)
+				return m, nil
+			}
+
+			m.run = &state
+			m.screen = screenRun
+			m.status = ""
+			return m, nil
+		case itemCheckUpdate:
+			if m.cfg.NoUpdate {
+				m.status = "Update checks disabled (--no-update)."
+				return m, nil
+			}
+			m.busy = true
+			m.status = "Checking for updates…"
+			return m, checkUpdateCmd(m.cfg.Version)
+		case itemInstallUpdate:
+			if m.cfg.NoUpdate {
+				m.status = "Update checks disabled (--no-update)."
+				return m, nil
+			}
+			m.busy = true
+			m.status = "Installing update…"
+			return m, applyUpdateCmd(m.cfg.Version)
+		case itemQuit:
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+func (m menuModel) viewRun() string {
+	if m.run == nil {
+		return "No run."
+	}
+
+	season, ok := m.run.CurrentSeason() // make sure you changed this to pointer receiver
+	seasonStr := "unknown"
+	if ok {
+		seasonStr = string(season)
+	}
+
+	out := m.run.EvaluateRun()
+
+	b := strings.Builder{}
+	b.WriteString(brightGreen.Render("SURVIVE IT") + dimGreen.Render("  run\n"))
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s\n",
+		m.run.Day, m.run.Scenario.Name, seasonStr,
+	)))
+	b.WriteString(border.Render("----------------------------------------") + "\n")
+
+	b.WriteString(green.Render("Players:\n"))
+	for _, p := range m.run.Players {
+		b.WriteString(fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n",
+			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale,
+		))
+	}
+
+	b.WriteString(border.Render("----------------------------------------") + "\n")
+	b.WriteString(dimGreen.Render("Enter/n: next day   q/esc: back\n"))
+
+	if out.Status != game.RunOutcomeOngoing {
+		b.WriteString("\n" + brightGreen.Render(string(out.Status)) + "\n")
+	}
+	if m.status != "" {
+		b.WriteString("\n" + green.Render(m.status) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m menuModel) viewMenu() string {
+	title := brightGreen.Render("SURVIVE IT") + dimGreen.Render("  alpha")
 	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
 
 	items := []string{
-		"Start (coming soon)",
+		"Start (quick run)",
 		"Check for updates",
+		"Install Update",
 		"Quit",
 	}
 
-	out := ""
-	out += title + "\n" + ver + "\n"
-	out += border.Render("----------------------------------------") + "\n\n"
+	var b strings.Builder
+	b.WriteString(title + "\n" + ver + "\n")
+	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
 	for i, it := range items {
 		cursor := "  "
@@ -142,20 +260,35 @@ func (m menuModel) View() string {
 		} else {
 			line = green.Render(it)
 		}
-		out += cursor + line + "\n"
+		b.WriteString(cursor + line + "\n")
 	}
 
-	out += "\n" + border.Render("----------------------------------------") + "\n"
-	out += dimGreen.Render("↑/↓ to move, Enter to select, q to quit") + "\n"
+	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ to move, Enter to select, q to quit") + "\n")
 	if m.status != "" {
-		out += "\n" + green.Render(m.status) + "\n"
+		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
-	return out
+
+	return b.String()
 }
 
 func checkUpdateCmd(currentVersion string) tea.Cmd {
 	return func() tea.Msg {
-		// Tiny delay so the UI visibly switches to busy state.
+		// Tiny delay so the UI visibly switches to a busy state.
+		time.Sleep(150 * time.Millisecond)
+
+		res, err := update.Check(update.CheckParams{
+			CurrentVersion: currentVersion,
+		})
+		if err != nil {
+			return updateResultMsg{err: err}
+		}
+		return updateResultMsg{status: res}
+	}
+}
+
+func applyUpdateCmd(currentVersion string) tea.Cmd {
+	return func() tea.Msg {
 		time.Sleep(150 * time.Millisecond)
 
 		res, err := update.Apply(currentVersion)
