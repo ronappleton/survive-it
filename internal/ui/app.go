@@ -215,9 +215,13 @@ func (m menuModel) viewRun() string {
 	paneW := max(30, w-3)
 
 	box := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
-		Padding(0, 1).
+		PaddingTop(2).
+		PaddingLeft(4).
 		Width(paneW)
 
 	// Render header first (auto height)
@@ -314,9 +318,6 @@ func (m menuModel) headerText() string {
 
 	var b strings.Builder
 	b.WriteString(brightGreen.Render("SURVIVE IT"))
-	b.WriteString("")
-	b.WriteString(brightGreen.Render("----------"))
-	b.WriteString("")
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
