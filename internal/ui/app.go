@@ -390,9 +390,42 @@ type scenarioBuilderState struct {
 	defaultDaysIdx int
 	customDays     string
 	seasonSetID    string
-	phaseCountIdx  int
-	phaseSeason    [4]int
-	phaseDays      [4]string
+	phases         []phaseBuilderPhase
+}
+
+type phaseBuilderPhase struct {
+	seasonIdx int
+	days      string
+}
+
+type scenarioBuilderRowKind int
+
+const (
+	builderRowScenario scenarioBuilderRowKind = iota
+	builderRowName
+	builderRowMode
+	builderRowBiome
+	builderRowDaysMode
+	builderRowDaysPreset
+	builderRowDaysCustom
+	builderRowSeasonProfileID
+	builderRowPhaseSeason
+	builderRowPhaseDays
+	builderRowAddPhase
+	builderRowRemovePhase
+	builderRowSave
+	builderRowDelete
+	builderRowCancel
+)
+
+const maxBuilderPhases = 12
+
+type scenarioBuilderRow struct {
+	label    string
+	value    string
+	kind     scenarioBuilderRowKind
+	phaseIdx int
+	active   bool
 }
 
 type runLengthOption struct {
@@ -424,7 +457,7 @@ func newLoadRunState() loadRunState {
 }
 
 func newScenarioBuilderState() scenarioBuilderState {
-	s := scenarioBuilderState{
+	return scenarioBuilderState{
 		cursor:         0,
 		selectedIdx:    0,
 		name:           "",
@@ -434,11 +467,11 @@ func newScenarioBuilderState() scenarioBuilderState {
 		defaultDaysIdx: 1,
 		customDays:     "60",
 		seasonSetID:    "custom_profile",
-		phaseCountIdx:  1, // 2 phases by default
+		phases: []phaseBuilderPhase{
+			{seasonIdx: 0, days: "14"},
+			{seasonIdx: 1, days: "0"},
+		},
 	}
-	s.phaseSeason = [4]int{0, 2, 2, 2}
-	s.phaseDays = [4]string{"14", "0", "0", "0"}
-	return s
 }
 
 func setupModes() []game.GameMode {
@@ -843,7 +876,13 @@ func (m menuModel) viewLoadRun() string {
 }
 
 func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const rowCount = 20
+	rows := m.scenarioBuilderRows()
+	if len(rows) == 0 {
+		return m, nil
+	}
+	if m.build.cursor < 0 || m.build.cursor >= len(rows) {
+		m.build.cursor = len(rows) - 1
+	}
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -852,10 +891,10 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenMenu
 		return m, nil
 	case "up", "k":
-		m.build.cursor = wrapIndex(m.build.cursor, -1, rowCount)
+		m.build.cursor = wrapIndex(m.build.cursor, -1, len(rows))
 		return m, nil
 	case "down", "j":
-		m.build.cursor = wrapIndex(m.build.cursor, 1, rowCount)
+		m.build.cursor = wrapIndex(m.build.cursor, 1, len(rows))
 		return m, nil
 	case "left":
 		m = m.adjustScenarioBuilderChoice(-1)
@@ -867,16 +906,38 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.backspaceScenarioBuilderText()
 		return m, nil
 	case "enter":
-		switch m.build.cursor {
-		case 17:
+		row := rows[m.build.cursor]
+		if !row.active {
+			return m, nil
+		}
+
+		switch row.kind {
+		case builderRowSave:
 			return m.saveScenarioFromBuilder()
-		case 18:
+		case builderRowDelete:
 			return m.deleteScenarioFromBuilder()
-		case 19:
+		case builderRowCancel:
 			m.screen = screenMenu
 			return m, nil
+		case builderRowAddPhase:
+			if len(m.build.phases) >= maxBuilderPhases {
+				m.status = fmt.Sprintf("Maximum phases reached (%d).", maxBuilderPhases)
+				return m, nil
+			}
+			m.build.phases = append(m.build.phases, phaseBuilderPhase{
+				seasonIdx: m.build.phases[len(m.build.phases)-1].seasonIdx,
+				days:      "0",
+			})
+			return m, nil
+		case builderRowRemovePhase:
+			if len(m.build.phases) <= 1 {
+				m.status = "At least one phase is required."
+				return m, nil
+			}
+			m.build.phases = m.build.phases[:len(m.build.phases)-1]
+			return m, nil
 		default:
-			if m.scenarioBuilderRowSupportsCycle(m.build.cursor) {
+			if m.scenarioBuilderRowSupportsCycle(row) {
 				m = m.adjustScenarioBuilderChoice(1)
 			}
 			return m, nil
@@ -892,30 +953,38 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
+	rows := m.scenarioBuilderRows()
+	if len(rows) == 0 {
+		return m
+	}
+	if m.build.cursor < 0 || m.build.cursor >= len(rows) {
+		return m
+	}
+
+	row := rows[m.build.cursor]
+	if !row.active {
+		return m
+	}
+
 	seasonOptions := builderSeasonOptions()
 	scenarioChoices := builderScenarioChoices(m.customScenarios)
-	switch m.build.cursor {
-	case 0:
+	switch row.kind {
+	case builderRowScenario:
 		next := wrapIndex(m.build.selectedIdx, delta, len(scenarioChoices))
 		m = m.loadScenarioBuilderSelection(next)
-	case 2:
+	case builderRowMode:
 		m.build.modeIdx = wrapIndex(m.build.modeIdx, delta, len(setupModes()))
-	case 3:
+	case builderRowBiome:
 		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
-	case 4:
+	case builderRowDaysMode:
 		m.build.useCustomDays = !m.build.useCustomDays
-	case 5:
+	case builderRowDaysPreset:
 		m.build.defaultDaysIdx = wrapIndex(m.build.defaultDaysIdx, delta, len(builderDefaultDays()))
-	case 8:
-		m.build.phaseCountIdx = wrapIndex(m.build.phaseCountIdx, delta, 4)
-	case 9:
-		m.build.phaseSeason[0] = wrapIndex(m.build.phaseSeason[0], delta, len(seasonOptions))
-	case 11:
-		m.build.phaseSeason[1] = wrapIndex(m.build.phaseSeason[1], delta, len(seasonOptions))
-	case 13:
-		m.build.phaseSeason[2] = wrapIndex(m.build.phaseSeason[2], delta, len(seasonOptions))
-	case 15:
-		m.build.phaseSeason[3] = wrapIndex(m.build.phaseSeason[3], delta, len(seasonOptions))
+	case builderRowPhaseSeason:
+		idx := row.phaseIdx
+		if idx >= 0 && idx < len(m.build.phases) {
+			m.build.phases[idx].seasonIdx = wrapIndex(m.build.phases[idx].seasonIdx, delta, len(seasonOptions))
+		}
 	}
 
 	return m
@@ -938,11 +1007,15 @@ func (m menuModel) saveScenarioFromBuilder() (tea.Model, tea.Cmd) {
 		defaultDays = v
 	}
 
-	phaseCount := m.build.phaseCountIdx + 1
+	phaseCount := len(m.build.phases)
+	if phaseCount < 1 {
+		m.status = "At least one season phase is required."
+		return m, nil
+	}
 	seasonOptions := builderSeasonOptions()
 	phases := make([]game.SeasonPhase, 0, phaseCount)
 	for i := 0; i < phaseCount; i++ {
-		days, err := parseNonNegativeInt(m.build.phaseDays[i])
+		days, err := parseNonNegativeInt(m.build.phases[i].days)
 		if err != nil {
 			m.status = fmt.Sprintf("Phase %d days must be a number >= 0.", i+1)
 			return m, nil
@@ -952,7 +1025,7 @@ func (m menuModel) saveScenarioFromBuilder() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		phases = append(phases, game.SeasonPhase{
-			Season: seasonOptions[m.build.phaseSeason[i]],
+			Season: seasonOptions[m.build.phases[i].seasonIdx],
 			Days:   days,
 		})
 	}
@@ -1029,54 +1102,97 @@ func (m menuModel) deleteScenarioFromBuilder() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m menuModel) scenarioBuilderRowSupportsCycle(row int) bool {
-	switch row {
-	case 0, 2, 3, 4, 5, 8, 9, 11, 13, 15:
+func (m menuModel) scenarioBuilderRowSupportsCycle(row scenarioBuilderRow) bool {
+	switch row.kind {
+	case builderRowScenario, builderRowMode, builderRowBiome, builderRowDaysMode, builderRowDaysPreset, builderRowPhaseSeason:
 		return true
 	default:
 		return false
 	}
 }
 
+func (m menuModel) scenarioBuilderRows() []scenarioBuilderRow {
+	scenarioChoices := builderScenarioChoices(m.customScenarios)
+	selectedScenarioIdx := m.build.selectedIdx
+	if selectedScenarioIdx < 0 || selectedScenarioIdx >= len(scenarioChoices) {
+		selectedScenarioIdx = 0
+	}
+
+	rows := []scenarioBuilderRow{
+		{label: "Scenario", value: scenarioChoices[selectedScenarioIdx], kind: builderRowScenario, active: true},
+		{label: "Name", value: m.build.name, kind: builderRowName, active: true},
+		{label: "Game Mode", value: modeLabel(setupModes()[m.build.modeIdx]), kind: builderRowMode, active: true},
+		{label: "Biome", value: builderBiomes()[m.build.biomeIdx], kind: builderRowBiome, active: true},
+		{label: "Days Mode", value: map[bool]string{true: "Custom", false: "Preset"}[m.build.useCustomDays], kind: builderRowDaysMode, active: true},
+		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx]), kind: builderRowDaysPreset, active: !m.build.useCustomDays},
+		{label: "Days Custom", value: m.build.customDays, kind: builderRowDaysCustom, active: m.build.useCustomDays},
+		{label: "Season Profile ID", value: m.build.seasonSetID, kind: builderRowSeasonProfileID, active: true},
+	}
+
+	seasonOptions := builderSeasonOptions()
+	for i := range m.build.phases {
+		rows = append(rows,
+			scenarioBuilderRow{
+				label:    fmt.Sprintf("Phase %d Season", i+1),
+				value:    builderSeasonLabel(seasonOptions[m.build.phases[i].seasonIdx]),
+				kind:     builderRowPhaseSeason,
+				phaseIdx: i,
+				active:   true,
+			},
+			scenarioBuilderRow{
+				label:    fmt.Sprintf("Phase %d Days", i+1),
+				value:    m.build.phases[i].days,
+				kind:     builderRowPhaseDays,
+				phaseIdx: i,
+				active:   true,
+			},
+		)
+	}
+
+	rows = append(rows,
+		scenarioBuilderRow{label: "Add Phase", value: fmt.Sprintf("%d/%d", len(m.build.phases), maxBuilderPhases), kind: builderRowAddPhase, active: len(m.build.phases) < maxBuilderPhases},
+		scenarioBuilderRow{label: "Remove Last Phase", value: "", kind: builderRowRemovePhase, active: len(m.build.phases) > 1},
+		scenarioBuilderRow{label: "Save Scenario", value: "", kind: builderRowSave, active: true},
+		scenarioBuilderRow{label: "Delete Scenario", value: "", kind: builderRowDelete, active: m.build.selectedIdx > 0},
+		scenarioBuilderRow{label: "Cancel", value: "", kind: builderRowCancel, active: true},
+	)
+
+	return rows
+}
+
 func (m menuModel) appendScenarioBuilderText(runes []rune) menuModel {
+	rows := m.scenarioBuilderRows()
+	if len(rows) == 0 || m.build.cursor < 0 || m.build.cursor >= len(rows) {
+		return m
+	}
+
+	row := rows[m.build.cursor]
+	if !row.active {
+		return m
+	}
+
 	text := string(runes)
-	switch m.build.cursor {
-	case 1:
+	switch row.kind {
+	case builderRowName:
 		m.build.name += text
-	case 6:
+	case builderRowDaysCustom:
 		for _, r := range runes {
 			if r >= '0' && r <= '9' {
 				m.build.customDays += string(r)
 			}
 		}
-	case 7:
+	case builderRowSeasonProfileID:
 		for _, r := range runes {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
 				m.build.seasonSetID += string(r)
 			}
 		}
-	case 10:
-		for _, r := range runes {
-			if r >= '0' && r <= '9' {
-				m.build.phaseDays[0] += string(r)
-			}
-		}
-	case 12:
-		for _, r := range runes {
-			if r >= '0' && r <= '9' {
-				m.build.phaseDays[1] += string(r)
-			}
-		}
-	case 14:
-		for _, r := range runes {
-			if r >= '0' && r <= '9' {
-				m.build.phaseDays[2] += string(r)
-			}
-		}
-	case 16:
-		for _, r := range runes {
-			if r >= '0' && r <= '9' {
-				m.build.phaseDays[3] += string(r)
+	case builderRowPhaseDays:
+		if row.phaseIdx >= 0 && row.phaseIdx < len(m.build.phases) {
+			for _, r := range runes {
+				if r >= '0' && r <= '9' {
+					m.build.phases[row.phaseIdx].days += string(r)
+				}
 			}
 		}
 	}
@@ -1085,6 +1201,12 @@ func (m menuModel) appendScenarioBuilderText(runes []rune) menuModel {
 }
 
 func (m menuModel) backspaceScenarioBuilderText() menuModel {
+	rows := m.scenarioBuilderRows()
+	if len(rows) == 0 || m.build.cursor < 0 || m.build.cursor >= len(rows) {
+		return m
+	}
+	row := rows[m.build.cursor]
+
 	backspace := func(s string) string {
 		if len(s) == 0 {
 			return s
@@ -1092,21 +1214,17 @@ func (m menuModel) backspaceScenarioBuilderText() menuModel {
 		return s[:len(s)-1]
 	}
 
-	switch m.build.cursor {
-	case 1:
+	switch row.kind {
+	case builderRowName:
 		m.build.name = backspace(m.build.name)
-	case 6:
+	case builderRowDaysCustom:
 		m.build.customDays = backspace(m.build.customDays)
-	case 7:
+	case builderRowSeasonProfileID:
 		m.build.seasonSetID = backspace(m.build.seasonSetID)
-	case 10:
-		m.build.phaseDays[0] = backspace(m.build.phaseDays[0])
-	case 12:
-		m.build.phaseDays[1] = backspace(m.build.phaseDays[1])
-	case 14:
-		m.build.phaseDays[2] = backspace(m.build.phaseDays[2])
-	case 16:
-		m.build.phaseDays[3] = backspace(m.build.phaseDays[3])
+	case builderRowPhaseDays:
+		if row.phaseIdx >= 0 && row.phaseIdx < len(m.build.phases) {
+			m.build.phases[row.phaseIdx].days = backspace(m.build.phases[row.phaseIdx].days)
+		}
 	}
 
 	return m
@@ -1160,20 +1278,18 @@ func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
 		set = record.Scenario.SeasonSets[0]
 	}
 
-	phaseCount := len(set.Phases)
-	if phaseCount < 1 {
-		phaseCount = 1
-	}
-	if phaseCount > 4 {
-		phaseCount = 4
-	}
-	loaded.phaseCountIdx = phaseCount - 1
-
-	for i := 0; i < 4; i++ {
-		if i < len(set.Phases) {
-			loaded.phaseSeason[i] = selectedSeasonIndex(set.Phases[i].Season)
-			loaded.phaseDays[i] = fmt.Sprintf("%d", set.Phases[i].Days)
+	loaded.phases = make([]phaseBuilderPhase, 0, maxBuilderPhases)
+	for _, phase := range set.Phases {
+		if len(loaded.phases) >= maxBuilderPhases {
+			break
 		}
+		loaded.phases = append(loaded.phases, phaseBuilderPhase{
+			seasonIdx: selectedSeasonIndex(phase.Season),
+			days:      fmt.Sprintf("%d", phase.Days),
+		})
+	}
+	if len(loaded.phases) == 0 {
+		loaded.phases = []phaseBuilderPhase{{seasonIdx: 0, days: "0"}}
 	}
 
 	m.build = loaded
@@ -1181,43 +1297,15 @@ func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
 }
 
 func (m menuModel) viewScenarioBuilder() string {
-	scenarioChoices := builderScenarioChoices(m.customScenarios)
-	seasonOptions := builderSeasonOptions()
-	phaseCount := m.build.phaseCountIdx + 1
-	selectedScenarioIdx := m.build.selectedIdx
-	if selectedScenarioIdx < 0 || selectedScenarioIdx >= len(scenarioChoices) {
-		selectedScenarioIdx = 0
-	}
+	rows := m.scenarioBuilderRows()
 
 	var b strings.Builder
 	b.WriteString(brightGreen.Render("SCENARIO BUILDER / EDITOR") + "\n")
-	b.WriteString(dimGreen.Render("Create or edit scenarios with full season profile control") + "\n")
+	b.WriteString(dimGreen.Render("Create or edit scenarios with dynamic season phases") + "\n")
 	b.WriteString(border.Render("----------------------------------------") + "\n\n")
 
-	rows := []struct {
-		label string
-		value string
-	}{
-		{label: "Scenario", value: scenarioChoices[selectedScenarioIdx]},
-		{label: "Name", value: m.build.name},
-		{label: "Game Mode", value: modeLabel(setupModes()[m.build.modeIdx])},
-		{label: "Biome", value: builderBiomes()[m.build.biomeIdx]},
-		{label: "Days Mode", value: map[bool]string{true: "Custom", false: "Preset"}[m.build.useCustomDays]},
-		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])},
-		{label: "Days Custom", value: m.build.customDays},
-		{label: "Season Profile ID", value: m.build.seasonSetID},
-		{label: "Phase Count", value: fmt.Sprintf("%d", phaseCount)},
-		{label: "Phase 1 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[0]])},
-		{label: "Phase 1 Days", value: m.build.phaseDays[0]},
-		{label: "Phase 2 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[1]])},
-		{label: "Phase 2 Days", value: m.build.phaseDays[1]},
-		{label: "Phase 3 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[2]])},
-		{label: "Phase 3 Days", value: m.build.phaseDays[2]},
-		{label: "Phase 4 Season", value: builderSeasonLabel(seasonOptions[m.build.phaseSeason[3]])},
-		{label: "Phase 4 Days", value: m.build.phaseDays[3]},
-		{label: "Save Scenario", value: ""},
-		{label: "Delete Scenario", value: ""},
-		{label: "Cancel", value: ""},
+	if m.build.cursor < 0 || m.build.cursor >= len(rows) {
+		m.build.cursor = 0
 	}
 
 	for i, row := range rows {
@@ -1227,24 +1315,7 @@ func (m menuModel) viewScenarioBuilder() string {
 			cursor = "> "
 			lineStyle = brightGreen
 		}
-
-		active := true
-		switch i {
-		case 5:
-			active = !m.build.useCustomDays
-		case 6:
-			active = m.build.useCustomDays
-		case 11, 12:
-			active = phaseCount >= 2
-		case 13, 14:
-			active = phaseCount >= 3
-		case 15, 16:
-			active = phaseCount >= 4
-		case 18:
-			active = m.build.selectedIdx > 0
-		}
-
-		if !active {
+		if !row.active {
 			lineStyle = dimGreen
 		}
 
@@ -1254,19 +1325,19 @@ func (m menuModel) viewScenarioBuilder() string {
 		}
 
 		value := row.value
-		if i == 1 && strings.TrimSpace(value) == "" {
+		if row.kind == builderRowName && strings.TrimSpace(value) == "" {
 			value = "<type name>"
 		}
-		if i == 6 && strings.TrimSpace(value) == "" {
+		if row.kind == builderRowDaysCustom && strings.TrimSpace(value) == "" {
 			value = "<type days>"
 		}
-		if i == 7 && strings.TrimSpace(value) == "" {
+		if row.kind == builderRowSeasonProfileID && strings.TrimSpace(value) == "" {
 			value = "<profile_id>"
 		}
-		if (i == 10 || i == 12 || i == 14 || i == 16) && strings.TrimSpace(value) == "" {
+		if row.kind == builderRowPhaseDays && strings.TrimSpace(value) == "" {
 			value = "0"
 		}
-		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-14s %s", row.label+":", value)) + "\n")
+		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-18s %s", row.label+":", value)) + "\n")
 	}
 
 	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
