@@ -313,8 +313,10 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("\nSURVIVE IT\n"))
-	b.WriteString(brightGreen.Render("-------------"))
+	b.WriteString(brightGreen.Render("SURVIVE IT"))
+	b.WriteString("")
+	b.WriteString(brightGreen.Render("----------"))
+	b.WriteString("")
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
@@ -324,6 +326,7 @@ func (m menuModel) headerText() string {
 func (m menuModel) bodyText(w int) string {
 	var b strings.Builder
 	b.WriteString(green.Render("Players:\n\n"))
+	b.WriteString("")
 	for _, p := range m.run.Players {
 		b.WriteString(trunc(fmt.Sprintf(
 			" - %s [%s/%s] E:%d H:%d M:%d\n",
