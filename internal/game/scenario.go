@@ -4,6 +4,10 @@ type Scenario struct {
 	ID                 ScenarioID
 	Name               string
 	Biome              string
+	Description        string
+	Daunting           string
+	Motivation         string
+	SupportedModes     []GameMode
 	DefaultDays        int
 	IssuedKit          IssuedKit
 	SeasonSets         []SeasonSet

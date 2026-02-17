@@ -7,8 +7,9 @@ import (
 type GameMode string
 
 const (
-	ModeNakedAndAfraid GameMode = "naked_and_afraid"
-	ModeAlone          GameMode = "alone"
+	ModeNakedAndAfraid   GameMode = "naked_and_afraid"
+	ModeNakedAndAfraidXL GameMode = "naked_and_afraid_xl"
+	ModeAlone            GameMode = "alone"
 )
 
 type RunConfig struct {
@@ -32,6 +33,7 @@ func (r RunLength) IsValid() bool {
 func (c RunConfig) Validate() error {
 	switch c.Mode {
 	case ModeNakedAndAfraid:
+	case ModeNakedAndAfraidXL:
 	case ModeAlone:
 	default:
 		return fmt.Errorf("invalid mode: %s", c.Mode)

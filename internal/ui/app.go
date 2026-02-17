@@ -35,6 +35,7 @@ type screen int
 const (
 	screenMenu screen = iota
 	screenSetup
+	screenScenarioPicker
 	screenLoadRun
 	screenScenarioBuilder
 	screenRun
@@ -85,6 +86,7 @@ type menuModel struct {
 	idx    int
 	screen screen
 	setup  setupState
+	pick   scenarioPickerState
 	load   loadRunState
 	build  scenarioBuilderState
 
@@ -105,6 +107,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		cfg:             cfg,
 		idx:             0,
 		setup:           newSetupState(),
+		pick:            newScenarioPickerState(),
 		load:            newLoadRunState(),
 		build:           newScenarioBuilderState(),
 		activeSaveSlot:  1,
@@ -149,6 +152,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenSetup {
 			return m.updateSetup(msg)
 		}
+		if m.screen == screenScenarioPicker {
+			return m.updateScenarioPicker(msg)
+		}
 		if m.screen == screenLoadRun {
 			return m.updateLoadRun(msg)
 		}
@@ -180,6 +186,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m menuModel) View() string {
 	if m.screen == screenSetup {
 		return m.viewSetup()
+	}
+	if m.screen == screenScenarioPicker {
+		return m.viewScenarioPicker()
 	}
 	if m.screen == screenLoadRun {
 		return m.viewLoadRun()
@@ -327,6 +336,7 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch menuItem(m.idx) {
 		case itemStart:
 			m.setup = newSetupState()
+			m = m.ensureSetupScenarioSelection()
 			m.screen = screenSetup
 			m.status = ""
 			return m, nil
@@ -364,8 +374,12 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 type setupScenarioOption struct {
-	id    game.ScenarioID
-	label string
+	scenario game.Scenario
+	label    string
+}
+
+type scenarioPickerState struct {
+	cursor int
 }
 
 type saveSlotMeta struct {
@@ -437,7 +451,7 @@ type runLengthOption struct {
 type setupState struct {
 	cursor         int
 	modeIdx        int
-	scenarioIdx    int
+	scenarioID     game.ScenarioID
 	playerCountIdx int
 	runLengthIdx   int
 }
@@ -446,10 +460,14 @@ func newSetupState() setupState {
 	return setupState{
 		cursor:         0,
 		modeIdx:        0,
-		scenarioIdx:    0,
+		scenarioID:     "",
 		playerCountIdx: 1, // 2 players by default
 		runLengthIdx:   0,
 	}
+}
+
+func newScenarioPickerState() scenarioPickerState {
+	return scenarioPickerState{cursor: 0}
 }
 
 func newLoadRunState() loadRunState {
@@ -478,26 +496,38 @@ func setupModes() []game.GameMode {
 	return []game.GameMode{
 		game.ModeAlone,
 		game.ModeNakedAndAfraid,
+		game.ModeNakedAndAfraidXL,
 	}
 }
 
-func (m menuModel) setupScenarioOptions() []setupScenarioOption {
-	options := []setupScenarioOption{
-		{id: game.ScenarioRandomID, label: "Random"},
-	}
-
+func (m menuModel) setupScenarioOptionsForMode(mode game.GameMode) []setupScenarioOption {
+	options := make([]setupScenarioOption, 0)
 	for _, scenario := range m.availableScenarios() {
+		if !scenarioSupportsMode(scenario, mode) {
+			continue
+		}
 		label := scenario.Name
 		if isCustomScenarioID(scenario.ID) {
 			label = scenario.Name + " (Custom)"
 		}
 		options = append(options, setupScenarioOption{
-			id:    scenario.ID,
-			label: label,
+			scenario: scenario,
+			label:    label,
 		})
 	}
-
 	return options
+}
+
+func scenarioSupportsMode(s game.Scenario, mode game.GameMode) bool {
+	if len(s.SupportedModes) == 0 {
+		return true
+	}
+	for _, allowed := range s.SupportedModes {
+		if allowed == mode {
+			return true
+		}
+	}
+	return false
 }
 
 func setupPlayerCounts() []int {
@@ -597,6 +627,7 @@ func wrapIndex(current, delta, size int) int {
 
 func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	const rowCount = 6 // mode, scenario, players, run length, start, cancel
+	m = m.ensureSetupScenarioSelection()
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -611,13 +642,24 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setup.cursor = wrapIndex(m.setup.cursor, 1, rowCount)
 		return m, nil
 	case "left":
+		if m.setup.cursor == 1 {
+			m = m.openScenarioPicker()
+			return m, nil
+		}
 		m = m.adjustSetupChoice(-1)
 		return m, nil
 	case "right":
+		if m.setup.cursor == 1 {
+			m = m.openScenarioPicker()
+			return m, nil
+		}
 		m = m.adjustSetupChoice(1)
 		return m, nil
 	case "enter":
 		switch m.setup.cursor {
+		case 1:
+			m = m.openScenarioPicker()
+			return m, nil
 		case 4:
 			return m.startRunFromSetup()
 		case 5:
@@ -633,13 +675,26 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) adjustSetupChoice(delta int) menuModel {
-	scenarios := m.setupScenarioOptions()
 	switch m.setup.cursor {
 	case 0:
 		m.setup.modeIdx = wrapIndex(m.setup.modeIdx, delta, len(setupModes()))
+		m = m.ensureSetupScenarioSelection()
 	case 1:
-		m.setup.scenarioIdx = wrapIndex(m.setup.scenarioIdx, delta, len(scenarios))
-		mode, found := m.preferredModeForScenario(scenarios[m.setup.scenarioIdx].id)
+		options := m.setupScenarioOptionsForMode(m.setupMode())
+		if len(options) == 0 {
+			m.setup.scenarioID = ""
+			return m
+		}
+		idx := 0
+		for i, option := range options {
+			if option.scenario.ID == m.setup.scenarioID {
+				idx = i
+				break
+			}
+		}
+		idx = wrapIndex(idx, delta, len(options))
+		m.setup.scenarioID = options[idx].scenario.ID
+		mode, found := m.preferredModeForScenario(options[idx].scenario.ID)
 		if found {
 			m.setup.modeIdx = selectedModeIndex(mode)
 		}
@@ -653,15 +708,25 @@ func (m menuModel) adjustSetupChoice(delta int) menuModel {
 }
 
 func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
+	m = m.ensureSetupScenarioSelection()
 	modes := setupModes()
-	scenarioOptions := m.setupScenarioOptions()
 	playerCounts := setupPlayerCounts()
 	runLengths := setupRunLengths()
+	mode := modes[m.setup.modeIdx]
+	scenarioID := m.setup.scenarioID
+	if scenarioID == "" {
+		options := m.setupScenarioOptionsForMode(mode)
+		if len(options) == 0 {
+			m.status = fmt.Sprintf("No scenarios available for mode %s.", modeLabel(mode))
+			return m, nil
+		}
+		scenarioID = options[0].scenario.ID
+	}
 
 	runLength := runLengths[m.setup.runLengthIdx]
 	cfg := game.RunConfig{
-		Mode:        modes[m.setup.modeIdx],
-		ScenarioID:  scenarioOptions[m.setup.scenarioIdx].id,
+		Mode:        mode,
+		ScenarioID:  scenarioID,
 		PlayerCount: playerCounts[m.setup.playerCountIdx],
 		RunLength: game.RunLength{
 			OpenEnded: runLength.openEnded,
@@ -684,17 +749,22 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) viewSetup() string {
+	m = m.ensureSetupScenarioSelection()
 	modes := setupModes()
-	scenarios := m.setupScenarioOptions()
+	scenarios := m.setupScenarioOptionsForMode(m.setupMode())
 	playerCounts := setupPlayerCounts()
 	runLengths := setupRunLengths()
+	scenarioLabel := "No scenarios available"
+	if selected, found := findSetupScenarioByID(scenarios, m.setup.scenarioID); found {
+		scenarioLabel = selected.label
+	}
 
 	rows := []struct {
 		label string
 		value string
 	}{
 		{label: "Mode", value: modeLabel(modes[m.setup.modeIdx])},
-		{label: "Scenario", value: scenarios[m.setup.scenarioIdx].label},
+		{label: "Scenario", value: scenarioLabel},
 		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
 		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
 		{label: "Start Run", value: ""},
@@ -726,7 +796,7 @@ func (m menuModel) viewSetup() string {
 	}
 
 	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  (Scenario opens picker)  Shift+Q back") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
@@ -734,10 +804,188 @@ func (m menuModel) viewSetup() string {
 	return b.String()
 }
 
+func (m menuModel) setupMode() game.GameMode {
+	modes := setupModes()
+	if m.setup.modeIdx < 0 || m.setup.modeIdx >= len(modes) {
+		return modes[0]
+	}
+	return modes[m.setup.modeIdx]
+}
+
+func (m menuModel) ensureSetupScenarioSelection() menuModel {
+	options := m.setupScenarioOptionsForMode(m.setupMode())
+	if len(options) == 0 {
+		m.setup.scenarioID = ""
+		return m
+	}
+	for _, option := range options {
+		if option.scenario.ID == m.setup.scenarioID {
+			return m
+		}
+	}
+	m.setup.scenarioID = options[0].scenario.ID
+	return m
+}
+
+func findSetupScenarioByID(options []setupScenarioOption, id game.ScenarioID) (setupScenarioOption, bool) {
+	for _, option := range options {
+		if option.scenario.ID == id {
+			return option, true
+		}
+	}
+	return setupScenarioOption{}, false
+}
+
+func (m menuModel) openScenarioPicker() menuModel {
+	options := m.setupScenarioOptionsForMode(m.setupMode())
+	if len(options) == 0 {
+		m.status = fmt.Sprintf("No scenarios available for mode %s.", modeLabel(m.setupMode()))
+		return m
+	}
+
+	cursor := 0
+	for i, option := range options {
+		if option.scenario.ID == m.setup.scenarioID {
+			cursor = i
+			break
+		}
+	}
+
+	m.pick = scenarioPickerState{cursor: cursor}
+	m.screen = screenScenarioPicker
+	return m
+}
+
+func (m menuModel) updateScenarioPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	options := m.setupScenarioOptionsForMode(m.setupMode())
+	if len(options) == 0 {
+		m.screen = screenSetup
+		m.status = fmt.Sprintf("No scenarios available for mode %s.", modeLabel(m.setupMode()))
+		return m, nil
+	}
+
+	if m.pick.cursor < 0 || m.pick.cursor >= len(options) {
+		m.pick.cursor = 0
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		m.screen = screenSetup
+		return m, nil
+	case "up", "k":
+		m.pick.cursor = wrapIndex(m.pick.cursor, -1, len(options))
+		return m, nil
+	case "down", "j":
+		m.pick.cursor = wrapIndex(m.pick.cursor, 1, len(options))
+		return m, nil
+	case "enter":
+		m.setup.scenarioID = options[m.pick.cursor].scenario.ID
+		m.screen = screenSetup
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m menuModel) viewScenarioPicker() string {
+	options := m.setupScenarioOptionsForMode(m.setupMode())
+	if len(options) == 0 {
+		return brightGreen.Render("No scenarios available for this mode.")
+	}
+
+	if m.pick.cursor < 0 || m.pick.cursor >= len(options) {
+		m.pick.cursor = 0
+	}
+	selected := options[m.pick.cursor].scenario
+
+	totalWidth := m.w
+	if totalWidth < 90 {
+		totalWidth = 90
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+
+	listWidth := totalWidth / 3
+	if listWidth < 28 {
+		listWidth = 28
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 40 {
+		detailWidth = 40
+	}
+
+	var list strings.Builder
+	for i, option := range options {
+		line := option.label
+		if i == m.pick.cursor {
+			list.WriteString(brightGreen.Render("> " + line))
+		} else {
+			list.WriteString(green.Render("  " + line))
+		}
+		list.WriteString("\n")
+	}
+
+	detailText := m.scenarioDetailText(selected)
+	listPane := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detailText)
+
+	var b strings.Builder
+	b.WriteString(brightGreen.Render("SCENARIO SELECT") + "\n")
+	b.WriteString(dimGreen.Render("Mode: "+modeLabel(m.setupMode())+"  |  ↑/↓ browse, Enter select, Shift+Q back") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	return b.String()
+}
+
+func (m menuModel) scenarioDetailText(s game.Scenario) string {
+	desc := s.Description
+	if strings.TrimSpace(desc) == "" {
+		desc = "A survival challenge scenario."
+	}
+	daunting := s.Daunting
+	if strings.TrimSpace(daunting) == "" {
+		daunting = "Conditions may deteriorate quickly if you lose momentum."
+	}
+	motivation := s.Motivation
+	if strings.TrimSpace(motivation) == "" {
+		motivation = "Stay disciplined and complete the challenge."
+	}
+
+	var b strings.Builder
+	b.WriteString(brightGreen.Render(s.Name) + "\n")
+	b.WriteString(green.Render(fmt.Sprintf("Biome: %s", s.Biome)) + "\n")
+	b.WriteString(green.Render(fmt.Sprintf("Default Days: %d", s.DefaultDays)) + "\n\n")
+	b.WriteString(dimGreen.Render(desc) + "\n\n")
+	b.WriteString(brightGreen.Render("Daunting") + "\n")
+	b.WriteString(green.Render(daunting) + "\n\n")
+	b.WriteString(brightGreen.Render("Motivation") + "\n")
+	b.WriteString(green.Render(motivation))
+	return b.String()
+}
+
 func (m menuModel) availableScenarios() []game.Scenario {
 	scenarios := append([]game.Scenario{}, game.BuiltInScenarios()...)
 	for _, record := range m.customScenarios {
-		scenarios = append(scenarios, record.Scenario)
+		scenario := record.Scenario
+		if len(scenario.SupportedModes) == 0 {
+			scenario.SupportedModes = []game.GameMode{record.PreferredMode}
+		}
+		scenarios = append(scenarios, scenario)
 	}
 	return scenarios
 }
@@ -1046,6 +1294,12 @@ func (m menuModel) saveScenarioFromBuilder() (tea.Model, tea.Cmd) {
 		ID:          scenarioID,
 		Name:        name,
 		Biome:       builderBiomes()[m.build.biomeIdx],
+		Description: "Custom scenario crafted in the scenario editor.",
+		Daunting:    "Custom conditions can become severe without careful planning.",
+		Motivation:  "Adapt, persist, and complete your own survival blueprint.",
+		SupportedModes: []game.GameMode{
+			setupModes()[m.build.modeIdx],
+		},
 		DefaultDays: defaultDays,
 		IssuedKit:   game.IssuedKit{},
 		SeasonSets: []game.SeasonSet{
@@ -1487,6 +1741,8 @@ func modeLabel(mode game.GameMode) string {
 		return "Alone"
 	case game.ModeNakedAndAfraid:
 		return "Naked and Afraid"
+	case game.ModeNakedAndAfraidXL:
+		return "Naked and Afraid XL"
 	default:
 		return string(mode)
 	}
@@ -1664,6 +1920,14 @@ func loadCustomScenarios(path string) ([]customScenarioRecord, error) {
 	}
 
 	if len(library.Custom) > 0 {
+		for i := range library.Custom {
+			if library.Custom[i].PreferredMode == "" {
+				library.Custom[i].PreferredMode = game.ModeAlone
+			}
+			if len(library.Custom[i].Scenario.SupportedModes) == 0 {
+				library.Custom[i].Scenario.SupportedModes = []game.GameMode{library.Custom[i].PreferredMode}
+			}
+		}
 		return library.Custom, nil
 	}
 
@@ -1671,6 +1935,9 @@ func loadCustomScenarios(path string) ([]customScenarioRecord, error) {
 	if len(library.Scenarios) > 0 {
 		records := make([]customScenarioRecord, 0, len(library.Scenarios))
 		for _, scenario := range library.Scenarios {
+			if len(scenario.SupportedModes) == 0 {
+				scenario.SupportedModes = []game.GameMode{game.ModeAlone}
+			}
 			records = append(records, customScenarioRecord{
 				Scenario:      scenario,
 				PreferredMode: game.ModeAlone,
