@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/appengine-ltd/survive-it/internal/game"
+	"github.com/appengine-ltd/survive-it/internal/update"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
-
-	"github.com/appengine-ltd/survive-it/internal/update"
+	"github.com/charmbracelet/lipgloss/table"
 )
 
 type AppConfig struct {
@@ -203,25 +202,15 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m menuModel) viewRun() string {
-	w := m.w
-	h := m.h
-	if w <= 0 {
-		w = 120
-	}
-	if h <= 0 {
-		h = 35
-	}
-
-	paneW := max(30, w-3)
-
 	box := lipgloss.NewStyle().
 		Bold(true).
-		Background(lipgloss.Color("#7D56F4")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("2")).
 		PaddingTop(2).
 		PaddingLeft(4).
-		Width(paneW)
+		Width(24).
+		Height(32)
 
 	box.Render("")
 
@@ -231,24 +220,13 @@ func (m menuModel) viewRun() string {
 	// Render footer first (auto height)
 	footer := box.Render(m.footerText())
 
-	usedHeight := lipgloss.Height(header) + lipgloss.Height(footer)
+	m.bodyText()
 
-	bodyHeight := h - usedHeight
-	if bodyHeight < 3 {
-		bodyHeight = 3
-	}
-
-	body := box.Height(max(4, bodyHeight)).Render(m.bodyText(paneW))
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-}
-
-func trunc(s string, w int) string {
-	return ansi.Truncate(s, w, "…")
+	return lipgloss.JoinVertical(lipgloss.Left, header, footer)
 }
 
 func (m menuModel) viewMenu() string {
-	title := brightGreen.Render("SURVIVE IT") + dimGreen.Render("  alpha")
+	title := brightGreen.Render("SURVIVE IT\n") + dimGreen.Render("  alpha")
 	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
 
 	items := []string{
@@ -318,26 +296,24 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT\n"))
+	b.WriteString(brightGreen.Render("SURVIVE IT"))
 	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  %s  |  Season: %s",
 		m.run.Day, m.run.Scenario.Name, seasonStr,
 	)))
 	return b.String()
 }
 
-func (m menuModel) bodyText(w int) string {
+func (m menuModel) bodyText() {
 	var b strings.Builder
 	b.WriteString(green.Render("Players:\n\n"))
 	b.WriteString("")
+	rows := make([]string, 0, len(m.run.Players))
 	for _, p := range m.run.Players {
-		b.WriteString(trunc(fmt.Sprintf(
-			" - %s [%s/%s] E:%d H:%d M:%d\n",
-			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale),
-			w,
-		),
-		)
+		rows = append(rows, fmt.Sprintf(" - %s [%s/%s] E:%d H:%d M:%d\n", p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale))
 	}
-	return b.String()
+
+	t := table.New().Border(lipgloss.NormalBorder()).Row(rows...)
+	t.Render()
 }
 
 func (m menuModel) footerText() string {
