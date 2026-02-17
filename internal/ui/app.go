@@ -212,9 +212,21 @@ func (m menuModel) viewRun() string {
 		totalWidth = 60
 	}
 
-	headerHeight := 5
-	footerHeight := 5
-	bodyHeight := totalHeight - headerHeight - footerHeight
+	headerRows := 4
+	footerRows := 4
+	bodyRows := totalHeight - headerRows - footerRows
+	if bodyRows < 8 {
+		bodyRows = 8
+	}
+
+	// Lipgloss height applies to the content area; borders add 2 rows.
+	contentHeight := func(totalRows int) int {
+		h := totalRows - 2
+		if h < 1 {
+			return 1
+		}
+		return h
+	}
 
 	paneStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
@@ -225,15 +237,15 @@ func (m menuModel) viewRun() string {
 	header := paneStyle.Copy().
 		Bold(true).
 		Foreground(lipgloss.Color("#FAFAFA")).
-		Height(headerHeight).
+		Height(contentHeight(headerRows)).
 		Render(m.headerText())
 	body := paneStyle.Copy().
 		Foreground(lipgloss.Color("10")).
-		Height(bodyHeight).
+		Height(contentHeight(bodyRows)).
 		Render(m.bodyText())
 	footer := paneStyle.Copy().
 		Foreground(lipgloss.Color("#FAFAFA")).
-		Height(footerHeight).
+		Height(contentHeight(footerRows)).
 		Render(m.footerText())
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
@@ -310,13 +322,10 @@ func (m menuModel) headerText() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SURVIVE IT"))
+	b.WriteString(brightGreen.Render("SURVIVE IT!"))
 	b.WriteString("\n")
-	b.WriteString(brightGreen.Render(fmt.Sprintf("Day %d  |  Mode: %s  |  Season: %s",
-		m.run.Day, modeLabel(m.run.Config.Mode), seasonStr,
-	)))
-	b.WriteString("\n")
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Scenario: %s  |  Players: %d", m.run.Scenario.Name, len(m.run.Players))))
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d",
+		modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day)))
 	return b.String()
 }
 
@@ -362,15 +371,11 @@ func (m menuModel) bodyText() string {
 			return green
 		})
 
-	return green.Render("Players") + "\n" + t.Render()
+	return t.Render()
 }
 
 func (m menuModel) footerText() string {
 	var b strings.Builder
-
-	b.WriteString(brightGreen.Render("Input"))
-	b.WriteString("\n")
-	b.WriteString(dimGreen.Render("> "))
 
 	out := m.run.EvaluateRun()
 	if out.Status != game.RunOutcomeOngoing {
