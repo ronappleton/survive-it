@@ -17,6 +17,7 @@ type RunConfig struct {
 	ScenarioID  ScenarioID
 	PlayerCount int
 	Players     []PlayerConfig
+	IssuedKit   []KitItem
 	RunLength   RunLength
 	Seed        int64
 }

@@ -57,15 +57,31 @@ type PlayerState struct {
 	Name      string
 	Sex       Sex
 	BodyType  BodyType
+	WeightKg  int
+	HeightFt  int
+	HeightIn  int
+	Endurance int
+	Bushcraft int
+	Mental    int
+	KitLimit  int
+	Kit       []KitItem
 	Energy    int
 	Hydration int
 	Morale    int
 }
 
 type PlayerConfig struct {
-	Name     string
-	Sex      Sex
-	BodyType BodyType
+	Name      string
+	Sex       Sex
+	BodyType  BodyType
+	WeightKg  int
+	HeightFt  int
+	HeightIn  int
+	Endurance int
+	Bushcraft int
+	Mental    int
+	KitLimit  int
+	Kit       []KitItem
 }
 
 func CreatePlayers(cfg RunConfig) []PlayerState {
@@ -97,6 +113,19 @@ func CreatePlayers(cfg RunConfig) []PlayerState {
 			}
 		}
 
+		if pc.WeightKg <= 0 {
+			pc.WeightKg = 75
+		}
+		if pc.HeightFt <= 0 {
+			pc.HeightFt = 5
+		}
+		if pc.HeightIn < 0 || pc.HeightIn > 11 {
+			pc.HeightIn = 10
+		}
+		if pc.KitLimit <= 0 {
+			pc.KitLimit = 1
+		}
+
 		name := pc.Name
 		if name == "" {
 			name = generateName(rng, pc.Sex, used)
@@ -113,6 +142,14 @@ func CreatePlayers(cfg RunConfig) []PlayerState {
 			Name:      name,
 			Sex:       pc.Sex,
 			BodyType:  pc.BodyType,
+			WeightKg:  pc.WeightKg,
+			HeightFt:  pc.HeightFt,
+			HeightIn:  pc.HeightIn,
+			Endurance: clamp(pc.Endurance, -3, 3),
+			Bushcraft: clamp(pc.Bushcraft, -3, 3),
+			Mental:    clamp(pc.Mental, -3, 3),
+			KitLimit:  pc.KitLimit,
+			Kit:       append([]KitItem(nil), pc.Kit...),
 			Energy:    100,
 			Hydration: 100,
 			Morale:    100,

@@ -188,3 +188,77 @@ func TestValidateRunConfigWithScenariosRejectsWrongModeScenarioPair(t *testing.T
 		t.Fatalf("expected mode/scenario mismatch to fail validation")
 	}
 }
+
+func TestEnsureSetupPlayersAppliesSeriesKitLimits(t *testing.T) {
+	m := newMenuModel(AppConfig{})
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+
+	m.setup.players[0].KitLimit = 10
+	m.setup.players[0].Kit = []game.KitItem{
+		game.KitHatchet,
+		game.KitSixInchKnife,
+		game.KitParacord50ft,
+	}
+
+	m.setup.modeIdx = selectedModeIndex(game.ModeNakedAndAfraid)
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+
+	if got := m.setup.players[0].KitLimit; got != 1 {
+		t.Fatalf("expected Naked and Afraid kit limit 1, got %d", got)
+	}
+	if got := len(m.setup.players[0].Kit); got != 1 {
+		t.Fatalf("expected player kit to be trimmed to 1 item, got %d", got)
+	}
+	if len(m.setup.issuedKit) == 0 {
+		t.Fatalf("expected scenario-based issued kit recommendation")
+	}
+}
+
+func TestStartRunFromSetupUsesConfiguredPlayersAndIssuedKit(t *testing.T) {
+	m := newMenuModel(AppConfig{})
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+
+	m.setup.modeIdx = selectedModeIndex(game.ModeAlone)
+	m.setup.playerCountIdx = 1 // 2 players
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+
+	m.setup.players[0].Name = "Ron"
+	m.setup.players[0].Sex = game.SexMale
+	m.setup.players[0].BodyType = game.BodyTypeMale
+	m.setup.players[0].KitLimit = 2
+	m.setup.players[0].Kit = []game.KitItem{game.KitHatchet, game.KitFerroRod}
+
+	m.setup.players[1].Name = "Alex"
+	m.setup.players[1].Sex = game.SexNonBinary
+	m.setup.players[1].BodyType = game.BodyTypeNeutral
+	m.setup.players[1].KitLimit = 2
+	m.setup.players[1].Kit = []game.KitItem{game.KitParacord50ft}
+
+	m.setup.issuedKit = []game.KitItem{game.KitCookingPot, game.KitCanteen}
+	m.setup.issuedCustom = true
+
+	gotModel, _ := m.startRunFromSetup()
+	got, ok := gotModel.(menuModel)
+	if !ok {
+		t.Fatalf("expected menuModel, got %T", gotModel)
+	}
+	if got.run == nil {
+		t.Fatalf("expected run to start")
+	}
+	if len(got.run.Config.Players) != 2 {
+		t.Fatalf("expected 2 configured players, got %d", len(got.run.Config.Players))
+	}
+	if got.run.Config.Players[0].Name != "Ron" {
+		t.Fatalf("expected first configured player name Ron, got %q", got.run.Config.Players[0].Name)
+	}
+	if got.run.Config.Players[1].Name != "Alex" {
+		t.Fatalf("expected second configured player name Alex, got %q", got.run.Config.Players[1].Name)
+	}
+	if len(got.run.Config.IssuedKit) != 2 {
+		t.Fatalf("expected issued kit to carry into run config, got %d items", len(got.run.Config.IssuedKit))
+	}
+}

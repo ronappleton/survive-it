@@ -36,6 +36,7 @@ const (
 	screenMenu screen = iota
 	screenSetup
 	screenScenarioPicker
+	screenPlayerConfig
 	screenLoadRun
 	screenScenarioBuilder
 	screenRun
@@ -87,6 +88,7 @@ type menuModel struct {
 	screen screen
 	setup  setupState
 	pick   scenarioPickerState
+	pcfg   playerConfigState
 	load   loadRunState
 	build  scenarioBuilderState
 
@@ -108,6 +110,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		idx:             0,
 		setup:           newSetupState(),
 		pick:            newScenarioPickerState(),
+		pcfg:            newPlayerConfigState(),
 		load:            newLoadRunState(),
 		build:           newScenarioBuilderState(),
 		activeSaveSlot:  1,
@@ -155,6 +158,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenScenarioPicker {
 			return m.updateScenarioPicker(msg)
 		}
+		if m.screen == screenPlayerConfig {
+			return m.updatePlayerConfig(msg)
+		}
 		if m.screen == screenLoadRun {
 			return m.updateLoadRun(msg)
 		}
@@ -189,6 +195,9 @@ func (m menuModel) View() string {
 	}
 	if m.screen == screenScenarioPicker {
 		return m.viewScenarioPicker()
+	}
+	if m.screen == screenPlayerConfig {
+		return m.viewPlayerConfig()
 	}
 	if m.screen == screenLoadRun {
 		return m.viewLoadRun()
@@ -336,7 +345,9 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch menuItem(m.idx) {
 		case itemStart:
 			m.setup = newSetupState()
+			m.pcfg = newPlayerConfigState()
 			m = m.ensureSetupScenarioSelection()
+			m = m.ensureSetupPlayers()
 			m.screen = screenSetup
 			m.status = ""
 			return m, nil
@@ -380,6 +391,14 @@ type setupScenarioOption struct {
 
 type scenarioPickerState struct {
 	cursor int
+}
+
+type playerConfigState struct {
+	cursor       int
+	playerIdx    int
+	nameIdx      int
+	addKitIdx    int
+	addIssuedIdx int
 }
 
 type saveSlotMeta struct {
@@ -442,6 +461,38 @@ type scenarioBuilderRow struct {
 	active   bool
 }
 
+type playerConfigRowKind int
+
+const (
+	playerRowPlayer playerConfigRowKind = iota
+	playerRowName
+	playerRowQuickName
+	playerRowSex
+	playerRowBodyType
+	playerRowWeightKg
+	playerRowHeightFt
+	playerRowHeightIn
+	playerRowEndurance
+	playerRowBushcraft
+	playerRowMental
+	playerRowKitLimit
+	playerRowPersonalKit
+	playerRowAddPersonalKit
+	playerRowRemovePersonalKit
+	playerRowIssuedKit
+	playerRowAddIssuedKit
+	playerRowRemoveIssuedKit
+	playerRowResetIssuedKit
+	playerRowBack
+)
+
+type playerConfigRow struct {
+	label  string
+	value  string
+	kind   playerConfigRowKind
+	active bool
+}
+
 type runLengthOption struct {
 	label     string
 	openEnded bool
@@ -454,20 +505,38 @@ type setupState struct {
 	scenarioID     game.ScenarioID
 	playerCountIdx int
 	runLengthIdx   int
+	players        []game.PlayerConfig
+	issuedKit      []game.KitItem
+	issuedCustom   bool
 }
 
 func newSetupState() setupState {
-	return setupState{
+	s := setupState{
 		cursor:         0,
 		modeIdx:        0,
 		scenarioID:     "",
 		playerCountIdx: 1, // 2 players by default
 		runLengthIdx:   0,
 	}
+	s.players = make([]game.PlayerConfig, setupPlayerCounts()[s.playerCountIdx])
+	for i := range s.players {
+		s.players[i] = defaultPlayerConfig(game.ModeAlone)
+	}
+	return s
 }
 
 func newScenarioPickerState() scenarioPickerState {
 	return scenarioPickerState{cursor: 0}
+}
+
+func newPlayerConfigState() playerConfigState {
+	return playerConfigState{
+		cursor:       0,
+		playerIdx:    0,
+		nameIdx:      0,
+		addKitIdx:    0,
+		addIssuedIdx: 0,
+	}
 }
 
 func newLoadRunState() loadRunState {
@@ -542,6 +611,148 @@ func setupRunLengths() []runLengthOption {
 		{label: "60 days", days: 60},
 		{label: "Open ended", openEnded: true},
 	}
+}
+
+func maxKitLimitForMode(mode game.GameMode) int {
+	switch mode {
+	case game.ModeAlone:
+		return 10
+	case game.ModeNakedAndAfraid:
+		return 1
+	case game.ModeNakedAndAfraidXL:
+		return 1
+	default:
+		return 1
+	}
+}
+
+func defaultKitLimitForMode(mode game.GameMode) int {
+	return maxKitLimitForMode(mode)
+}
+
+func playerConfigSuggestedNames() []string {
+	return []string{
+		"Sophia", "Daniel", "Maya", "Ethan", "Harper",
+		"Riley", "Quinn", "Rowan", "Kai", "Avery",
+		"Emma", "Olivia", "Jack", "Tom", "Freya",
+		"Jordan", "Morgan", "Taylor", "Alex", "Noah",
+	}
+}
+
+func playerConfigSexes() []game.Sex {
+	return []game.Sex{
+		game.SexMale,
+		game.SexFemale,
+		game.SexNonBinary,
+		game.SexOther,
+	}
+}
+
+func playerConfigBodyTypes() []game.BodyType {
+	return []game.BodyType{
+		game.BodyTypeNeutral,
+		game.BodyTypeMale,
+		game.BodyTypeFemale,
+	}
+}
+
+func defaultPlayerConfig(mode game.GameMode) game.PlayerConfig {
+	return game.PlayerConfig{
+		Sex:       game.SexOther,
+		BodyType:  game.BodyTypeNeutral,
+		WeightKg:  75,
+		HeightFt:  5,
+		HeightIn:  10,
+		Endurance: 0,
+		Bushcraft: 0,
+		Mental:    0,
+		KitLimit:  defaultKitLimitForMode(mode),
+		Kit:       []game.KitItem{},
+	}
+}
+
+func recommendedIssuedKitForScenario(mode game.GameMode, scenario game.Scenario) []game.KitItem {
+	biome := strings.ToLower(scenario.Biome)
+	kit := make([]game.KitItem, 0, 6)
+
+	switch {
+	case strings.Contains(biome, "winter"), strings.Contains(biome, "arctic"), strings.Contains(biome, "tundra"), strings.Contains(biome, "cold"):
+		kit = append(kit, game.KitFerroRod, game.KitThermalLayer, game.KitHatchet, game.KitCookingPot)
+	case strings.Contains(biome, "wet"), strings.Contains(biome, "swamp"), strings.Contains(biome, "jungle"), strings.Contains(biome, "rainforest"):
+		kit = append(kit, game.KitParacord50ft, game.KitTarp, game.KitFerroRod, game.KitMosquitoNet)
+	case strings.Contains(biome, "desert"), strings.Contains(biome, "savanna"), strings.Contains(biome, "dry"):
+		kit = append(kit, game.KitCanteen, game.KitWaterFilter, game.KitHatchet, game.KitParacord50ft)
+	default:
+		kit = append(kit, game.KitHatchet, game.KitParacord50ft, game.KitFerroRod, game.KitCookingPot)
+	}
+
+	if mode == game.ModeNakedAndAfraid {
+		return firstNKitItems(kit, 2)
+	}
+	if mode == game.ModeNakedAndAfraidXL {
+		return firstNKitItems(kit, 3)
+	}
+	return firstNKitItems(kit, 4)
+}
+
+func firstNKitItems(items []game.KitItem, n int) []game.KitItem {
+	if len(items) <= n {
+		return append([]game.KitItem(nil), items...)
+	}
+	return append([]game.KitItem(nil), items[:n]...)
+}
+
+func (m menuModel) ensureSetupPlayers() menuModel {
+	mode := m.setupMode()
+	count := setupPlayerCounts()[m.setup.playerCountIdx]
+
+	if len(m.setup.players) < count {
+		for len(m.setup.players) < count {
+			m.setup.players = append(m.setup.players, defaultPlayerConfig(mode))
+		}
+	}
+	if len(m.setup.players) > count {
+		m.setup.players = m.setup.players[:count]
+	}
+
+	defaultLimit := defaultKitLimitForMode(mode)
+	maxLimit := maxKitLimitForMode(mode)
+	for i := range m.setup.players {
+		if m.setup.players[i].KitLimit <= 0 {
+			m.setup.players[i].KitLimit = defaultLimit
+		}
+		if m.setup.players[i].KitLimit > maxLimit {
+			m.setup.players[i].KitLimit = maxLimit
+		}
+		if len(m.setup.players[i].Kit) > m.setup.players[i].KitLimit {
+			m.setup.players[i].Kit = append([]game.KitItem(nil), m.setup.players[i].Kit[:m.setup.players[i].KitLimit]...)
+		}
+	}
+
+	if scenario, found := m.selectedSetupScenario(); found {
+		if !m.setup.issuedCustom {
+			m.setup.issuedKit = recommendedIssuedKitForScenario(mode, scenario)
+		}
+	}
+
+	if len(m.setup.players) > 0 && m.pcfg.playerIdx >= len(m.setup.players) {
+		m.pcfg.playerIdx = len(m.setup.players) - 1
+	}
+
+	return m
+}
+
+func (m menuModel) selectedSetupScenario() (game.Scenario, bool) {
+	options := m.setupScenarioOptionsForMode(m.setupMode())
+	if len(options) == 0 {
+		return game.Scenario{}, false
+	}
+	for _, option := range options {
+		if option.scenario.ID == m.setup.scenarioID {
+			return option.scenario, true
+		}
+	}
+	return options[0].scenario, true
 }
 
 func builderBiomes() []string {
@@ -626,8 +837,9 @@ func wrapIndex(current, delta, size int) int {
 }
 
 func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const rowCount = 6 // mode, scenario, players, run length, start, cancel
+	const rowCount = 7 // mode, scenario, players, run length, configure players, start, cancel
 	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -646,11 +858,19 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.openScenarioPicker()
 			return m, nil
 		}
+		if m.setup.cursor == 4 {
+			m.screen = screenPlayerConfig
+			return m, nil
+		}
 		m = m.adjustSetupChoice(-1)
 		return m, nil
 	case "right":
 		if m.setup.cursor == 1 {
 			m = m.openScenarioPicker()
+			return m, nil
+		}
+		if m.setup.cursor == 4 {
+			m.screen = screenPlayerConfig
 			return m, nil
 		}
 		m = m.adjustSetupChoice(1)
@@ -661,8 +881,11 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.openScenarioPicker()
 			return m, nil
 		case 4:
-			return m.startRunFromSetup()
+			m.screen = screenPlayerConfig
+			return m, nil
 		case 5:
+			return m.startRunFromSetup()
+		case 6:
 			m.screen = screenMenu
 			return m, nil
 		default:
@@ -704,11 +927,12 @@ func (m menuModel) adjustSetupChoice(delta int) menuModel {
 		m.setup.runLengthIdx = wrapIndex(m.setup.runLengthIdx, delta, len(setupRunLengths()))
 	}
 
-	return m
+	return m.ensureSetupPlayers()
 }
 
 func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
 	modes := setupModes()
 	playerCounts := setupPlayerCounts()
 	runLengths := setupRunLengths()
@@ -724,6 +948,10 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 	}
 
 	runLength := runLengths[m.setup.runLengthIdx]
+	players := append([]game.PlayerConfig(nil), m.setup.players...)
+	for i := range players {
+		players[i].Kit = append([]game.KitItem(nil), players[i].Kit...)
+	}
 	cfg := game.RunConfig{
 		Mode:        mode,
 		ScenarioID:  scenarioID,
@@ -732,8 +960,9 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 			OpenEnded: runLength.openEnded,
 			Days:      runLength.days,
 		},
-		Seed:    0,
-		Players: nil,
+		Seed:      0,
+		Players:   players,
+		IssuedKit: append([]game.KitItem(nil), m.setup.issuedKit...),
 	}
 
 	state, err := newRunStateWithScenarios(cfg, m.availableScenarios())
@@ -750,6 +979,7 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 
 func (m menuModel) viewSetup() string {
 	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
 	modes := setupModes()
 	scenarios := m.setupScenarioOptionsForMode(m.setupMode())
 	playerCounts := setupPlayerCounts()
@@ -767,6 +997,7 @@ func (m menuModel) viewSetup() string {
 		{label: "Scenario", value: scenarioLabel},
 		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
 		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
+		{label: "Configure Players", value: ""},
 		{label: "Start Run", value: ""},
 		{label: "Cancel", value: ""},
 	}
@@ -976,6 +1207,524 @@ func (m menuModel) scenarioDetailText(s game.Scenario) string {
 	b.WriteString(brightGreen.Render("Motivation") + "\n")
 	b.WriteString(green.Render(motivation))
 	return b.String()
+}
+
+func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+	m = m.normalizePlayerConfigState()
+	rows := m.playerConfigRows()
+	if len(rows) == 0 {
+		m.screen = screenSetup
+		return m, nil
+	}
+	if m.pcfg.cursor < 0 || m.pcfg.cursor >= len(rows) {
+		m.pcfg.cursor = 0
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		m.screen = screenSetup
+		return m, nil
+	case "up", "k":
+		m.pcfg.cursor = wrapIndex(m.pcfg.cursor, -1, len(rows))
+		return m, nil
+	case "down", "j":
+		m.pcfg.cursor = wrapIndex(m.pcfg.cursor, 1, len(rows))
+		return m, nil
+	case "left":
+		m = m.adjustPlayerConfigChoice(-1)
+		return m, nil
+	case "right":
+		m = m.adjustPlayerConfigChoice(1)
+		return m, nil
+	case "backspace", "ctrl+h":
+		m = m.backspacePlayerConfigText()
+		return m, nil
+	case "enter":
+		row := rows[m.pcfg.cursor]
+		if !row.active {
+			return m, nil
+		}
+		switch row.kind {
+		case playerRowQuickName:
+			names := playerConfigSuggestedNames()
+			if len(names) == 0 || len(m.setup.players) == 0 {
+				return m, nil
+			}
+			m.setup.players[m.pcfg.playerIdx].Name = names[m.pcfg.nameIdx]
+		case playerRowAddPersonalKit:
+			m = m.addPersonalKitItem()
+		case playerRowRemovePersonalKit:
+			m = m.removePersonalKitItem()
+		case playerRowAddIssuedKit:
+			m = m.addIssuedKitItem()
+		case playerRowRemoveIssuedKit:
+			m = m.removeIssuedKitItem()
+		case playerRowResetIssuedKit:
+			m = m.resetIssuedKitRecommendations()
+		case playerRowBack:
+			m.screen = screenSetup
+			return m, nil
+		default:
+			if m.playerConfigRowSupportsCycle(row.kind) {
+				m = m.adjustPlayerConfigChoice(1)
+			}
+		}
+		return m, nil
+	}
+
+	if len(msg.Runes) > 0 {
+		m = m.appendPlayerConfigText(msg.Runes)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m menuModel) viewPlayerConfig() string {
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+	m = m.normalizePlayerConfigState()
+	rows := m.playerConfigRows()
+	if len(rows) == 0 {
+		return brightGreen.Render("No players available. Return to wizard and choose player count.")
+	}
+	if m.pcfg.cursor < 0 || m.pcfg.cursor >= len(rows) {
+		m.pcfg.cursor = 0
+	}
+
+	scenarioLabel := "Unknown scenario"
+	if selected, found := m.selectedSetupScenario(); found {
+		scenarioLabel = selected.Name
+	}
+
+	playerCount := len(m.setup.players)
+	activePlayer := m.pcfg.playerIdx + 1
+
+	var b strings.Builder
+	b.WriteString(brightGreen.Render("PLAYER CONFIGURATION") + "\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n")
+	b.WriteString(border.Render("------------------------------------------------------------") + "\n\n")
+
+	for i, row := range rows {
+		cursor := "  "
+		lineStyle := green
+		if i == m.pcfg.cursor {
+			cursor = "> "
+			lineStyle = brightGreen
+		}
+		if !row.active {
+			lineStyle = dimGreen
+		}
+
+		if row.value == "" {
+			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			continue
+		}
+
+		value := row.value
+		if row.kind == playerRowName && strings.TrimSpace(value) == "" {
+			value = "<auto/random or type custom name>"
+		}
+		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-24s %s", row.label+":", value)) + "\n")
+	}
+
+	b.WriteString("\n" + border.Render("------------------------------------------------------------") + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  type to edit Name  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("Use Add rows for kit picks and Remove rows to undo selections.") + "\n")
+	if m.status != "" {
+		b.WriteString("\n" + green.Render(m.status) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m menuModel) playerConfigRows() []playerConfigRow {
+	if len(m.setup.players) == 0 {
+		return nil
+	}
+
+	allKit := game.AllKitItems()
+	names := playerConfigSuggestedNames()
+	if len(names) == 0 {
+		names = []string{"Player"}
+	}
+	playerIdx := m.pcfg.playerIdx
+	if playerIdx < 0 || playerIdx >= len(m.setup.players) {
+		playerIdx = 0
+	}
+	nameIdx := m.pcfg.nameIdx
+	if nameIdx < 0 || nameIdx >= len(names) {
+		nameIdx = 0
+	}
+	addKitIdx := m.pcfg.addKitIdx
+	addIssuedIdx := m.pcfg.addIssuedIdx
+	if len(allKit) > 0 {
+		if addKitIdx < 0 || addKitIdx >= len(allKit) {
+			addKitIdx = 0
+		}
+		if addIssuedIdx < 0 || addIssuedIdx >= len(allKit) {
+			addIssuedIdx = 0
+		}
+	}
+
+	p := m.setup.players[playerIdx]
+	addKitLabel := ""
+	addIssuedLabel := ""
+	if len(allKit) > 0 {
+		addKitLabel = string(allKit[addKitIdx])
+		addIssuedLabel = string(allKit[addIssuedIdx])
+	}
+
+	return []playerConfigRow{
+		{label: "Player", value: fmt.Sprintf("%d / %d", playerIdx+1, len(m.setup.players)), kind: playerRowPlayer, active: true},
+		{label: "Name", value: p.Name, kind: playerRowName, active: true},
+		{label: "Quick Name", value: names[nameIdx], kind: playerRowQuickName, active: true},
+		{label: "Sex", value: string(p.Sex), kind: playerRowSex, active: true},
+		{label: "Body Type", value: string(p.BodyType), kind: playerRowBodyType, active: true},
+		{label: "Weight (kg)", value: fmt.Sprintf("%d", p.WeightKg), kind: playerRowWeightKg, active: true},
+		{label: "Height (ft)", value: fmt.Sprintf("%d", p.HeightFt), kind: playerRowHeightFt, active: true},
+		{label: "Height (in)", value: fmt.Sprintf("%d", p.HeightIn), kind: playerRowHeightIn, active: true},
+		{label: "Endurance Modifier", value: fmt.Sprintf("%+d", p.Endurance), kind: playerRowEndurance, active: true},
+		{label: "Bushcraft Modifier", value: fmt.Sprintf("%+d", p.Bushcraft), kind: playerRowBushcraft, active: true},
+		{label: "Mental Modifier", value: fmt.Sprintf("%+d", p.Mental), kind: playerRowMental, active: true},
+		{label: "Kit Limit", value: fmt.Sprintf("%d", p.KitLimit), kind: playerRowKitLimit, active: true},
+		{label: "Personal Kit", value: kitSummary(p.Kit, p.KitLimit), kind: playerRowPersonalKit, active: true},
+		{label: "Add Personal Item", value: addKitLabel, kind: playerRowAddPersonalKit, active: len(allKit) > 0 && len(p.Kit) < p.KitLimit},
+		{label: "Remove Personal Item", value: "", kind: playerRowRemovePersonalKit, active: len(p.Kit) > 0},
+		{label: "Issued Kit", value: kitSummary(m.setup.issuedKit, 0), kind: playerRowIssuedKit, active: true},
+		{label: "Add Issued Item", value: addIssuedLabel, kind: playerRowAddIssuedKit, active: len(allKit) > 0},
+		{label: "Remove Issued Item", value: "", kind: playerRowRemoveIssuedKit, active: len(m.setup.issuedKit) > 0},
+		{label: "Reset Issued (Recommended)", value: "", kind: playerRowResetIssuedKit, active: true},
+		{label: "Back To Wizard", value: "", kind: playerRowBack, active: true},
+	}
+}
+
+func (m menuModel) playerConfigRowSupportsCycle(kind playerConfigRowKind) bool {
+	switch kind {
+	case playerRowPlayer, playerRowQuickName, playerRowSex, playerRowBodyType,
+		playerRowWeightKg, playerRowHeightFt, playerRowHeightIn, playerRowEndurance,
+		playerRowBushcraft, playerRowMental, playerRowKitLimit, playerRowAddPersonalKit,
+		playerRowAddIssuedKit:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m menuModel) adjustPlayerConfigChoice(delta int) menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizePlayerConfigState()
+	rows := m.playerConfigRows()
+	if len(rows) == 0 || m.pcfg.cursor < 0 || m.pcfg.cursor >= len(rows) {
+		return m
+	}
+	row := rows[m.pcfg.cursor]
+	if !row.active {
+		return m
+	}
+
+	p := &m.setup.players[m.pcfg.playerIdx]
+	switch row.kind {
+	case playerRowPlayer:
+		m.pcfg.playerIdx = wrapIndex(m.pcfg.playerIdx, delta, len(m.setup.players))
+	case playerRowQuickName:
+		m.pcfg.nameIdx = wrapIndex(m.pcfg.nameIdx, delta, len(playerConfigSuggestedNames()))
+	case playerRowSex:
+		options := playerConfigSexes()
+		idx := indexOfSex(options, p.Sex)
+		p.Sex = options[wrapIndex(idx, delta, len(options))]
+	case playerRowBodyType:
+		options := playerConfigBodyTypes()
+		idx := indexOfBodyType(options, p.BodyType)
+		p.BodyType = options[wrapIndex(idx, delta, len(options))]
+	case playerRowWeightKg:
+		p.WeightKg = clampInt(p.WeightKg+delta, 35, 220)
+	case playerRowHeightFt:
+		p.HeightFt = clampInt(p.HeightFt+delta, 4, 7)
+	case playerRowHeightIn:
+		p.HeightIn = clampInt(p.HeightIn+delta, 0, 11)
+	case playerRowEndurance:
+		p.Endurance = clampInt(p.Endurance+delta, -3, 3)
+	case playerRowBushcraft:
+		p.Bushcraft = clampInt(p.Bushcraft+delta, -3, 3)
+	case playerRowMental:
+		p.Mental = clampInt(p.Mental+delta, -3, 3)
+	case playerRowKitLimit:
+		maxLimit := maxKitLimitForMode(m.setupMode())
+		p.KitLimit = clampInt(p.KitLimit+delta, 1, maxLimit)
+		if len(p.Kit) > p.KitLimit {
+			p.Kit = append([]game.KitItem(nil), p.Kit[:p.KitLimit]...)
+		}
+	case playerRowAddPersonalKit:
+		m.pcfg.addKitIdx = wrapIndex(m.pcfg.addKitIdx, delta, len(game.AllKitItems()))
+	case playerRowAddIssuedKit:
+		m.pcfg.addIssuedIdx = wrapIndex(m.pcfg.addIssuedIdx, delta, len(game.AllKitItems()))
+	}
+
+	return m
+}
+
+func (m menuModel) appendPlayerConfigText(runes []rune) menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizePlayerConfigState()
+	rows := m.playerConfigRows()
+	if len(rows) == 0 || m.pcfg.cursor < 0 || m.pcfg.cursor >= len(rows) {
+		return m
+	}
+	row := rows[m.pcfg.cursor]
+	if row.kind != playerRowName {
+		return m
+	}
+
+	p := &m.setup.players[m.pcfg.playerIdx]
+	for _, r := range runes {
+		if r >= 32 && r <= 126 {
+			if len(p.Name) >= 32 {
+				break
+			}
+			p.Name += string(r)
+		}
+	}
+	return m
+}
+
+func (m menuModel) backspacePlayerConfigText() menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizePlayerConfigState()
+	rows := m.playerConfigRows()
+	if len(rows) == 0 || m.pcfg.cursor < 0 || m.pcfg.cursor >= len(rows) {
+		return m
+	}
+	row := rows[m.pcfg.cursor]
+	if row.kind != playerRowName {
+		return m
+	}
+
+	p := &m.setup.players[m.pcfg.playerIdx]
+	if len(p.Name) > 0 {
+		p.Name = p.Name[:len(p.Name)-1]
+	}
+	return m
+}
+
+func (m menuModel) addPersonalKitItem() menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizePlayerConfigState()
+	items := game.AllKitItems()
+	if len(items) == 0 {
+		return m
+	}
+	p := &m.setup.players[m.pcfg.playerIdx]
+	if len(p.Kit) >= p.KitLimit {
+		m.status = fmt.Sprintf("Player kit limit reached (%d).", p.KitLimit)
+		return m
+	}
+	item := items[m.pcfg.addKitIdx]
+	if hasKitItem(p.Kit, item) {
+		m.status = fmt.Sprintf("%s already selected for this player.", item)
+		return m
+	}
+	p.Kit = append(p.Kit, item)
+	m.status = fmt.Sprintf("Added %s to player kit.", item)
+	return m
+}
+
+func (m menuModel) removePersonalKitItem() menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizePlayerConfigState()
+	p := &m.setup.players[m.pcfg.playerIdx]
+	if len(p.Kit) == 0 {
+		return m
+	}
+
+	items := game.AllKitItems()
+	if len(items) > 0 {
+		selected := items[m.pcfg.addKitIdx]
+		if idx := indexOfKitItem(p.Kit, selected); idx >= 0 {
+			p.Kit = removeKitItemAt(p.Kit, idx)
+			m.status = fmt.Sprintf("Removed %s from player kit.", selected)
+			return m
+		}
+	}
+
+	removed := p.Kit[len(p.Kit)-1]
+	p.Kit = p.Kit[:len(p.Kit)-1]
+	m.status = fmt.Sprintf("Removed %s from player kit.", removed)
+	return m
+}
+
+func (m menuModel) addIssuedKitItem() menuModel {
+	m = m.normalizePlayerConfigState()
+	items := game.AllKitItems()
+	if len(items) == 0 {
+		return m
+	}
+	item := items[m.pcfg.addIssuedIdx]
+	if hasKitItem(m.setup.issuedKit, item) {
+		m.status = fmt.Sprintf("%s is already in issued kit.", item)
+		return m
+	}
+	m.setup.issuedKit = append(m.setup.issuedKit, item)
+	m.setup.issuedCustom = true
+	m.status = fmt.Sprintf("Added %s to issued kit.", item)
+	return m
+}
+
+func (m menuModel) removeIssuedKitItem() menuModel {
+	m = m.normalizePlayerConfigState()
+	if len(m.setup.issuedKit) == 0 {
+		return m
+	}
+
+	items := game.AllKitItems()
+	if len(items) > 0 {
+		selected := items[m.pcfg.addIssuedIdx]
+		if idx := indexOfKitItem(m.setup.issuedKit, selected); idx >= 0 {
+			m.setup.issuedKit = removeKitItemAt(m.setup.issuedKit, idx)
+			m.setup.issuedCustom = true
+			m.status = fmt.Sprintf("Removed %s from issued kit.", selected)
+			return m
+		}
+	}
+
+	removed := m.setup.issuedKit[len(m.setup.issuedKit)-1]
+	m.setup.issuedKit = m.setup.issuedKit[:len(m.setup.issuedKit)-1]
+	m.setup.issuedCustom = true
+	m.status = fmt.Sprintf("Removed %s from issued kit.", removed)
+	return m
+}
+
+func (m menuModel) resetIssuedKitRecommendations() menuModel {
+	scenario, found := m.selectedSetupScenario()
+	if !found {
+		m.status = "No scenario selected."
+		return m
+	}
+	m.setup.issuedCustom = false
+	m.setup.issuedKit = recommendedIssuedKitForScenario(m.setupMode(), scenario)
+	m.status = "Issued kit reset to scenario recommendations."
+	return m
+}
+
+func (m menuModel) normalizePlayerConfigState() menuModel {
+	if len(m.setup.players) > 0 {
+		if m.pcfg.playerIdx < 0 || m.pcfg.playerIdx >= len(m.setup.players) {
+			m.pcfg.playerIdx = 0
+		}
+	} else {
+		m.pcfg.playerIdx = 0
+	}
+
+	names := playerConfigSuggestedNames()
+	if len(names) > 0 {
+		if m.pcfg.nameIdx < 0 || m.pcfg.nameIdx >= len(names) {
+			m.pcfg.nameIdx = 0
+		}
+	} else {
+		m.pcfg.nameIdx = 0
+	}
+
+	items := game.AllKitItems()
+	if len(items) > 0 {
+		if m.pcfg.addKitIdx < 0 || m.pcfg.addKitIdx >= len(items) {
+			m.pcfg.addKitIdx = 0
+		}
+		if m.pcfg.addIssuedIdx < 0 || m.pcfg.addIssuedIdx >= len(items) {
+			m.pcfg.addIssuedIdx = 0
+		}
+	} else {
+		m.pcfg.addKitIdx = 0
+		m.pcfg.addIssuedIdx = 0
+	}
+
+	return m
+}
+
+func hasKitItem(items []game.KitItem, target game.KitItem) bool {
+	return indexOfKitItem(items, target) >= 0
+}
+
+func indexOfKitItem(items []game.KitItem, target game.KitItem) int {
+	for i, item := range items {
+		if item == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func removeKitItemAt(items []game.KitItem, idx int) []game.KitItem {
+	if idx < 0 || idx >= len(items) {
+		return items
+	}
+	return append(append([]game.KitItem{}, items[:idx]...), items[idx+1:]...)
+}
+
+func kitSummary(items []game.KitItem, limit int) string {
+	if len(items) == 0 {
+		if limit > 0 {
+			return fmt.Sprintf("0/%d (none)", limit)
+		}
+		return "none"
+	}
+
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, string(item))
+	}
+
+	preview := strings.Join(parts, ", ")
+	if len(parts) > 3 {
+		preview = strings.Join(parts[:3], ", ") + fmt.Sprintf(" (+%d more)", len(parts)-3)
+	}
+
+	if limit > 0 {
+		return fmt.Sprintf("%d/%d %s", len(items), limit, preview)
+	}
+	return fmt.Sprintf("%d %s", len(items), preview)
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func indexOfSex(values []game.Sex, target game.Sex) int {
+	for i, value := range values {
+		if value == target {
+			return i
+		}
+	}
+	return 0
+}
+
+func indexOfBodyType(values []game.BodyType, target game.BodyType) int {
+	for i, value := range values {
+		if value == target {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m menuModel) availableScenarios() []game.Scenario {
