@@ -430,7 +430,14 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(command, "hunt") || strings.HasPrefix(command, "catch") {
 			return m.handleHuntCommand(command)
 		}
-		m.status = "Unknown command. Try: next, save, load, menu, hunt land|fish|air."
+		if m.run != nil {
+			res := m.run.ExecuteRunCommand(command)
+			if res.Handled {
+				m.status = res.Message
+				return m, nil
+			}
+		}
+		m.status = "Unknown command. Try: next, save, load, menu, hunt land|fish|air, actions, use <item> <action>."
 		return m, nil
 	}
 }
@@ -5008,7 +5015,7 @@ func (m menuModel) bodyText() string {
 }
 
 func (m menuModel) controlsLine(totalWidth int) string {
-	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Type: hunt land|fish|air [raw] [liver] [p#] [grams]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
+	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Cmd: hunt land|fish|air [raw] [liver] [p#] [grams]  use <item> <action> [p#]  actions [p#]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
 	maxWidth := totalWidth - 2
 	if maxWidth < 20 {
 		maxWidth = 20
