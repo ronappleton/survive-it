@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,12 +43,16 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, wood gather [kg] [p#], fire status|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
 		}
 	case "forage":
 		return s.executeForageCommand(fields[1:])
 	case "trees":
 		return s.executeTreesCommand()
+	case "resources":
+		return s.executeResourcesCommand()
+	case "collect":
+		return s.executeCollectCommand(fields[1:])
 	case "wood":
 		return s.executeWoodCommand(fields[1:])
 	case "fire":
@@ -225,9 +230,49 @@ func (s *RunState) executeTreesCommand() RunCommandResult {
 	return RunCommandResult{Handled: true, Message: "Trees -> " + strings.Join(parts, ", ")}
 }
 
+func (s *RunState) executeResourcesCommand() RunCommandResult {
+	available := ResourcesForBiome(s.Scenario.Biome)
+	if len(available) == 0 {
+		return RunCommandResult{Handled: true, Message: "No biome resources available."}
+	}
+	parts := make([]string, 0, len(available))
+	for _, resource := range available {
+		parts = append(parts, resource.ID)
+	}
+	return RunCommandResult{
+		Handled: true,
+		Message: fmt.Sprintf("Resources -> %s | Stock: %s", strings.Join(parts, ", "), formatResourceStock(s.ResourceStock)),
+	}
+}
+
+func (s *RunState) executeCollectCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: collect <resource|any> [qty] [p#]"}
+	}
+
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
+	resourceID := "any"
+	if len(rest) > 0 {
+		resourceID = rest[0]
+	}
+	if !hasAmount {
+		amount = 0
+	}
+
+	resource, qty, err := s.CollectResource(playerID, resourceID, amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Collect failed: %v", err)}
+	}
+	unit := resource.Unit
+	if unit == "kg" {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.1f %s of %s. Stock: %s", playerID, qty, unit, resource.Name, formatResourceStock(s.ResourceStock))}
+	}
+	return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.0f %s of %s. Stock: %s", playerID, qty, unit, resource.Name, formatResourceStock(s.ResourceStock))}
+}
+
 func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
 	if len(fields) == 0 {
-		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood stock"}
+		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood dry [kg] [p#] | wood stock"}
 	}
 
 	switch fields[0] {
@@ -247,24 +292,100 @@ func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
 			Message: fmt.Sprintf("P%d gathered %.1fkg from %s (%s). Stock: %s",
 				playerID, kg, tree.Name, tree.WoodType, formatWoodStock(s.WoodStock)),
 		}
+	case "dry":
+		playerID, amount, hasAmount, _ := parseOptionalPlayerAndNumber(fields[1:])
+		if !hasAmount {
+			amount = 1.0
+		}
+		dried, err := s.DryWood(playerID, amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Wood dry failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d dried %.1fkg wood. Stock: %s", playerID, dried, formatWoodStock(s.WoodStock))}
 	default:
-		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood stock"}
+		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood dry [kg] [p#] | wood stock"}
 	}
 }
 
 func (s *RunState) executeFireCommand(fields []string) RunCommandResult {
 	if len(fields) == 0 || fields[0] == "status" {
 		if !s.Fire.Lit {
-			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire: out | Wood stock: %s", formatWoodStock(s.WoodStock))}
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire: out | Prep: %s | Wood stock: %s", formatFirePrep(s.FirePrep), formatWoodStock(s.WoodStock))}
 		}
 		return RunCommandResult{
 			Handled: true,
-			Message: fmt.Sprintf("Fire: lit (%s) intensity %d heat %dC fuel %.1fkg | Wood stock: %s",
-				s.Fire.WoodType, s.Fire.Intensity, s.Fire.HeatC, s.Fire.FuelKg, formatWoodStock(s.WoodStock)),
+			Message: fmt.Sprintf("Fire: lit (%s) intensity %d heat %dC fuel %.1fkg method:%s | Prep: %s | Wood stock: %s",
+				s.Fire.WoodType, s.Fire.Intensity, s.Fire.HeatC, s.Fire.FuelKg, s.Fire.LastMethod, formatFirePrep(s.FirePrep), formatWoodStock(s.WoodStock)),
 		}
 	}
 
 	switch fields[0] {
+	case "methods":
+		return RunCommandResult{Handled: true, Message: "Fire methods -> ferro, bow_drill, hand_drill"}
+	case "prep":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: fire prep tinder|kindling|feather [count] [p#]"}
+		}
+		playerID, amount, hasAmount, _ := parseOptionalPlayerAndNumber(fields[2:])
+		count := 1
+		if hasAmount {
+			count = clamp(int(math.Round(amount)), 1, 10)
+		}
+		created, err := s.PrepareFireMaterial(playerID, fields[1], count)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire prep failed: %v", err)}
+		}
+		return RunCommandResult{
+			Handled: true,
+			Message: fmt.Sprintf("P%d prepared %d %s bundle(s). Prep: %s", playerID, created, fields[1], formatFirePrep(s.FirePrep)),
+		}
+	case "ember":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: fire ember bow|hand [woodtype] [p#]"}
+		}
+		method := ParseFireMethod(fields[1])
+		if method != FireMethodBowDrill && method != FireMethodHandDrill {
+			return RunCommandResult{Handled: true, Message: "Ember method must be bow or hand."}
+		}
+		playerID := 1
+		woodType := WoodType("")
+		for _, token := range fields[2:] {
+			if parsed := parsePlayerToken(token); parsed > 0 {
+				playerID = parsed
+				continue
+			}
+			if parsed := parseWoodType(token); parsed != "" {
+				woodType = parsed
+			}
+		}
+		chance, success, err := s.TryCreateEmber(playerID, method, woodType)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire ember failed: %v", err)}
+		}
+		if success {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d created ember with %s (chance %.0f%%). Prep: %s", playerID, method, chance*100, formatFirePrep(s.FirePrep))}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d failed ember with %s (chance %.0f%%). Prep: %s", playerID, method, chance*100, formatFirePrep(s.FirePrep))}
+	case "ignite":
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if !hasAmount {
+			amount = 1.0
+		}
+		woodType := WoodType("")
+		for _, token := range rest {
+			if parsed := parseWoodType(token); parsed != "" {
+				woodType = parsed
+				break
+			}
+		}
+		chance, success, err := s.IgniteFromEmber(playerID, woodType, amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Ignite failed: %v", err)}
+		}
+		if success {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d ignited fire from ember (chance %.0f%%). Fire heat %dC intensity %d.", playerID, chance*100, s.Fire.HeatC, s.Fire.Intensity)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d failed to ignite from ember (chance %.0f%%). Prep: %s", playerID, chance*100, formatFirePrep(s.FirePrep))}
 	case "out", "extinguish":
 		s.ExtinguishFire()
 		return RunCommandResult{Handled: true, Message: "Fire extinguished."}
@@ -287,12 +408,12 @@ func (s *RunState) executeFireCommand(fields []string) RunCommandResult {
 				break
 			}
 		}
-		if err := s.StartFire(playerID, woodType, amount); err != nil {
+		if err := s.startFireWithMethod(playerID, woodType, amount, FireMethodFerro); err != nil {
 			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire start failed: %v", err)}
 		}
 		return RunCommandResult{
 			Handled: true,
-			Message: fmt.Sprintf("P%d started fire with %.1fkg %s. Intensity %d, heat %dC.",
+			Message: fmt.Sprintf("P%d started fire with %.1fkg %s using ferro method. Intensity %d, heat %dC.",
 				playerID, amount, woodType, s.Fire.Intensity, s.Fire.HeatC),
 		}
 	case "tend":
@@ -316,7 +437,7 @@ func (s *RunState) executeFireCommand(fields []string) RunCommandResult {
 				playerID, amount, woodType, s.Fire.Intensity, s.Fire.HeatC, s.Fire.FuelKg),
 		}
 	default:
-		return RunCommandResult{Handled: true, Message: "Usage: fire status | fire build [woodtype] [kg] [p#] | fire tend [woodtype] [kg] [p#] | fire out"}
+		return RunCommandResult{Handled: true, Message: "Usage: fire status | fire methods | fire prep tinder|kindling|feather [count] [p#] | fire ember bow|hand [woodtype] [p#] | fire ignite [woodtype] [kg] [p#] | fire build [woodtype] [kg] [p#] | fire tend [woodtype] [kg] [p#] | fire out"}
 	}
 }
 

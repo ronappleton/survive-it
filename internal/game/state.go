@@ -13,11 +13,14 @@ type RunState struct {
 	Players     []PlayerState
 	Weather     WeatherState
 
-	MetabolismProgress float64      `json:"metabolism_progress"`
-	WoodStock          []WoodStock  `json:"wood_stock,omitempty"`
-	Fire               FireState    `json:"fire"`
-	Shelter            ShelterState `json:"shelter"`
-	CraftedItems       []string     `json:"crafted_items,omitempty"`
+	MetabolismProgress float64         `json:"metabolism_progress"`
+	WoodStock          []WoodStock     `json:"wood_stock,omitempty"`
+	ResourceStock      []ResourceStock `json:"resource_stock,omitempty"`
+	Fire               FireState       `json:"fire"`
+	FirePrep           FirePrepState   `json:"fire_prep"`
+	Shelter            ShelterState    `json:"shelter"`
+	CraftedItems       []string        `json:"crafted_items,omitempty"`
+	FireAttemptCount   int             `json:"fire_attempt_count"`
 }
 
 func NewRunState(config RunConfig) (RunState, error) {

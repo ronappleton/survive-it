@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"slices"
 	"strconv"
@@ -184,6 +185,202 @@ func nutritionFromPer100g(per100 NutritionPer100g, grams int) NutritionTotals {
 	}
 }
 
+type ResourceSpec struct {
+	ID        string
+	Name      string
+	BiomeTags []string
+	Unit      string
+	GatherMin float64
+	GatherMax float64
+	Dryness   float64 // 0=soaked, 1=bone dry
+	Flammable bool
+}
+
+type ResourceStock struct {
+	ID   string  `json:"id"`
+	Name string  `json:"name"`
+	Unit string  `json:"unit"`
+	Qty  float64 `json:"qty"`
+}
+
+func ResourceCatalog() []ResourceSpec {
+	return []ResourceSpec{
+		{ID: "dry_grass", Name: "Dry Grass", BiomeTags: []string{"savanna", "badlands", "dry", "desert", "forest"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.85, Flammable: true},
+		{ID: "birch_bark", Name: "Birch Bark", BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, Unit: "sheet", GatherMin: 1, GatherMax: 3, Dryness: 0.8, Flammable: true},
+		{ID: "cedar_bark", Name: "Cedar Bark", BiomeTags: []string{"coast", "temperate_rainforest", "vancouver", "forest"}, Unit: "sheet", GatherMin: 1, GatherMax: 3, Dryness: 0.78, Flammable: true},
+		{ID: "inner_bark_fiber", Name: "Inner Bark Fiber", BiomeTags: []string{"forest", "boreal", "savanna", "jungle"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.72, Flammable: true},
+		{ID: "fatwood", Name: "Fatwood", BiomeTags: []string{"boreal", "forest", "mountain", "dry"}, Unit: "stick", GatherMin: 1, GatherMax: 3, Dryness: 0.9, Flammable: true},
+		{ID: "resin", Name: "Tree Resin", BiomeTags: []string{"forest", "boreal", "mountain", "jungle", "savanna"}, Unit: "lump", GatherMin: 1, GatherMax: 3, Dryness: 0.95, Flammable: true},
+		{ID: "punkwood", Name: "Punkwood", BiomeTags: []string{"forest", "boreal", "swamp", "wetlands"}, Unit: "chunk", GatherMin: 1, GatherMax: 3, Dryness: 0.55, Flammable: true},
+		{ID: "cattail_fluff", Name: "Cattail Fluff", BiomeTags: []string{"wetlands", "swamp", "delta", "lake"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.82, Flammable: true},
+		{ID: "dry_moss", Name: "Dry Moss", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain", "coast"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.76, Flammable: true},
+		{ID: "coconut_husk", Name: "Coconut Husk", BiomeTags: []string{"island", "coast", "tropical", "delta"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.74, Flammable: true},
+		{ID: "reed_bundle", Name: "Reed Bundle", BiomeTags: []string{"wetlands", "swamp", "delta", "lake", "river"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.58, Flammable: true},
+		{ID: "vine_fiber", Name: "Vine Fiber", BiomeTags: []string{"jungle", "tropical", "wetlands", "swamp"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.52, Flammable: true},
+		{ID: "stone_flake", Name: "Stone Flake", BiomeTags: []string{"mountain", "badlands", "desert", "river", "coast"}, Unit: "piece", GatherMin: 1, GatherMax: 4, Dryness: 1.0, Flammable: false},
+		{ID: "clay", Name: "Clay", BiomeTags: []string{"river", "delta", "wetlands", "swamp", "lake", "badlands", "coast"}, Unit: "kg", GatherMin: 0.4, GatherMax: 2.0, Dryness: 0.2, Flammable: false},
+		{ID: "charcoal", Name: "Charcoal", BiomeTags: []string{"forest", "savanna", "jungle", "mountain", "coast"}, Unit: "chunk", GatherMin: 1, GatherMax: 3, Dryness: 0.95, Flammable: true},
+		{ID: "drift_reed_fiber", Name: "Drift Reed Fiber", BiomeTags: []string{"delta", "coast", "island", "wetlands"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.5, Flammable: true},
+	}
+}
+
+func ResourcesForBiome(biome string) []ResourceSpec {
+	norm := normalizeBiome(biome)
+	catalog := ResourceCatalog()
+	out := make([]ResourceSpec, 0, len(catalog))
+	for _, resource := range catalog {
+		for _, tag := range resource.BiomeTags {
+			if strings.Contains(norm, normalizeBiome(tag)) {
+				out = append(out, resource)
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		// Always leave a fallback starter set.
+		for _, resource := range catalog {
+			if resource.ID == "dry_grass" || resource.ID == "inner_bark_fiber" || resource.ID == "stone_flake" || resource.ID == "clay" {
+				out = append(out, resource)
+			}
+		}
+	}
+	return out
+}
+
+func (s *RunState) addResourceStock(resource ResourceSpec, qty float64) {
+	if s == nil || qty <= 0 {
+		return
+	}
+	for i := range s.ResourceStock {
+		if s.ResourceStock[i].ID == resource.ID {
+			s.ResourceStock[i].Qty += qty
+			return
+		}
+	}
+	s.ResourceStock = append(s.ResourceStock, ResourceStock{
+		ID:   resource.ID,
+		Name: resource.Name,
+		Unit: resource.Unit,
+		Qty:  qty,
+	})
+}
+
+func (s *RunState) consumeResourceStock(id string, qty float64) bool {
+	if s == nil || qty <= 0 {
+		return false
+	}
+	for i := range s.ResourceStock {
+		if s.ResourceStock[i].ID != id || s.ResourceStock[i].Qty+1e-9 < qty {
+			continue
+		}
+		s.ResourceStock[i].Qty -= qty
+		if s.ResourceStock[i].Qty <= 0.001 {
+			s.ResourceStock = append(s.ResourceStock[:i], s.ResourceStock[i+1:]...)
+		}
+		return true
+	}
+	return false
+}
+
+func (s *RunState) resourceQty(id string) float64 {
+	if s == nil {
+		return 0
+	}
+	for _, stock := range s.ResourceStock {
+		if stock.ID == id {
+			return stock.Qty
+		}
+	}
+	return 0
+}
+
+func (s *RunState) findResourceForBiome(resourceID string) (ResourceSpec, bool) {
+	options := ResourcesForBiome(s.Scenario.Biome)
+	for _, resource := range options {
+		if resource.ID == resourceID {
+			return resource, true
+		}
+	}
+	for _, resource := range ResourceCatalog() {
+		if resource.ID == resourceID {
+			return resource, true
+		}
+	}
+	return ResourceSpec{}, false
+}
+
+func (s *RunState) CollectResource(playerID int, resourceID string, requestedQty float64) (ResourceSpec, float64, error) {
+	if s == nil {
+		return ResourceSpec{}, 0, fmt.Errorf("run state is nil")
+	}
+	if _, ok := s.playerByID(playerID); !ok {
+		return ResourceSpec{}, 0, fmt.Errorf("player %d not found", playerID)
+	}
+
+	resourceID = strings.ToLower(strings.TrimSpace(resourceID))
+	available := ResourcesForBiome(s.Scenario.Biome)
+	if len(available) == 0 {
+		return ResourceSpec{}, 0, fmt.Errorf("no resources available")
+	}
+
+	var resource ResourceSpec
+	found := false
+	if resourceID != "" && resourceID != "any" {
+		for _, entry := range available {
+			if entry.ID == resourceID {
+				resource = entry
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ResourceSpec{}, 0, fmt.Errorf("resource not available in biome: %s", resourceID)
+		}
+	} else {
+		rng := seededRNG(seedFromLabel(s.Config.Seed, fmt.Sprintf("collect:%s:%d:%d", normalizeBiome(s.Scenario.Biome), s.Day, playerID)))
+		resource = available[rng.IntN(len(available))]
+		found = true
+	}
+	if !found {
+		return ResourceSpec{}, 0, fmt.Errorf("resource selection failed")
+	}
+
+	qty := requestedQty
+	if qty <= 0 {
+		rng := seededRNG(seedFromLabel(s.Config.Seed, fmt.Sprintf("collect:%s:%d:%d:%s", normalizeBiome(s.Scenario.Biome), s.Day, playerID, resource.ID)))
+		qty = resource.GatherMin
+		if resource.GatherMax > resource.GatherMin {
+			qty += rng.Float64() * (resource.GatherMax - resource.GatherMin)
+		}
+	}
+	min := 0.1
+	if resource.Unit != "kg" {
+		min = 1
+		qty = math.Round(qty)
+	}
+	if qty < min {
+		qty = min
+	}
+
+	s.addResourceStock(resource, qty)
+	return resource, qty, nil
+}
+
+func formatResourceStock(stock []ResourceStock) string {
+	if len(stock) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(stock))
+	for _, item := range stock {
+		if item.Unit == "kg" {
+			parts = append(parts, fmt.Sprintf("%s %.1f%s", item.ID, item.Qty, item.Unit))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %.0f%s", item.ID, item.Qty, item.Unit))
+	}
+	return strings.Join(parts, ", ")
+}
+
 type WoodType string
 
 const (
@@ -249,38 +446,135 @@ func TreesForBiome(biome string) []TreeSpec {
 }
 
 type WoodStock struct {
-	Type WoodType `json:"type"`
-	Kg   float64  `json:"kg"`
+	Type    WoodType `json:"type"`
+	Kg      float64  `json:"kg"`
+	Wetness float64  `json:"wetness"` // 0 = fully dry, 1 = soaked
 }
 
 func (s *RunState) addWoodStock(woodType WoodType, kg float64) {
+	s.addWoodStockWithWetness(woodType, kg, 0.25)
+}
+
+func (s *RunState) addWoodStockWithWetness(woodType WoodType, kg float64, wetness float64) {
 	if s == nil || kg <= 0 {
 		return
 	}
+	wetness = clampFloat(wetness, 0, 1)
 	for i := range s.WoodStock {
 		if s.WoodStock[i].Type == woodType {
+			total := s.WoodStock[i].Kg + kg
+			if total > 0 {
+				s.WoodStock[i].Wetness = ((s.WoodStock[i].Wetness * s.WoodStock[i].Kg) + (wetness * kg)) / total
+			}
 			s.WoodStock[i].Kg += kg
 			return
 		}
 	}
-	s.WoodStock = append(s.WoodStock, WoodStock{Type: woodType, Kg: kg})
+	s.WoodStock = append(s.WoodStock, WoodStock{Type: woodType, Kg: kg, Wetness: wetness})
 }
 
 func (s *RunState) consumeWoodStock(woodType WoodType, kg float64) bool {
+	_, ok := s.consumeWoodStockDetailed(woodType, kg)
+	return ok
+}
+
+func (s *RunState) consumeWoodStockDetailed(woodType WoodType, kg float64) (float64, bool) {
 	if s == nil || kg <= 0 {
-		return false
+		return 0, false
 	}
 	for i := range s.WoodStock {
 		if s.WoodStock[i].Type != woodType || s.WoodStock[i].Kg+1e-9 < kg {
 			continue
 		}
+		wetness := s.WoodStock[i].Wetness
 		s.WoodStock[i].Kg -= kg
 		if s.WoodStock[i].Kg <= 0.001 {
 			s.WoodStock = append(s.WoodStock[:i], s.WoodStock[i+1:]...)
 		}
-		return true
+		return wetness, true
 	}
-	return false
+	return 0, false
+}
+
+func (s *RunState) consumeAnyWoodPreferDry(kg float64) (WoodType, float64, bool) {
+	if s == nil || kg <= 0 {
+		return "", 0, false
+	}
+	bestIndex := -1
+	bestWetness := 2.0
+	for i := range s.WoodStock {
+		if s.WoodStock[i].Kg+1e-9 < kg {
+			continue
+		}
+		if s.WoodStock[i].Wetness < bestWetness {
+			bestWetness = s.WoodStock[i].Wetness
+			bestIndex = i
+		}
+	}
+	if bestIndex < 0 {
+		return "", 0, false
+	}
+	chosen := s.WoodStock[bestIndex]
+	s.WoodStock[bestIndex].Kg -= kg
+	if s.WoodStock[bestIndex].Kg <= 0.001 {
+		s.WoodStock = append(s.WoodStock[:bestIndex], s.WoodStock[bestIndex+1:]...)
+	}
+	return chosen.Type, chosen.Wetness, true
+}
+
+func (s *RunState) averageWoodWetness(woodType WoodType) float64 {
+	if s == nil {
+		return 0.5
+	}
+	totalKg := 0.0
+	wetnessWeighted := 0.0
+	for _, stock := range s.WoodStock {
+		if woodType != "" && stock.Type != woodType {
+			continue
+		}
+		totalKg += stock.Kg
+		wetnessWeighted += stock.Wetness * stock.Kg
+	}
+	if totalKg <= 0 {
+		return 0.55
+	}
+	return clampFloat(wetnessWeighted/totalKg, 0, 1)
+}
+
+func (s *RunState) DryWood(playerID int, kg float64) (float64, error) {
+	if s == nil {
+		return 0, fmt.Errorf("run state is nil")
+	}
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return 0, fmt.Errorf("player %d not found", playerID)
+	}
+	if kg <= 0 {
+		kg = 1.0
+	}
+	remaining := kg
+	dried := 0.0
+	for i := range s.WoodStock {
+		if remaining <= 0 {
+			break
+		}
+		if s.WoodStock[i].Kg <= 0 {
+			continue
+		}
+		take := math.Min(s.WoodStock[i].Kg, remaining)
+		// Drying is partial per operation.
+		drop := 0.28 + (float64(clamp(player.Bushcraft, -3, 3)) * 0.03)
+		s.WoodStock[i].Wetness = clampFloat(s.WoodStock[i].Wetness-drop, 0, 1)
+		dried += take
+		remaining -= take
+	}
+	if dried <= 0 {
+		return 0, fmt.Errorf("no wood stock to dry")
+	}
+	player.Energy = clamp(player.Energy-clamp(int(math.Ceil(dried)), 1, 5), 0, 100)
+	player.Hydration = clamp(player.Hydration-clamp(int(math.Ceil(dried/2)), 1, 3), 0, 100)
+	refreshEffectBars(player)
+	return dried, nil
 }
 
 func (s *RunState) totalWoodKg() float64 {
@@ -318,8 +612,41 @@ func (s *RunState) GatherWood(playerID int, requestedKg float64) (TreeSpec, floa
 	if kg < 0.2 {
 		kg = 0.2
 	}
-	s.addWoodStock(tree.WoodType, kg)
+	s.addWoodStockWithWetness(tree.WoodType, kg, s.ambientWoodWetness())
 	return tree, kg, nil
+}
+
+func (s *RunState) ambientWoodWetness() float64 {
+	if s == nil {
+		return 0.4
+	}
+	wetness := 0.22
+	switch s.Weather.Type {
+	case WeatherRain:
+		wetness += 0.28
+	case WeatherHeavyRain:
+		wetness += 0.4
+	case WeatherStorm:
+		wetness += 0.48
+	case WeatherSnow:
+		wetness += 0.25
+	case WeatherBlizzard:
+		wetness += 0.35
+	case WeatherSunny:
+		wetness -= 0.08
+	case WeatherHeatwave:
+		wetness -= 0.14
+	}
+	if biomeIsTropicalWet(s.Scenario.Biome) {
+		wetness += 0.12
+	}
+	if biomeIsDesertOrDry(s.Scenario.Biome) {
+		wetness -= 0.1
+	}
+	if s.Weather.StreakDays > 1 && isRainyWeather(s.Weather.Type) {
+		wetness += float64(clamp(s.Weather.StreakDays-1, 0, 4)) * 0.06
+	}
+	return clampFloat(wetness, 0.02, 0.98)
 }
 
 type ShelterType string
@@ -446,9 +773,49 @@ type FireState struct {
 	HeatC         int      `json:"heat_c"`
 	FuelKg        float64  `json:"fuel_kg"`
 	LastTendedDay int      `json:"last_tended_day"`
+	LastMethod    string   `json:"last_method,omitempty"`
+}
+
+type FireMethod string
+
+const (
+	FireMethodFerro     FireMethod = "ferro"
+	FireMethodBowDrill  FireMethod = "bow_drill"
+	FireMethodHandDrill FireMethod = "hand_drill"
+)
+
+type FirePrepState struct {
+	TinderBundles   int     `json:"tinder_bundles"`
+	KindlingBundles int     `json:"kindling_bundles"`
+	FeatherSticks   int     `json:"feather_sticks"`
+	Embers          int     `json:"embers"`
+	TinderQuality   float64 `json:"tinder_quality"`
+	KindlingQuality float64 `json:"kindling_quality"`
+	FeatherQuality  float64 `json:"feather_quality"`
+}
+
+func FireMethods() []FireMethod {
+	return []FireMethod{FireMethodFerro, FireMethodBowDrill, FireMethodHandDrill}
+}
+
+func ParseFireMethod(raw string) FireMethod {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "ferro", "ferrorod", "firesteel":
+		return FireMethodFerro
+	case "bow", "bowdrill", "bow_drill":
+		return FireMethodBowDrill
+	case "hand", "handdrill", "hand_drill":
+		return FireMethodHandDrill
+	default:
+		return ""
+	}
 }
 
 func (s *RunState) StartFire(playerID int, woodType WoodType, kg float64) error {
+	return s.startFireWithMethod(playerID, woodType, kg, FireMethodFerro)
+}
+
+func (s *RunState) startFireWithMethod(playerID int, woodType WoodType, kg float64, method FireMethod) error {
 	if s == nil {
 		return fmt.Errorf("run state is nil")
 	}
@@ -459,11 +826,16 @@ func (s *RunState) StartFire(playerID int, woodType WoodType, kg float64) error 
 	if kg <= 0 {
 		kg = 1.0
 	}
-	if !s.consumeWoodStock(woodType, kg) {
+	wetness, ok := s.consumeWoodStockDetailed(woodType, kg)
+	if !ok {
 		return fmt.Errorf("not enough %s wood (need %.1fkg)", woodType, kg)
 	}
 
 	intensity, heat := fireMetrics(woodType, kg)
+	if wetness > 0.6 {
+		intensity = clamp(intensity-int(math.Round(wetness*8)), 6, 100)
+		heat = clamp(heat-int(math.Round(wetness*12)), 0, 120)
+	}
 	s.Fire = FireState{
 		Lit:           true,
 		WoodType:      woodType,
@@ -471,6 +843,7 @@ func (s *RunState) StartFire(playerID int, woodType WoodType, kg float64) error 
 		HeatC:         heat,
 		FuelKg:        kg,
 		LastTendedDay: s.Day,
+		LastMethod:    string(method),
 	}
 	player.Morale = clamp(player.Morale+3, 0, 100)
 	player.Energy = clamp(player.Energy-1, 0, 100)
@@ -495,12 +868,17 @@ func (s *RunState) TendFire(playerID int, kg float64, woodType WoodType) error {
 	if kg <= 0 {
 		kg = 0.8
 	}
-	if !s.consumeWoodStock(woodType, kg) {
+	wetness, ok := s.consumeWoodStockDetailed(woodType, kg)
+	if !ok {
 		return fmt.Errorf("not enough %s wood (need %.1fkg)", woodType, kg)
 	}
 
 	s.Fire.FuelKg += kg
 	intensityGain, heatGain := fireMetrics(woodType, kg)
+	if wetness > 0.6 {
+		intensityGain = clamp(intensityGain-int(math.Round(wetness*6)), 4, 100)
+		heatGain = clamp(heatGain-int(math.Round(wetness*10)), 0, 120)
+	}
 	s.Fire.Intensity = clamp(s.Fire.Intensity+intensityGain/2, 10, 100)
 	s.Fire.HeatC = clamp(s.Fire.HeatC+heatGain/3, 0, 120)
 	s.Fire.WoodType = woodType
@@ -515,6 +893,344 @@ func (s *RunState) ExtinguishFire() {
 		return
 	}
 	s.Fire = FireState{}
+}
+
+func (s *RunState) PrepareFireMaterial(playerID int, material string, count int) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("run state is nil")
+	}
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return 0, fmt.Errorf("player %d not found", playerID)
+	}
+	if count <= 0 {
+		count = 1
+	}
+	if count > 10 {
+		count = 10
+	}
+
+	switch strings.ToLower(strings.TrimSpace(material)) {
+	case "tinder":
+		created := 0
+		quality := 0.0
+		for i := 0; i < count; i++ {
+			resourceID, dryness, ok := s.consumeBestTinderResource()
+			if !ok {
+				break
+			}
+			created++
+			quality += dryness
+			if resourceID == "resin" || resourceID == "fatwood" {
+				quality += 0.1
+			}
+		}
+		if created == 0 {
+			return 0, fmt.Errorf("need tinder resources (collect dry_grass, birch_bark, cedar_bark, cattail_fluff, dry_moss, coconut_husk, inner_bark_fiber, resin, or fatwood)")
+		}
+		s.FirePrep.TinderBundles += created
+		s.FirePrep.TinderQuality = blendQuality(s.FirePrep.TinderQuality, s.FirePrep.TinderBundles-created, quality/float64(created), created)
+		player.Energy = clamp(player.Energy-created, 0, 100)
+		refreshEffectBars(player)
+		return created, nil
+	case "kindling":
+		created := 0
+		quality := 0.0
+		for i := 0; i < count; i++ {
+			_, wetness, ok := s.consumeAnyWoodPreferDry(0.22)
+			if !ok {
+				break
+			}
+			created++
+			quality += 1.0 - wetness
+		}
+		if created == 0 {
+			return 0, fmt.Errorf("need wood stock (use: wood gather)")
+		}
+		s.FirePrep.KindlingBundles += created
+		s.FirePrep.KindlingQuality = blendQuality(s.FirePrep.KindlingQuality, s.FirePrep.KindlingBundles-created, quality/float64(created), created)
+		player.Energy = clamp(player.Energy-created, 0, 100)
+		player.Hydration = clamp(player.Hydration-created/2, 0, 100)
+		refreshEffectBars(player)
+		return created, nil
+	case "feather", "feathersticks", "feather_sticks":
+		created := 0
+		quality := 0.0
+		for i := 0; i < count; i++ {
+			_, wetness, ok := s.consumeAnyWoodPreferDry(0.18)
+			if !ok {
+				break
+			}
+			created++
+			quality += 1.0 - wetness
+		}
+		if created == 0 {
+			return 0, fmt.Errorf("need dry-ish wood stock for feather sticks")
+		}
+		s.FirePrep.FeatherSticks += created
+		s.FirePrep.FeatherQuality = blendQuality(s.FirePrep.FeatherQuality, s.FirePrep.FeatherSticks-created, quality/float64(created), created)
+		player.Energy = clamp(player.Energy-created, 0, 100)
+		refreshEffectBars(player)
+		return created, nil
+	default:
+		return 0, fmt.Errorf("unknown material: %s (use tinder|kindling|feather)", material)
+	}
+}
+
+func blendQuality(previous float64, previousCount int, next float64, nextCount int) float64 {
+	total := previousCount + nextCount
+	if total <= 0 {
+		return 0
+	}
+	return clampFloat(((previous*float64(previousCount))+(next*float64(nextCount)))/float64(total), 0, 1)
+}
+
+func (s *RunState) consumeBestTinderResource() (string, float64, bool) {
+	if s == nil || len(s.ResourceStock) == 0 {
+		return "", 0, false
+	}
+	bestIndex := -1
+	bestDryness := -1.0
+	for i := range s.ResourceStock {
+		spec, ok := s.findResourceForBiome(s.ResourceStock[i].ID)
+		if !ok || !spec.Flammable {
+			continue
+		}
+		if s.ResourceStock[i].Qty < 1 {
+			continue
+		}
+		if spec.Dryness > bestDryness {
+			bestDryness = spec.Dryness
+			bestIndex = i
+		}
+	}
+	if bestIndex < 0 {
+		return "", 0, false
+	}
+	id := s.ResourceStock[bestIndex].ID
+	s.ResourceStock[bestIndex].Qty -= 1
+	if s.ResourceStock[bestIndex].Qty <= 0.001 {
+		s.ResourceStock = append(s.ResourceStock[:bestIndex], s.ResourceStock[bestIndex+1:]...)
+	}
+	return id, clampFloat(bestDryness, 0, 1), true
+}
+
+func (s *RunState) TryCreateEmber(playerID int, method FireMethod, preferredWood WoodType) (float64, bool, error) {
+	if s == nil {
+		return 0, false, fmt.Errorf("run state is nil")
+	}
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return 0, false, fmt.Errorf("player %d not found", playerID)
+	}
+	if method != FireMethodBowDrill && method != FireMethodHandDrill {
+		return 0, false, fmt.Errorf("ember method must be bow_drill or hand_drill")
+	}
+	if err := s.ensureFireMethodComponents(method); err != nil {
+		return 0, false, err
+	}
+
+	chance := s.emberChance(method, *player, preferredWood)
+	success := s.fireRoll("ember", method, playerID) <= chance
+	s.FireAttemptCount++
+
+	// Attempt consumes some prep regardless of result.
+	if s.FirePrep.TinderBundles > 0 {
+		s.FirePrep.TinderBundles--
+	}
+	if s.FirePrep.KindlingBundles > 0 {
+		s.FirePrep.KindlingBundles--
+	}
+	if method == FireMethodBowDrill && s.FirePrep.FeatherSticks > 0 {
+		s.FirePrep.FeatherSticks--
+	}
+	player.Energy = clamp(player.Energy-2, 0, 100)
+	player.Hydration = clamp(player.Hydration-1, 0, 100)
+	if success {
+		s.FirePrep.Embers++
+		player.Morale = clamp(player.Morale+2, 0, 100)
+	} else {
+		player.Morale = clamp(player.Morale-1, 0, 100)
+	}
+	refreshEffectBars(player)
+
+	return chance, success, nil
+}
+
+func (s *RunState) ensureFireMethodComponents(method FireMethod) error {
+	has := func(id string) bool { return slices.Contains(s.CraftedItems, id) }
+	switch method {
+	case FireMethodBowDrill:
+		required := []string{"bow_drill_spindle", "bow_drill_hearth_board", "bow_drill_bow", "bearing_block"}
+		for _, item := range required {
+			if !has(item) {
+				return fmt.Errorf("missing component: %s (craft it first)", item)
+			}
+		}
+	case FireMethodHandDrill:
+		required := []string{"hand_drill_spindle", "hand_drill_hearth_board"}
+		for _, item := range required {
+			if !has(item) {
+				return fmt.Errorf("missing component: %s (craft it first)", item)
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported fire method: %s", method)
+	}
+	return nil
+}
+
+func (s *RunState) emberChance(method FireMethod, player PlayerState, preferredWood WoodType) float64 {
+	base := 0.34
+	switch method {
+	case FireMethodBowDrill:
+		base = 0.46
+	case FireMethodHandDrill:
+		base = 0.31
+	}
+
+	chance := base
+	chance += float64(clamp(player.Bushcraft, -3, 3)) * 0.07
+	chance += float64(clamp(player.Endurance, -3, 3)) * 0.03
+	chance += float64(clamp(player.Mental, -3, 3)) * 0.02
+
+	if s.FirePrep.TinderBundles > 0 {
+		chance += 0.08 + (s.FirePrep.TinderQuality * 0.08)
+	} else {
+		chance -= 0.1
+	}
+	if s.FirePrep.KindlingBundles > 0 {
+		chance += 0.05 + (s.FirePrep.KindlingQuality * 0.08)
+	} else {
+		chance -= 0.08
+	}
+	if s.FirePrep.FeatherSticks > 0 {
+		chance += 0.04 + (s.FirePrep.FeatherQuality * 0.06)
+	}
+
+	wetness := s.averageWoodWetness(preferredWood)
+	chance -= wetness * 0.38
+
+	switch s.Weather.Type {
+	case WeatherRain:
+		chance -= 0.12
+	case WeatherHeavyRain:
+		chance -= 0.2
+	case WeatherStorm:
+		chance -= 0.28
+	case WeatherSnow:
+		chance -= 0.14
+	case WeatherBlizzard:
+		chance -= 0.24
+	case WeatherSunny:
+		chance += 0.04
+	case WeatherHeatwave:
+		chance += 0.06
+	}
+
+	if method == FireMethodHandDrill && s.Weather.TemperatureC <= 2 {
+		chance -= 0.08
+	}
+	if method == FireMethodBowDrill && s.Weather.TemperatureC <= 2 {
+		chance -= 0.04
+	}
+
+	if preferredWood == WoodTypeResinous {
+		chance += 0.05
+	}
+	if preferredWood == WoodTypeDriftwood {
+		chance -= 0.06
+	}
+
+	return clampFloat(chance, 0.03, 0.95)
+}
+
+func (s *RunState) IgniteFromEmber(playerID int, woodType WoodType, kg float64) (float64, bool, error) {
+	if s == nil {
+		return 0, false, fmt.Errorf("run state is nil")
+	}
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return 0, false, fmt.Errorf("player %d not found", playerID)
+	}
+	if s.FirePrep.Embers < 1 {
+		return 0, false, fmt.Errorf("no ember ready (use: fire ember bow|hand)")
+	}
+	if s.FirePrep.TinderBundles < 1 || s.FirePrep.KindlingBundles < 1 {
+		return 0, false, fmt.Errorf("need at least 1 tinder bundle and 1 kindling bundle (use: fire prep ...)")
+	}
+	if kg <= 0 {
+		kg = 1.0
+	}
+	if woodType == "" {
+		if len(s.WoodStock) > 0 {
+			woodType = s.WoodStock[0].Type
+		} else {
+			woodType = WoodTypeHardwood
+		}
+	}
+
+	chance := 0.62
+	chance += s.FirePrep.TinderQuality * 0.12
+	chance += s.FirePrep.KindlingQuality * 0.12
+	chance += s.FirePrep.FeatherQuality * 0.08
+	if s.FirePrep.FeatherSticks > 0 {
+		chance += 0.06
+	}
+	if s.resourceQty("resin") >= 1 {
+		chance += 0.05
+		_ = s.consumeResourceStock("resin", 1)
+	}
+	wetness := s.averageWoodWetness(woodType)
+	chance -= wetness * 0.42
+	switch s.Weather.Type {
+	case WeatherRain:
+		chance -= 0.09
+	case WeatherHeavyRain:
+		chance -= 0.16
+	case WeatherStorm:
+		chance -= 0.24
+	case WeatherSnow:
+		chance -= 0.1
+	case WeatherBlizzard:
+		chance -= 0.18
+	case WeatherSunny:
+		chance += 0.04
+	}
+	chance += float64(clamp(player.Bushcraft, -3, 3)) * 0.04
+	chance = clampFloat(chance, 0.05, 0.95)
+
+	success := s.fireRoll("ignite", FireMethodBowDrill, playerID) <= chance
+	s.FireAttemptCount++
+
+	// Consume prep for every ignition attempt.
+	s.FirePrep.Embers = maxInt(0, s.FirePrep.Embers-1)
+	s.FirePrep.TinderBundles = maxInt(0, s.FirePrep.TinderBundles-1)
+	s.FirePrep.KindlingBundles = maxInt(0, s.FirePrep.KindlingBundles-1)
+	if s.FirePrep.FeatherSticks > 0 {
+		s.FirePrep.FeatherSticks--
+	}
+
+	player.Energy = clamp(player.Energy-1, 0, 100)
+	player.Hydration = clamp(player.Hydration-1, 0, 100)
+
+	if !success {
+		player.Morale = clamp(player.Morale-1, 0, 100)
+		refreshEffectBars(player)
+		return chance, false, nil
+	}
+
+	if err := s.startFireWithMethod(playerID, woodType, kg, FireMethodBowDrill); err != nil {
+		return chance, false, err
+	}
+	refreshEffectBars(player)
+	return chance, true, nil
+}
+
+func (s *RunState) fireRoll(stage string, method FireMethod, playerID int) float64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%d:%d:%d:%s:%s:%d", s.Config.Seed, s.Day, playerID, stage, method, s.FireAttemptCount)))
+	return float64(h.Sum64()%10000) / 10000.0
 }
 
 func fireMetrics(woodType WoodType, kg float64) (intensity int, heatC int) {
@@ -564,6 +1280,17 @@ func (s *RunState) progressCampState() {
 		if s.Shelter.Durability == 0 {
 			s.Shelter = ShelterState{}
 		}
+	}
+
+	// Prepared fire materials can degrade in persistent wet weather.
+	if isRainyWeather(s.Weather.Type) || s.Weather.Type == WeatherSnow || s.Weather.Type == WeatherBlizzard {
+		wetHit := 0.08
+		if s.Shelter.Type != "" && s.Shelter.Durability > 0 {
+			wetHit *= 0.45
+		}
+		s.FirePrep.TinderQuality = clampFloat(s.FirePrep.TinderQuality-wetHit, 0, 1)
+		s.FirePrep.KindlingQuality = clampFloat(s.FirePrep.KindlingQuality-wetHit*0.8, 0, 1)
+		s.FirePrep.FeatherQuality = clampFloat(s.FirePrep.FeatherQuality-wetHit*0.7, 0, 1)
 	}
 
 	if !s.Fire.Lit {
@@ -630,29 +1357,71 @@ func (s *RunState) campImpactForDay() statDelta {
 }
 
 type CraftableSpec struct {
-	ID              string
-	Name            string
-	BiomeTags       []string
-	Description     string
-	MinBushcraft    int
-	RequiresFire    bool
-	RequiresShelter bool
-	WoodKg          float64
-	Effects         statDelta
+	ID                string
+	Name              string
+	BiomeTags         []string
+	Description       string
+	MinBushcraft      int
+	RequiresFire      bool
+	RequiresShelter   bool
+	WoodKg            float64
+	RequiresItems     []string
+	RequiresResources []ResourceRequirement
+	Effects           statDelta
+}
+
+type ResourceRequirement struct {
+	ID  string
+	Qty float64
 }
 
 func CraftableCatalog() []CraftableSpec {
 	return []CraftableSpec{
+		// Fire method components.
+		{ID: "bow_drill_spindle", Name: "Bow Drill Spindle", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Straight spindle for bow drill fire set.", MinBushcraft: 1, WoodKg: 0.2, Effects: statDelta{Morale: 1}},
+		{ID: "bow_drill_hearth_board", Name: "Bow Drill Hearth Board", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Hearth board for receiving ember dust.", MinBushcraft: 1, WoodKg: 0.25, Effects: statDelta{Morale: 1}},
+		{ID: "bow_drill_bow", Name: "Bow Drill Bow", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Flexible bow used to spin spindle.", MinBushcraft: 1, WoodKg: 0.3, RequiresResources: []ResourceRequirement{{ID: "vine_fiber", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "bearing_block", Name: "Bearing Block", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Handhold block reducing friction loss.", MinBushcraft: 1, WoodKg: 0.18, Effects: statDelta{Energy: 1}},
+		{ID: "hand_drill_spindle", Name: "Hand Drill Spindle", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Long spindle for hand drill method.", MinBushcraft: 1, WoodKg: 0.2, Effects: statDelta{Morale: 1}},
+		{ID: "hand_drill_hearth_board", Name: "Hand Drill Hearth Board", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Hearth board for hand drill ember slot.", MinBushcraft: 1, WoodKg: 0.22, Effects: statDelta{Morale: 1}},
+
+		// Tree and wood products.
+		{ID: "tarp_stakes", Name: "Tarp Stakes", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands"}, Description: "Sharpened stakes for faster shelter setup.", MinBushcraft: 0, WoodKg: 0.25, Effects: statDelta{Energy: 1}},
+		{ID: "ridge_pole_kit", Name: "Ridge Pole Kit", BiomeTags: []string{"forest", "mountain", "boreal", "coast", "jungle"}, Description: "Pre-cut poles for lean-to and tarp frames.", MinBushcraft: 1, WoodKg: 1.1, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "shelter_lattice", Name: "Shelter Lattice", BiomeTags: []string{"forest", "jungle", "wetlands", "swamp", "coast"}, Description: "Interlaced branchwork to improve walling.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.2, Effects: statDelta{Energy: 2, Morale: 1}},
+		{ID: "fish_spear_shaft", Name: "Fish Spear Shaft", BiomeTags: []string{"delta", "river", "lake", "coast", "wetlands", "jungle"}, Description: "Balanced shaft for spear fishing builds.", MinBushcraft: 1, WoodKg: 0.4, Effects: statDelta{Energy: 1}},
+		{ID: "fish_gorge_hooks", Name: "Fish Gorge Hooks", BiomeTags: []string{"river", "lake", "delta", "coast", "wetlands"}, Description: "Carved gorge hooks for passive fish lines.", MinBushcraft: 2, WoodKg: 0.18, RequiresResources: []ResourceRequirement{{ID: "inner_bark_fiber", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "trap_trigger_set", Name: "Trap Trigger Set", BiomeTags: []string{"forest", "boreal", "mountain", "savanna", "badlands"}, Description: "Notched trigger kit for snare systems.", MinBushcraft: 2, WoodKg: 0.45, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "carving_wedges", Name: "Carving Wedges", BiomeTags: []string{"forest", "mountain", "coast", "boreal", "savanna"}, Description: "Simple wedges to split branches cleanly.", MinBushcraft: 1, WoodKg: 0.3, Effects: statDelta{Energy: 1}},
+		{ID: "pack_frame", Name: "Pack Frame", BiomeTags: []string{"forest", "mountain", "boreal", "savanna", "badlands"}, Description: "Frame for carrying wood and game loads.", MinBushcraft: 2, WoodKg: 1.4, RequiresResources: []ResourceRequirement{{ID: "inner_bark_fiber", Qty: 1}}, Effects: statDelta{Energy: 2, Morale: 1}},
+		{ID: "digging_stick", Name: "Digging Stick", BiomeTags: []string{"desert", "dry", "savanna", "forest", "jungle", "badlands"}, Description: "Hardened digging tool for roots and clay.", MinBushcraft: 0, WoodKg: 0.35, Effects: statDelta{Energy: 1}},
+		{ID: "bark_container", Name: "Bark Container", BiomeTags: []string{"forest", "boreal", "coast", "mountain", "jungle"}, Description: "Folded bark container for transport and storage.", MinBushcraft: 1, WoodKg: 0.2, RequiresResources: []ResourceRequirement{{ID: "birch_bark", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "wooden_cup", Name: "Wooden Cup", BiomeTags: []string{"forest", "boreal", "mountain", "coast", "savanna"}, Description: "Simple carved cup for hot liquids.", MinBushcraft: 1, WoodKg: 0.3, Effects: statDelta{Morale: 1}},
+		{ID: "wooden_spoon", Name: "Wooden Spoon", BiomeTags: []string{"forest", "boreal", "mountain", "coast", "jungle"}, Description: "Carved spoon improving camp meal routine.", MinBushcraft: 0, WoodKg: 0.08, Effects: statDelta{Morale: 1}},
+		{ID: "char_box", Name: "Char Box", BiomeTags: []string{"forest", "boreal", "mountain", "coast", "savanna", "badlands"}, Description: "Container for producing charred tinder.", MinBushcraft: 2, RequiresFire: true, WoodKg: 0.4, RequiresResources: []ResourceRequirement{{ID: "charcoal", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "resin_torch", Name: "Resin Torch", BiomeTags: []string{"forest", "boreal", "mountain", "jungle", "savanna"}, Description: "Hand torch for night movement and signaling.", MinBushcraft: 1, WoodKg: 0.35, RequiresResources: []ResourceRequirement{{ID: "resin", Qty: 1}, {ID: "inner_bark_fiber", Qty: 1}}, Effects: statDelta{Morale: 2}},
+		{ID: "pitch_glue", Name: "Pitch Glue", BiomeTags: []string{"forest", "boreal", "mountain", "savanna", "jungle"}, Description: "Sticky resin pitch for hafting repairs.", MinBushcraft: 2, RequiresFire: true, WoodKg: 0.2, RequiresResources: []ResourceRequirement{{ID: "resin", Qty: 1}, {ID: "charcoal", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "arrow_shafts", Name: "Arrow Shafts", BiomeTags: []string{"forest", "savanna", "badlands", "mountain", "coast"}, Description: "Shaft bundle for bow maintenance.", MinBushcraft: 2, WoodKg: 0.35, RequiresItems: []string{"bow_stave"}, Effects: statDelta{Morale: 1}},
+		{ID: "bow_stave", Name: "Bow Stave", BiomeTags: []string{"forest", "savanna", "badlands", "mountain", "coast"}, Description: "Seasoned stave for primitive bow builds.", MinBushcraft: 2, WoodKg: 0.9, RequiresResources: []ResourceRequirement{{ID: "inner_bark_fiber", Qty: 1}}, Effects: statDelta{Morale: 2}},
+		{ID: "walking_staff", Name: "Walking Staff", BiomeTags: []string{"forest", "mountain", "badlands", "savanna", "coast"}, Description: "Staff improves rough-terrain movement confidence.", MinBushcraft: 0, WoodKg: 0.45, Effects: statDelta{Energy: 1}},
+		{ID: "split_basket", Name: "Split-Wood Basket", BiomeTags: []string{"forest", "boreal", "wetlands", "delta", "jungle"}, Description: "Basket for carrying food and gathered supplies.", MinBushcraft: 2, WoodKg: 0.9, RequiresResources: []ResourceRequirement{{ID: "reed_bundle", Qty: 1}}, Effects: statDelta{Morale: 1}},
+
+		// Existing camp utility builds, expanded.
 		{ID: "tripod", Name: "Cooking Tripod", BiomeTags: []string{"forest", "coast", "mountain", "jungle"}, Description: "Stabilizes cooking over open flame.", MinBushcraft: 0, RequiresFire: true, WoodKg: 0.8, Effects: statDelta{Morale: 1}},
-		{ID: "rain_catcher", Name: "Rain Catcher", BiomeTags: []string{"jungle", "wetlands", "coast", "island", "forest"}, Description: "Collects safer water during rain events.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 0.6, Effects: statDelta{Hydration: 2, Morale: 1}},
+		{ID: "rain_catcher", Name: "Rain Catcher", BiomeTags: []string{"jungle", "wetlands", "coast", "island", "forest"}, Description: "Collects safer water during rain events.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 0.6, RequiresResources: []ResourceRequirement{{ID: "reed_bundle", Qty: 1}}, Effects: statDelta{Hydration: 2, Morale: 1}},
 		{ID: "smoke_rack", Name: "Smoke Rack", BiomeTags: []string{"forest", "coast", "savanna", "jungle"}, Description: "Improves food preservation and morale.", MinBushcraft: 1, RequiresFire: true, WoodKg: 1.2, Effects: statDelta{Energy: 1, Morale: 2}},
-		{ID: "fish_trap", Name: "Fish Trap", BiomeTags: []string{"delta", "river", "lake", "swamp", "coast"}, Description: "Passive fish capture near water channels.", MinBushcraft: 1, WoodKg: 0.7, Effects: statDelta{Energy: 1}},
+		{ID: "fish_trap", Name: "Fish Trap", BiomeTags: []string{"delta", "river", "lake", "swamp", "coast"}, Description: "Passive fish capture near water channels.", MinBushcraft: 1, WoodKg: 0.7, RequiresResources: []ResourceRequirement{{ID: "vine_fiber", Qty: 1}}, Effects: statDelta{Energy: 1}},
 		{ID: "windbreak", Name: "Windbreak Wall", BiomeTags: []string{"arctic", "subarctic", "mountain", "badlands", "coast"}, Description: "Reduces nightly wind chill exposure.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.0, Effects: statDelta{Energy: 2, Morale: 1}},
 		{ID: "charcoal_bed", Name: "Charcoal Bed", BiomeTags: []string{"desert", "dry", "savanna", "badlands"}, Description: "Retains heat after sunset in dry zones.", MinBushcraft: 2, RequiresFire: true, WoodKg: 1.4, Effects: statDelta{Energy: 2}},
-		{ID: "bug_smudge", Name: "Bug Smudge Fire", BiomeTags: []string{"jungle", "swamp", "wetlands", "tropical", "island"}, Description: "Smoky fire that repels insects around camp.", MinBushcraft: 1, RequiresFire: true, WoodKg: 0.5, Effects: statDelta{Morale: 2}},
+		{ID: "bug_smudge", Name: "Bug Smudge Fire", BiomeTags: []string{"jungle", "swamp", "wetlands", "tropical", "island"}, Description: "Smoky fire that repels insects around camp.", MinBushcraft: 1, RequiresFire: true, WoodKg: 0.5, RequiresResources: []ResourceRequirement{{ID: "resin", Qty: 1}}, Effects: statDelta{Morale: 2}},
 		{ID: "snow_melt_station", Name: "Snow Melt Station", BiomeTags: []string{"arctic", "subarctic", "tundra", "winter"}, Description: "Converts snow to usable water efficiently.", MinBushcraft: 1, RequiresFire: true, WoodKg: 0.9, Effects: statDelta{Hydration: 2}},
-		{ID: "raised_bed", Name: "Raised Bed", BiomeTags: []string{"swamp", "wetlands", "jungle", "forest"}, Description: "Improves overnight rest by lifting off damp ground.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 1.1, Effects: statDelta{Energy: 2, Morale: 1}},
+		{ID: "raised_bed", Name: "Raised Bed", BiomeTags: []string{"swamp", "wetlands", "jungle", "forest"}, Description: "Improves overnight rest by lifting off damp ground.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 1.1, RequiresResources: []ResourceRequirement{{ID: "reed_bundle", Qty: 1}}, Effects: statDelta{Energy: 2, Morale: 1}},
 		{ID: "signal_beacon", Name: "Signal Beacon", BiomeTags: []string{"coast", "island", "mountain", "badlands", "savanna"}, Description: "High-visibility signal structure.", MinBushcraft: 0, RequiresFire: true, WoodKg: 1.3, Effects: statDelta{Morale: 2}},
+
+		// Clay-enabled builds for biomes where clay is available.
+		{ID: "clay_pot", Name: "Clay Pot", BiomeTags: []string{"river", "delta", "wetlands", "swamp", "lake", "badlands", "coast"}, Description: "Fire-hardened pot for boiling and stewing.", MinBushcraft: 2, RequiresFire: true, WoodKg: 0.4, RequiresResources: []ResourceRequirement{{ID: "clay", Qty: 1.2}}, Effects: statDelta{Hydration: 2, Morale: 1}},
+		{ID: "clay_cook_plate", Name: "Clay Cook Plate", BiomeTags: []string{"river", "delta", "wetlands", "swamp", "lake", "badlands", "coast"}, Description: "Flat fired clay plate for roasting and drying food.", MinBushcraft: 2, RequiresFire: true, WoodKg: 0.3, RequiresResources: []ResourceRequirement{{ID: "clay", Qty: 1.0}}, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "clay_heat_core", Name: "Clay Heat Core", BiomeTags: []string{"river", "delta", "wetlands", "swamp", "lake", "badlands", "coast"}, Description: "Baked clay core to retain heat into the night.", MinBushcraft: 3, RequiresFire: true, RequiresShelter: true, WoodKg: 0.6, RequiresResources: []ResourceRequirement{{ID: "clay", Qty: 1.5}}, Effects: statDelta{Energy: 2}},
 	}
 }
 
@@ -711,6 +1480,16 @@ func (s *RunState) CraftItem(playerID int, craftID string) (CraftableSpec, error
 	if chosen.RequiresShelter && (s.Shelter.Type == "" || s.Shelter.Durability <= 0) {
 		return CraftableSpec{}, fmt.Errorf("requires active shelter")
 	}
+	for _, needed := range chosen.RequiresItems {
+		if !slices.Contains(s.CraftedItems, needed) {
+			return CraftableSpec{}, fmt.Errorf("requires crafted item: %s", needed)
+		}
+	}
+	for _, needed := range chosen.RequiresResources {
+		if s.resourceQty(needed.ID) < needed.Qty {
+			return CraftableSpec{}, fmt.Errorf("requires resource: %s %.1f", needed.ID, needed.Qty)
+		}
+	}
 	if chosen.WoodKg > 0 {
 		woodType := s.Fire.WoodType
 		if woodType == "" && len(s.WoodStock) > 0 {
@@ -722,6 +1501,9 @@ func (s *RunState) CraftItem(playerID int, craftID string) (CraftableSpec, error
 		if !s.consumeWoodStock(woodType, chosen.WoodKg) {
 			return CraftableSpec{}, fmt.Errorf("needs %.1fkg wood", chosen.WoodKg)
 		}
+	}
+	for _, needed := range chosen.RequiresResources {
+		_ = s.consumeResourceStock(needed.ID, needed.Qty)
 	}
 
 	if !slices.Contains(s.CraftedItems, chosen.ID) {
@@ -758,9 +1540,18 @@ func formatWoodStock(stock []WoodStock) string {
 	}
 	parts := make([]string, 0, len(stock))
 	for _, item := range stock {
-		parts = append(parts, fmt.Sprintf("%s %.1fkg", item.Type, item.Kg))
+		parts = append(parts, fmt.Sprintf("%s %.1fkg (%d%% wet)", item.Type, item.Kg, int(math.Round(item.Wetness*100))))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func formatFirePrep(prep FirePrepState) string {
+	return fmt.Sprintf("tinder:%d (q%.2f) kindling:%d (q%.2f) feather:%d (q%.2f) embers:%d",
+		prep.TinderBundles, prep.TinderQuality,
+		prep.KindlingBundles, prep.KindlingQuality,
+		prep.FeatherSticks, prep.FeatherQuality,
+		prep.Embers,
+	)
 }
 
 func parseOptionalPlayerAndNumber(tokens []string) (playerID int, value float64, valueSet bool, rest []string) {
