@@ -172,11 +172,18 @@ func TestRunCatchAndConsumeFlow(t *testing.T) {
 func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T) {
 	catalog := AnimalCatalog()
 	ids := map[string]bool{}
-	fishCount := 0
+	landCount := 0
+	waterCount := 0
+	airCount := 0
 	for _, animal := range catalog {
 		ids[animal.ID] = true
-		if animal.Domain == AnimalDomainWater {
-			fishCount++
+		switch animal.Domain {
+		case AnimalDomainLand:
+			landCount++
+		case AnimalDomainWater:
+			waterCount++
+		case AnimalDomainAir:
+			airCount++
 		}
 	}
 
@@ -193,6 +200,9 @@ func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T)
 		"python",
 		"scorpion",
 		"tarantula",
+		"black_bear",
+		"swordfish",
+		"albatross",
 	}
 	for _, id := range required {
 		if !ids[id] {
@@ -200,8 +210,14 @@ func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T)
 		}
 	}
 
-	if fishCount < 15 {
-		t.Fatalf("expected expanded fish catalog, got only %d water species", fishCount)
+	if waterCount < 30 {
+		t.Fatalf("expected expanded fish/water catalog, got only %d water species", waterCount)
+	}
+	if landCount < 40 {
+		t.Fatalf("expected expanded land catalog, got only %d land species", landCount)
+	}
+	if airCount < 18 {
+		t.Fatalf("expected expanded air/bird catalog, got only %d air species", airCount)
 	}
 
 	snakeCount := 0
