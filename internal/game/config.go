@@ -47,7 +47,7 @@ func (c RunConfig) Validate() error {
 	found := c.ScenarioID == ScenarioRandomID
 
 	if !found {
-		for _, scenario := range BuiltInScenarios() {
+		for _, scenario := range AllScenarios() {
 			if scenario.ID == c.ScenarioID {
 				found = true
 				break

@@ -60,3 +60,24 @@ type SeasonSet struct {
 	ID     SeasonSetID
 	Phases []SeasonPhase
 }
+
+var externalScenarios []Scenario
+
+func SetExternalScenarios(scenarios []Scenario) {
+	externalScenarios = append([]Scenario(nil), scenarios...)
+}
+
+func ExternalScenarios() []Scenario {
+	return append([]Scenario(nil), externalScenarios...)
+}
+
+func AllScenarios() []Scenario {
+	base := BuiltInScenarios()
+	if len(externalScenarios) == 0 {
+		return base
+	}
+	out := make([]Scenario, 0, len(base)+len(externalScenarios))
+	out = append(out, base...)
+	out = append(out, externalScenarios...)
+	return out
+}

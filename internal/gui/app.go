@@ -37,6 +37,8 @@ const (
 	screenSetup
 	screenScenarioPicker
 	screenPlayerConfig
+	screenKitPicker
+	screenScenarioBuilder
 	screenLoad
 	screenRun
 )
@@ -46,6 +48,7 @@ type menuAction int
 const (
 	actionStart menuAction = iota
 	actionLoad
+	actionScenarioBuilder
 	actionQuit
 )
 
@@ -102,10 +105,13 @@ type gameUI struct {
 
 	menuCursor int
 
-	setup setupState
-	pick  scenarioPickerState
-	pcfg  playerConfigState
-	load  loadState
+	setup           setupState
+	pick            scenarioPickerState
+	pcfg            playerConfigState
+	kit             kitPickerState
+	sb              scenarioBuilderState
+	load            loadState
+	customScenarios []game.Scenario
 
 	run         *game.RunState
 	runMessages []string
@@ -145,6 +151,9 @@ func newGameUI(cfg AppConfig) *gameUI {
 			RunDays:     30,
 		},
 	}
+	custom, _ := loadCustomScenarios(defaultCustomScenariosFile)
+	ui.customScenarios = custom
+	game.SetExternalScenarios(custom)
 	ui.syncScenarioSelection()
 	ui.lastTick = time.Now()
 	return ui
@@ -189,6 +198,10 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updateScenarioPicker()
 	case screenPlayerConfig:
 		ui.updatePlayerConfig()
+	case screenKitPicker:
+		ui.updateKitPicker()
+	case screenScenarioBuilder:
+		ui.updateScenarioBuilder()
 	case screenLoad:
 		ui.updateLoad()
 	case screenRun:
@@ -206,6 +219,10 @@ func (ui *gameUI) draw() {
 		ui.drawScenarioPicker()
 	case screenPlayerConfig:
 		ui.drawPlayerConfig()
+	case screenKitPicker:
+		ui.drawKitPicker()
+	case screenScenarioBuilder:
+		ui.drawScenarioBuilder()
 	case screenLoad:
 		ui.drawLoad()
 	case screenRun:
@@ -230,6 +247,8 @@ func (ui *gameUI) updateMenu() {
 			ui.screen = screenSetup
 		case actionLoad:
 			ui.openLoad(false)
+		case actionScenarioBuilder:
+			ui.openScenarioBuilder()
 		case actionQuit:
 			ui.quit = true
 		}
@@ -270,6 +289,7 @@ func (ui *gameUI) menuItems() []menuItem {
 	return []menuItem{
 		{Label: "Start Run", Action: actionStart},
 		{Label: "Load Run", Action: actionLoad},
+		{Label: "Scenario Builder", Action: actionScenarioBuilder},
 		{Label: "Quit", Action: actionQuit},
 	}
 }
@@ -280,10 +300,10 @@ func (ui *gameUI) updateSetup() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 6)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 7)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 6)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 7)
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeft) {
@@ -302,6 +322,8 @@ func (ui *gameUI) updateSetup() {
 			ui.preparePlayerConfig()
 			ui.screen = screenPlayerConfig
 		case 5:
+			ui.openScenarioBuilder()
+		case 6:
 			ui.screen = screenMenu
 		}
 	}
@@ -342,6 +364,7 @@ func (ui *gameUI) drawSetup() {
 		{"Players", fmt.Sprintf("%d", ui.setup.PlayerCount)},
 		{"Run Length (days)", fmt.Sprintf("%d", ui.setup.RunDays)},
 		{"Configure Players", "Enter"},
+		{"Scenario Builder", "Enter"},
 		{"Back", "Enter"},
 	}
 
@@ -464,10 +487,10 @@ func (ui *gameUI) updatePlayerConfig() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor+1, 13)
+		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor+1, 14)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor-1, 13)
+		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor-1, 14)
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeft) {
@@ -483,10 +506,12 @@ func (ui *gameUI) updatePlayerConfig() {
 			ui.pcfg.EditingName = true
 			ui.pcfg.NameBuffer = player.Name
 		case 10:
-			ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players))
+			ui.openKitPicker()
 		case 11:
-			ui.startRunFromConfig()
+			ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players))
 		case 12:
+			ui.startRunFromConfig()
+		case 13:
 			ui.screen = screenSetup
 		}
 	}
@@ -547,6 +572,7 @@ func (ui *gameUI) drawPlayerConfig() {
 		{"Endurance", fmt.Sprintf("%+d", p.Endurance)},
 		{"Bushcraft", fmt.Sprintf("%+d", p.Bushcraft)},
 		{"Mental", fmt.Sprintf("%+d", p.Mental)},
+		{"Kit Picker", "Enter"},
 		{"Next Player", "Enter"},
 		{"Start Run", "Enter"},
 		{"Back", "Enter"},
@@ -578,6 +604,7 @@ func (ui *gameUI) drawPlayerConfig() {
 		fmt.Sprintf("Endurance: %+d", p.Endurance),
 		fmt.Sprintf("Bushcraft: %+d", p.Bushcraft),
 		fmt.Sprintf("Mental: %+d", p.Mental),
+		fmt.Sprintf("Kit: %d / %d selected", len(p.Kit), maxInt(1, p.KitLimit)),
 		"",
 		"Controls:",
 		"Up/Down move rows",
@@ -718,6 +745,19 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.screen = screenMenu
 		return
 	}
+	if rl.IsKeyPressed(rl.KeyS) {
+		path := savePathForSlot(1)
+		if err := saveRunToFile(path, *ui.run); err != nil {
+			ui.status = "Save failed: " + err.Error()
+		} else {
+			ui.status = "Saved to " + path
+			ui.appendRunMessage(ui.status)
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyL) {
+		ui.openLoad(true)
+		return
+	}
 
 	captureTextInput(&ui.runInput, 180)
 	if rl.IsKeyPressed(rl.KeyBackspace) && len(ui.runInput) == 0 {
@@ -782,7 +822,7 @@ func (ui *gameUI) drawRun() {
 		}
 	}
 
-	cmdHint := "Commands: next | save | load | menu | hunt land|fish|air ... | fire ... | craft ..."
+	cmdHint := "Commands: next | save | load | menu | hunt ... | fire ... | craft ...    Hotkeys: S save  L load  Esc menu"
 	rl.DrawText(cmdHint, int32(bottom.X)+12, int32(bottom.Y)-24, 17, colorDim)
 	in := strings.TrimSpace(ui.runInput)
 	if in == "" {
@@ -1136,7 +1176,12 @@ func (ui *gameUI) selectedMode() game.GameMode {
 }
 
 func scenariosForMode(mode game.GameMode) []game.Scenario {
-	all := game.BuiltInScenarios()
+	return scenariosForModeWithCustom(mode, nil)
+}
+
+func scenariosForModeWithCustom(mode game.GameMode, custom []game.Scenario) []game.Scenario {
+	all := append([]game.Scenario{}, game.BuiltInScenarios()...)
+	all = append(all, custom...)
 	out := make([]game.Scenario, 0, len(all))
 	for _, scenario := range all {
 		for _, supported := range scenario.SupportedModes {
@@ -1151,7 +1196,7 @@ func scenariosForMode(mode game.GameMode) []game.Scenario {
 }
 
 func (ui *gameUI) activeScenarios() []game.Scenario {
-	return scenariosForMode(ui.selectedMode())
+	return scenariosForModeWithCustom(ui.selectedMode(), ui.customScenarios)
 }
 
 func (ui *gameUI) selectedScenario() game.Scenario {

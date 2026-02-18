@@ -34,7 +34,7 @@ func NewRunState(config RunConfig) (RunState, error) {
 		resolvedConfig.Seed = time.Now().UnixNano()
 	}
 
-	scenarios := BuiltInScenarios()
+	scenarios := AllScenarios()
 
 	if resolvedConfig.ScenarioID == ScenarioRandomID {
 		rng := seededRNG(resolvedConfig.Seed)
