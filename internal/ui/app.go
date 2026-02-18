@@ -461,10 +461,19 @@ const (
 	kitTargetIssued
 )
 
+type kitPickerFocus int
+
+const (
+	kitFocusCategories kitPickerFocus = iota
+	kitFocusItems
+)
+
 type kitPickerState struct {
-	cursor   int
-	target   kitPickerTarget
-	returnTo screen
+	categoryIdx int
+	itemIdx     int
+	target      kitPickerTarget
+	focus       kitPickerFocus
+	returnTo    screen
 }
 
 type saveSlotMeta struct {
@@ -633,9 +642,11 @@ func newPlayerConfigState() playerConfigState {
 
 func newKitPickerState() kitPickerState {
 	return kitPickerState{
-		cursor:   0,
-		target:   kitTargetPersonal,
-		returnTo: screenPlayerConfig,
+		categoryIdx: 0,
+		itemIdx:     0,
+		target:      kitTargetPersonal,
+		focus:       kitFocusCategories,
+		returnTo:    screenPlayerConfig,
 	}
 }
 
@@ -1548,17 +1559,23 @@ func (m menuModel) openPersonalKitPicker(returnTo screen) menuModel {
 	m.kit = newKitPickerState()
 	m.kit.target = kitTargetPersonal
 	m.kit.returnTo = returnTo
-	m.kit.cursor = 0
+	m.kit.categoryIdx = 0
+	m.kit.itemIdx = 0
+	m.kit.focus = kitFocusCategories
 	if len(m.setup.players) > 0 {
 		playerKit := m.setup.players[m.pcfg.playerIdx].Kit
-		all := m.kitPickerItems()
-		for i, item := range all {
-			if hasKitItem(playerKit, item) {
-				m.kit.cursor = i
-				break
+		if len(playerKit) > 0 {
+			categories := m.kitPickerCategories()
+			for _, item := range playerKit {
+				if catIdx, itemIdx, ok := findKitPickerPosition(categories, item); ok {
+					m.kit.categoryIdx = catIdx
+					m.kit.itemIdx = itemIdx
+					break
+				}
 			}
 		}
 	}
+	m = m.normalizeKitPickerState(m.kitPickerCategories())
 	m.screen = screenKitPicker
 	return m
 }
@@ -1568,14 +1585,20 @@ func (m menuModel) openIssuedKitPicker(returnTo screen) menuModel {
 	m.kit = newKitPickerState()
 	m.kit.target = kitTargetIssued
 	m.kit.returnTo = returnTo
-	m.kit.cursor = 0
-	all := m.kitPickerItems()
-	for i, item := range all {
-		if hasKitItem(m.setup.issuedKit, item) {
-			m.kit.cursor = i
-			break
+	m.kit.categoryIdx = 0
+	m.kit.itemIdx = 0
+	m.kit.focus = kitFocusCategories
+	if len(m.setup.issuedKit) > 0 {
+		categories := m.kitPickerCategories()
+		for _, item := range m.setup.issuedKit {
+			if catIdx, itemIdx, ok := findKitPickerPosition(categories, item); ok {
+				m.kit.categoryIdx = catIdx
+				m.kit.itemIdx = itemIdx
+				break
+			}
 		}
 	}
+	m = m.normalizeKitPickerState(m.kitPickerCategories())
 	m.screen = screenKitPicker
 	return m
 }
@@ -1594,16 +1617,141 @@ func (m menuModel) kitPickerItems() []game.KitItem {
 	return game.AllKitItems()
 }
 
+type kitCategory struct {
+	label string
+	items []game.KitItem
+}
+
+func (m menuModel) kitPickerCategories() []kitCategory {
+	return categorizeKitItems(m.kitPickerItems())
+}
+
+func categorizeKitItems(items []game.KitItem) []kitCategory {
+	order := []string{
+		"Cutting / Tools",
+		"Fire",
+		"Water",
+		"Food / Hunting",
+		"Shelter / Warmth",
+		"Navigation / Signal",
+		"Protection / Medical",
+		"Utility",
+	}
+	buckets := make(map[string][]game.KitItem, len(order))
+	for _, item := range items {
+		label := kitCategoryLabel(item)
+		buckets[label] = append(buckets[label], item)
+	}
+	out := make([]kitCategory, 0, len(order))
+	for _, label := range order {
+		itemsForLabel := buckets[label]
+		if len(itemsForLabel) == 0 {
+			continue
+		}
+		out = append(out, kitCategory{
+			label: label,
+			items: itemsForLabel,
+		})
+	}
+	return out
+}
+
+func kitCategoryLabel(item game.KitItem) string {
+	name := strings.ToLower(string(item))
+	switch {
+	case strings.Contains(name, "knife"),
+		strings.Contains(name, "hatchet"),
+		strings.Contains(name, "saw"),
+		strings.Contains(name, "machete"),
+		strings.Contains(name, "shovel"),
+		strings.Contains(name, "multi-tool"):
+		return "Cutting / Tools"
+	case strings.Contains(name, "ferro"),
+		strings.Contains(name, "fire"),
+		strings.Contains(name, "magnifying"):
+		return "Fire"
+	case strings.Contains(name, "water"),
+		strings.Contains(name, "canteen"),
+		strings.Contains(name, "cup"),
+		strings.Contains(name, "purification"):
+		return "Water"
+	case strings.Contains(name, "fishing"),
+		strings.Contains(name, "gill"),
+		strings.Contains(name, "snare"),
+		strings.Contains(name, "bow"),
+		strings.Contains(name, "spear"),
+		strings.Contains(name, "ration"):
+		return "Food / Hunting"
+	case strings.Contains(name, "tarp"),
+		strings.Contains(name, "sleep"),
+		strings.Contains(name, "blanket"),
+		strings.Contains(name, "thermal"),
+		strings.Contains(name, "rain"),
+		strings.Contains(name, "paracord"),
+		strings.Contains(name, "rope"),
+		strings.Contains(name, "dry bag"):
+		return "Shelter / Warmth"
+	case strings.Contains(name, "compass"),
+		strings.Contains(name, "map"),
+		strings.Contains(name, "headlamp"),
+		strings.Contains(name, "signal"),
+		strings.Contains(name, "whistle"):
+		return "Navigation / Signal"
+	case strings.Contains(name, "first aid"),
+		strings.Contains(name, "insect"),
+		strings.Contains(name, "net"),
+		strings.Contains(name, "salt"):
+		return "Protection / Medical"
+	default:
+		return "Utility"
+	}
+}
+
+func findKitPickerPosition(categories []kitCategory, item game.KitItem) (int, int, bool) {
+	for catIdx, category := range categories {
+		for itemIdx, candidate := range category.items {
+			if candidate == item {
+				return catIdx, itemIdx, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func (m menuModel) normalizeKitPickerState(categories []kitCategory) menuModel {
+	if len(categories) == 0 {
+		m.kit.categoryIdx = 0
+		m.kit.itemIdx = 0
+		m.kit.focus = kitFocusCategories
+		return m
+	}
+	if m.kit.categoryIdx < 0 || m.kit.categoryIdx >= len(categories) {
+		m.kit.categoryIdx = 0
+	}
+	currentItems := categories[m.kit.categoryIdx].items
+	if len(currentItems) == 0 {
+		m.kit.itemIdx = 0
+		m.kit.focus = kitFocusCategories
+		return m
+	}
+	if m.kit.itemIdx < 0 || m.kit.itemIdx >= len(currentItems) {
+		m.kit.itemIdx = 0
+	}
+	if m.kit.focus != kitFocusCategories && m.kit.focus != kitFocusItems {
+		m.kit.focus = kitFocusCategories
+	}
+	return m
+}
+
 func (m menuModel) updateKitPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	all := m.kitPickerItems()
-	if len(all) == 0 {
+	categories := m.kitPickerCategories()
+	if len(categories) == 0 {
 		m.screen = m.kit.returnTo
 		m.status = "No kit items available."
 		return m, nil
 	}
-	if m.kit.cursor < 0 || m.kit.cursor >= len(all) {
-		m.kit.cursor = 0
-	}
+	m = m.normalizeKitPickerState(categories)
+	items := categories[m.kit.categoryIdx].items
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -1611,18 +1759,54 @@ func (m menuModel) updateKitPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "Q", "q", "esc":
 		m.screen = m.kit.returnTo
 		return m, nil
+	case "left", "h":
+		m.kit.focus = kitFocusCategories
+		return m, nil
+	case "right", "l":
+		if len(items) > 0 {
+			m.kit.focus = kitFocusItems
+		}
+		return m, nil
 	case "up", "k":
-		m.kit.cursor = wrapIndex(m.kit.cursor, -1, len(all))
+		if m.kit.focus == kitFocusCategories {
+			m.kit.categoryIdx = wrapIndex(m.kit.categoryIdx, -1, len(categories))
+			m = m.normalizeKitPickerState(categories)
+		} else if len(items) > 0 {
+			m.kit.itemIdx = wrapIndex(m.kit.itemIdx, -1, len(items))
+		}
 		return m, nil
 	case "down", "j":
-		m.kit.cursor = wrapIndex(m.kit.cursor, 1, len(all))
+		if m.kit.focus == kitFocusCategories {
+			m.kit.categoryIdx = wrapIndex(m.kit.categoryIdx, 1, len(categories))
+			m = m.normalizeKitPickerState(categories)
+		} else if len(items) > 0 {
+			m.kit.itemIdx = wrapIndex(m.kit.itemIdx, 1, len(items))
+		}
 		return m, nil
-	case "enter", " ":
-		m = m.toggleKitPickerSelection(all[m.kit.cursor])
+	case "enter":
+		if m.kit.focus == kitFocusCategories {
+			if len(items) == 0 {
+				m.status = "No items in this category."
+				return m, nil
+			}
+			m.kit.focus = kitFocusItems
+			return m, nil
+		}
+		if len(items) == 0 {
+			return m, nil
+		}
+		m = m.toggleKitPickerSelection(items[m.kit.itemIdx])
+		return m, nil
+	case " ":
+		if m.kit.focus == kitFocusItems && len(items) > 0 {
+			m = m.toggleKitPickerSelection(items[m.kit.itemIdx])
+		}
 		return m, nil
 	case "R", "r":
 		if m.kit.target == kitTargetIssued {
 			m = m.resetIssuedKitRecommendations()
+			categories = m.kitPickerCategories()
+			m = m.normalizeKitPickerState(categories)
 			return m, nil
 		}
 	}
@@ -1679,13 +1863,11 @@ func playerEditorSlotLabel(idx, total int) string {
 }
 
 func (m menuModel) viewKitPicker() string {
-	all := m.kitPickerItems()
-	if len(all) == 0 {
+	categories := m.kitPickerCategories()
+	if len(categories) == 0 {
 		return brightGreen.Render("No kit items available.")
 	}
-	if m.kit.cursor < 0 || m.kit.cursor >= len(all) {
-		m.kit.cursor = 0
-	}
+	m = m.normalizeKitPickerState(categories)
 
 	title := "KIT PICKER"
 	sub := "Toggle with Enter"
@@ -1716,63 +1898,120 @@ func (m menuModel) viewKitPicker() string {
 		}
 	}
 
-	var list strings.Builder
-	for i, item := range all {
-		cursor := "  "
-		line := fmt.Sprintf("[ ] %s", item)
-		if selected[item] {
-			line = fmt.Sprintf("[*] %s", item)
-		}
-		if i == m.kit.cursor {
-			cursor = "> "
-			list.WriteString(cursor + brightGreen.Render(line) + "\n")
-		} else {
-			list.WriteString(cursor + green.Render(line) + "\n")
-		}
-	}
+	currentCategory := categories[m.kit.categoryIdx]
+	currentItems := currentCategory.items
 
 	totalWidth := m.w - 2
-	if totalWidth < 92 {
-		totalWidth = 92
+	if totalWidth < 108 {
+		totalWidth = 108
 	}
 	contentHeight := m.h - 8
 	if contentHeight < 16 {
 		contentHeight = 16
 	}
-	listPaneTotal := totalWidth / 3
-	if listPaneTotal < 42 {
-		listPaneTotal = 42
+	categoryPaneTotal := totalWidth / 4
+	if categoryPaneTotal < 24 {
+		categoryPaneTotal = 24
 	}
-	if listPaneTotal > 58 {
-		listPaneTotal = 58
+	if categoryPaneTotal > 36 {
+		categoryPaneTotal = 36
 	}
-	detailPaneTotal := totalWidth - listPaneTotal
-	if detailPaneTotal < 44 {
-		detailPaneTotal = 44
-		listPaneTotal = totalWidth - detailPaneTotal
+	itemPaneTotal := totalWidth / 3
+	if itemPaneTotal < 32 {
+		itemPaneTotal = 32
 	}
-	listWidth := listPaneTotal - 4
-	if listWidth < 24 {
-		listWidth = 24
+	if itemPaneTotal > 52 {
+		itemPaneTotal = 52
+	}
+	detailPaneTotal := totalWidth - categoryPaneTotal - itemPaneTotal
+	if detailPaneTotal < 40 {
+		detailPaneTotal = 40
+		itemPaneTotal = totalWidth - categoryPaneTotal - detailPaneTotal
+		if itemPaneTotal < 30 {
+			itemPaneTotal = 30
+			categoryPaneTotal = totalWidth - itemPaneTotal - detailPaneTotal
+		}
+	}
+	categoryWidth := categoryPaneTotal - 4
+	if categoryWidth < 18 {
+		categoryWidth = 18
+	}
+	itemWidth := itemPaneTotal - 4
+	if itemWidth < 24 {
+		itemWidth = 24
 	}
 	detailWidth := detailPaneTotal - 4
 	if detailWidth < 30 {
 		detailWidth = 30
 	}
 
-	activeItem := all[m.kit.cursor]
-	selectedList := make([]string, 0, len(selected))
-	for _, item := range all {
-		if selected[item] {
-			selectedList = append(selectedList, string(item))
+	categoryLines := make([]string, 0, len(categories))
+	for i, category := range categories {
+		cursor := "  "
+		line := truncateForPane(fmt.Sprintf("%s (%d)", category.label, len(category.items)), categoryWidth-3)
+		lineStyle := green
+		if i == m.kit.categoryIdx {
+			cursor = "> "
+			if m.kit.focus == kitFocusCategories {
+				lineStyle = brightGreen
+			}
 		}
+		categoryLines = append(categoryLines, cursor+lineStyle.Render(line))
 	}
-	selectedText := "none selected"
-	if len(selectedList) > 0 {
-		selectedText = strings.Join(selectedList, "\n- ")
-		selectedText = "- " + selectedText
+	categoryLines = kitPickerViewportLines(categoryLines, m.kit.categoryIdx, contentHeight)
+
+	itemLines := make([]string, 0, len(currentItems))
+	for i, item := range currentItems {
+		cursor := "  "
+		line := fmt.Sprintf("[ ] %s", item)
+		if selected[item] {
+			line = fmt.Sprintf("[*] %s", item)
+		}
+		line = truncateForPane(line, itemWidth-3)
+		lineStyle := green
+		if i == m.kit.itemIdx {
+			cursor = "> "
+			if m.kit.focus == kitFocusItems {
+				lineStyle = brightGreen
+			}
+		}
+		itemLines = append(itemLines, cursor+lineStyle.Render(line))
+	}
+	if len(itemLines) == 0 {
+		itemLines = []string{dimGreen.Render("No items in category")}
+	} else {
+		itemLines = kitPickerViewportLines(itemLines, m.kit.itemIdx, contentHeight)
 	}
 
+	selectedList := make([]string, 0, selectedCount)
+	for _, category := range categories {
+		for _, item := range category.items {
+			if selected[item] {
+				selectedList = append(selectedList, string(item))
+			}
+		}
+	}
+	selectedLines := []string{"- none"}
+	if len(selectedList) > 0 {
+		selectedLines = make([]string, 0, len(selectedList))
+		for _, item := range selectedList {
+			selectedLines = append(selectedLines, "- "+item)
+		}
+	}
+	const selectedPreviewMax = 8
+	selectedPreview := selectedLines
+	if len(selectedPreview) > selectedPreviewMax {
+		remaining := len(selectedPreview) - selectedPreviewMax
+		selectedPreview = append(selectedPreview[:selectedPreviewMax], fmt.Sprintf("... +%d more", remaining))
+	}
+
+	activeItemLabel := "<none>"
+	activeFlavor := "Select a category, then choose an item."
+	if len(currentItems) > 0 {
+		activeItem := currentItems[m.kit.itemIdx]
+		activeItemLabel = string(activeItem)
+		activeFlavor = kitItemFlavorText(activeItem)
+	}
 	var detail strings.Builder
 	detail.WriteString(brightGreen.Render("Selected Items") + "\n")
 	if limit > 0 {
@@ -1780,11 +2019,14 @@ func (m menuModel) viewKitPicker() string {
 	} else {
 		detail.WriteString(green.Render(fmt.Sprintf("Count: %d", selectedCount)) + "\n\n")
 	}
-	detail.WriteString(green.Render(selectedText) + "\n\n")
+	detail.WriteString(green.Render(strings.Join(selectedPreview, "\n")) + "\n\n")
+	detail.WriteString(brightGreen.Render("Focused Category") + "\n")
+	detail.WriteString(green.Render(currentCategory.label) + "\n\n")
 	detail.WriteString(brightGreen.Render("Focused Item") + "\n")
-	detail.WriteString(green.Render(string(activeItem)) + "\n")
-	detail.WriteString(dimGreen.Render(kitItemFlavorText(activeItem)) + "\n\n")
-	detail.WriteString(dimGreen.Render("Enter toggles focused item on/off.") + "\n")
+	detail.WriteString(green.Render(activeItemLabel) + "\n")
+	detail.WriteString(dimGreen.Render(activeFlavor) + "\n\n")
+	detail.WriteString(dimGreen.Render("Enter on category opens item list.") + "\n")
+	detail.WriteString(dimGreen.Render("Enter/Space on item toggles selection.") + "\n")
 	if m.kit.target == kitTargetIssued {
 		detail.WriteString(dimGreen.Render("Shift+R resets issued kit to recommendation.") + "\n")
 	}
@@ -1797,13 +2039,20 @@ func (m menuModel) viewKitPicker() string {
 		b.WriteString(dimGreen.Render(fmt.Sprintf("%s  |  Selected: %d", sub, selectedCount)) + "\n")
 	}
 	b.WriteString(border.Render(dosRule(totalWidth)) + "\n\n")
-	listPane := lipgloss.NewStyle().
+	categoryPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
-		Width(listWidth).
+		Width(categoryWidth).
 		Height(contentHeight).
-		Render(list.String())
+		Render(strings.Join(categoryLines, "\n"))
+	itemPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(itemWidth).
+		Height(contentHeight).
+		Render(strings.Join(itemLines, "\n"))
 	detailPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
@@ -1811,17 +2060,54 @@ func (m menuModel) viewKitPicker() string {
 		Width(detailWidth).
 		Height(contentHeight).
 		Render(detail.String())
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, categoryPane, itemPane, detailPane))
 	b.WriteString("\n" + border.Render(dosRule(totalWidth)) + "\n")
 	if m.kit.target == kitTargetIssued {
-		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  R reset recommended  Shift+Q back") + "\n")
+		b.WriteString(dimGreen.Render("↑/↓ move  ←/→ switch pane  Enter select/toggle  R reset recommended  Shift+Q back") + "\n")
 	} else {
-		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  Shift+Q back") + "\n")
+		b.WriteString(dimGreen.Render("↑/↓ move  ←/→ switch pane  Enter select/toggle  Shift+Q back") + "\n")
 	}
 	if m.status != "" {
 		b.WriteString(green.Render(m.status) + "\n")
 	}
 	return b.String()
+}
+
+func truncateForPane(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if len(text) <= width {
+		return text
+	}
+	if width <= 3 {
+		return text[:width]
+	}
+	return text[:width-3] + "..."
+}
+
+func kitPickerViewportLines(lines []string, cursor, height int) []string {
+	if height <= 0 {
+		return []string{}
+	}
+	if len(lines) <= height {
+		return lines
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(lines) {
+		cursor = len(lines) - 1
+	}
+	start := cursor - height/2
+	if start < 0 {
+		start = 0
+	}
+	maxStart := len(lines) - height
+	if start > maxStart {
+		start = maxStart
+	}
+	return lines[start : start+height]
 }
 
 func maxInt(a, b int) int {
