@@ -18,7 +18,6 @@ import (
 	"github.com/appengine-ltd/survive-it/internal/update"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 )
 
 type AppConfig struct {
@@ -47,6 +46,8 @@ const (
 	screenOptions
 	screenPhaseEditor
 	screenRun
+	screenRunPlayers
+	screenRunCommandLibrary
 )
 
 func NewApp(cfg AppConfig) *App {
@@ -124,9 +125,12 @@ type menuModel struct {
 	build  scenarioBuilderState
 	phase  phaseEditorState
 	opts   optionsState
+	rplay  runPlayerUXState
+	rhelp  runCommandLibraryState
 
 	run             *game.RunState
 	runInput        string
+	runMessages     []string
 	activeSaveSlot  int
 	customScenarios []customScenarioRecord
 	loadReturn      screen
@@ -156,6 +160,8 @@ func newMenuModel(cfg AppConfig) menuModel {
 		build:           newScenarioBuilderState(),
 		phase:           newPhaseEditorState(),
 		opts:            newOptionsState(),
+		rplay:           newRunPlayerUXState(),
+		rhelp:           newRunCommandLibraryState(),
 		activeSaveSlot:  1,
 		customScenarios: customScenarios,
 	}
@@ -234,6 +240,12 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.screen == screenPhaseEditor {
 			return m.updatePhaseEditor(msg)
+		}
+		if m.screen == screenRunPlayers {
+			return m.updateRunPlayers(msg)
+		}
+		if m.screen == screenRunCommandLibrary {
+			return m.updateRunCommandLibrary(msg)
 		}
 
 		return m.updateMenu(msg)
@@ -327,6 +339,12 @@ func (m menuModel) View() string {
 	if m.screen == screenRun {
 		return m.viewRun()
 	}
+	if m.screen == screenRunPlayers {
+		return m.viewRunPlayers()
+	}
+	if m.screen == screenRunCommandLibrary {
+		return m.viewRunCommandLibrary()
+	}
 	return m.viewMenu()
 }
 
@@ -335,6 +353,21 @@ func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "Q", "esc":
 		next, cmd := m.returnToMainMenu()
 		return next, cmd
+	case "P":
+		if m.run == nil {
+			m.status = "No active run."
+			return m, nil
+		}
+		m.rplay.cursor = 0
+		m.screen = screenRunPlayers
+		return m, nil
+	case "H":
+		if m.run == nil {
+			m.status = "No active run."
+			return m, nil
+		}
+		m.screen = screenRunCommandLibrary
+		return m, nil
 
 	case "N":
 		m.advanceRunDay()
@@ -348,9 +381,11 @@ func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		path := savePathForSlot(m.activeSaveSlot)
 		if err := saveRunToFile(path, *m.run); err != nil {
 			m.status = fmt.Sprintf("Save failed: %v", err)
+			m.appendRunMessage(m.status)
 			return m, nil
 		}
 		m.status = fmt.Sprintf("Saved run to slot %d (%s)", m.activeSaveSlot, path)
+		m.appendRunMessage(m.status)
 		return m, nil
 	case "L":
 		m = m.openLoadRun(screenRun)
@@ -383,14 +418,21 @@ func (m *menuModel) advanceRunDay() {
 		return
 	}
 
+	previousDay := m.run.Day
 	m.run.AdvanceDay()
+	if m.run.Day != previousDay {
+		weatherLabel := game.WeatherLabel(m.run.Weather.Type)
+		m.appendRunMessage(fmt.Sprintf("Day %d started | Weather: %s | Temp: %s", m.run.Day, weatherLabel, m.formatTemperature(m.run.Weather.TemperatureC)))
+	}
 	out := m.run.EvaluateRun()
 	if out.Status == game.RunOutcomeCritical {
 		m.status = fmt.Sprintf("CRITICAL: %v", out.CriticalPlayerIDs)
+		m.appendRunMessage(m.status)
 		return
 	}
 	if out.Status == game.RunOutcomeCompleted {
 		m.status = "COMPLETED"
+		m.appendRunMessage(m.status)
 		return
 	}
 	m.status = ""
@@ -404,6 +446,21 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 	case "":
 		m.status = "Enter a command or use Shift+ shortcuts."
 		return m, nil
+	case "players", "player", "roster":
+		if m.run == nil {
+			m.status = "No active run."
+			return m, nil
+		}
+		m.rplay.cursor = 0
+		m.screen = screenRunPlayers
+		return m, nil
+	case "help", "library":
+		if m.run == nil {
+			m.status = "No active run."
+			return m, nil
+		}
+		m.screen = screenRunCommandLibrary
+		return m, nil
 	case "next":
 		m.advanceRunDay()
 		m.runPlayedFor = 0
@@ -416,9 +473,11 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		path := savePathForSlot(m.activeSaveSlot)
 		if err := saveRunToFile(path, *m.run); err != nil {
 			m.status = fmt.Sprintf("Save failed: %v", err)
+			m.appendRunMessage(m.status)
 			return m, nil
 		}
 		m.status = fmt.Sprintf("Saved run to slot %d", m.activeSaveSlot)
+		m.appendRunMessage(m.status)
 		return m, nil
 	case "load":
 		m = m.openLoadRun(screenRun)
@@ -434,6 +493,7 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 			res := m.run.ExecuteRunCommand(command)
 			if res.Handled {
 				m.status = res.Message
+				m.appendRunMessage(res.Message)
 				return m, nil
 			}
 		}
@@ -485,6 +545,7 @@ func (m menuModel) handleHuntCommand(command string) (tea.Model, tea.Cmd) {
 	catch, outcome, err := m.run.CatchAndConsume(playerID, domain, choice)
 	if err != nil {
 		m.status = fmt.Sprintf("Hunt failed: %v", err)
+		m.appendRunMessage(m.status)
 		return m, nil
 	}
 
@@ -504,6 +565,7 @@ func (m menuModel) handleHuntCommand(command string) (tea.Model, tea.Cmd) {
 		msg += " | illness risk triggered: " + strings.Join(names, ", ")
 	}
 	m.status = msg
+	m.appendRunMessage(msg)
 	return m, nil
 }
 
@@ -752,6 +814,12 @@ type optionsState struct {
 	tempUnit    temperatureUnit
 	dayHours    int
 }
+
+type runPlayerUXState struct {
+	cursor int
+}
+
+type runCommandLibraryState struct{}
 
 type builderScenarioPickerState struct {
 	cursor   int
@@ -1006,6 +1074,14 @@ func newOptionsState() optionsState {
 		tempUnit:    tempUnitCelsius,
 		dayHours:    defaultDayHours,
 	}
+}
+
+func newRunPlayerUXState() runPlayerUXState {
+	return runPlayerUXState{cursor: 0}
+}
+
+func newRunCommandLibraryState() runCommandLibraryState {
+	return runCommandLibraryState{}
 }
 
 func newBuilderScenarioPickerState() builderScenarioPickerState {
@@ -1659,6 +1735,7 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 
 	m.run = &state
 	m.runPlayedFor = 0
+	m.resetRunHistory(fmt.Sprintf("Run started: %s | %s", modeLabel(m.run.Config.Mode), m.run.Scenario.Name))
 	m.screen = screenRun
 	m.status = ""
 	return m, nil
@@ -3548,11 +3625,13 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		m.run = &state
 		m.runPlayedFor = 0
+		m.resetRunHistory(fmt.Sprintf("Run loaded from %s", selected.Path))
 		if slot, ok := slotNumberFromPath(selected.Path); ok {
 			m.activeSaveSlot = slot
 		}
 		m.screen = screenRun
 		m.status = fmt.Sprintf("Loaded %s", selected.Path)
+		m.appendRunMessage(m.status)
 		return m, nil
 	}
 
@@ -4980,42 +5059,28 @@ func modeLabel(mode game.GameMode) string {
 }
 
 func (m menuModel) bodyText() string {
-	if len(m.run.Players) == 0 {
-		return dimGreen.Render("No players loaded.")
+	lines := []string{
+		brightGreen.Render("Message History"),
+	}
+	if len(m.runMessages) == 0 {
+		lines = append(lines, dimGreen.Render("No events yet. Use commands or Shift+ shortcuts."))
+		lines = append(lines, dimGreen.Render("Open Shift+P for player UX and Shift+H for command library."))
+		return strings.Join(lines, "\n")
 	}
 
-	rows := make([][]string, 0, len(m.run.Players))
-	for _, p := range m.run.Players {
-		rows = append(rows, []string{
-			p.Name,
-			string(p.Sex),
-			string(p.BodyType),
-			fmt.Sprintf("%d", p.Energy),
-			fmt.Sprintf("%d", p.Hydration),
-			fmt.Sprintf("%d", p.Morale),
-			fmt.Sprintf("%d", len(p.Ailments)),
-		})
+	const previewCount = 80
+	start := len(m.runMessages) - previewCount
+	if start < 0 {
+		start = 0
 	}
-
-	t := table.New().
-		Border(dosBox).
-		BorderStyle(border).
-		BorderHeader(true).
-		BorderRow(false).
-		Headers("Player", "Sex", "Body", "Energy", "Hydration", "Morale", "Ailments").
-		Rows(rows...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return brightGreen.Bold(true)
-			}
-			return green
-		})
-
-	return t.Render()
+	for i := start; i < len(m.runMessages); i++ {
+		lines = append(lines, green.Render(m.runMessages[i]))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m menuModel) controlsLine(totalWidth int) string {
-	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Cmd: hunt land|fish|air [raw] [liver] [p#] [grams]  use <item> <action> [p#]  actions [p#]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
+	text := fmt.Sprintf(" Shift+P Players  |  Shift+H Library  |  Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Cmd: hunt land|fish|air [raw] [liver] [p#] [grams]  use <item> <action> [p#]  actions [p#]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
 	maxWidth := totalWidth - 2
 	if maxWidth < 20 {
 		maxWidth = 20
@@ -5047,6 +5112,245 @@ func (m menuModel) footerText() string {
 	} else {
 		b.WriteString(brightGreen.Render("> " + m.runInput))
 	}
+	return b.String()
+}
+
+func (m *menuModel) resetRunHistory(intro string) {
+	m.runMessages = nil
+	if strings.TrimSpace(intro) != "" {
+		m.appendRunMessage(intro)
+	}
+	if m.run != nil {
+		m.appendRunMessage(fmt.Sprintf("Scenario biome: %s | Players: %d", m.run.Scenario.Biome, len(m.run.Players)))
+	}
+	m.appendRunMessage("Shortcuts: Shift+P players | Shift+H command library")
+}
+
+func (m *menuModel) appendRunMessage(message string) {
+	line := strings.TrimSpace(message)
+	if line == "" {
+		return
+	}
+	timestamped := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), line)
+	const maxMessages = 300
+	m.runMessages = append(m.runMessages, timestamped)
+	if len(m.runMessages) > maxMessages {
+		m.runMessages = append([]string{}, m.runMessages[len(m.runMessages)-maxMessages:]...)
+	}
+}
+
+func (m menuModel) updateRunPlayers(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.run == nil {
+		m.screen = screenRun
+		return m, nil
+	}
+	playerCount := len(m.run.Players)
+	if playerCount == 0 {
+		m.screen = screenRun
+		return m, nil
+	}
+	if m.rplay.cursor < 0 || m.rplay.cursor >= playerCount {
+		m.rplay.cursor = 0
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		m.screen = screenRun
+		return m, nil
+	case "H":
+		m.screen = screenRunCommandLibrary
+		return m, nil
+	case "up", "k":
+		m.rplay.cursor = wrapIndex(m.rplay.cursor, -1, playerCount)
+		return m, nil
+	case "down", "j":
+		m.rplay.cursor = wrapIndex(m.rplay.cursor, 1, playerCount)
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m menuModel) viewRunPlayers() string {
+	if m.run == nil || len(m.run.Players) == 0 {
+		return brightGreen.Render("No active players.") + "\n" + dimGreen.Render("Shift+Q back")
+	}
+	if m.rplay.cursor < 0 || m.rplay.cursor >= len(m.run.Players) {
+		m.rplay.cursor = 0
+	}
+
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	leftWidth := totalWidth / 3
+	if leftWidth < 30 {
+		leftWidth = 30
+	}
+	rightWidth := totalWidth - leftWidth - 4
+	if rightWidth < 50 {
+		rightWidth = 50
+	}
+
+	var left strings.Builder
+	left.WriteString(brightGreen.Render("Players") + "\n")
+	left.WriteString(green.Render(strings.Repeat("-", leftWidth-4)) + "\n")
+	for i, p := range m.run.Players {
+		cursor := "  "
+		style := green
+		if i == m.rplay.cursor {
+			cursor = "> "
+			style = brightGreen.Bold(true)
+		}
+		left.WriteString(style.Render(fmt.Sprintf("%s%s  E:%3d H:%3d M:%3d  Ail:%d", cursor, p.Name, p.Energy, p.Hydration, p.Morale, len(p.Ailments))) + "\n")
+	}
+
+	p := m.run.Players[m.rplay.cursor]
+	var ailments []string
+	if len(p.Ailments) == 0 {
+		ailments = []string{dimGreen.Render("None")}
+	} else {
+		for _, ail := range p.Ailments {
+			name := ail.Name
+			if name == "" {
+				name = string(ail.Type)
+			}
+			ailments = append(ailments, green.Render(fmt.Sprintf("- %s (%d day)", name, ail.DaysRemaining)))
+		}
+	}
+	kitPreview := make([]string, 0, len(p.Kit))
+	for _, item := range p.Kit {
+		kitPreview = append(kitPreview, string(item))
+	}
+	issuedPreview := make([]string, 0, len(m.run.Config.IssuedKit))
+	for _, item := range m.run.Config.IssuedKit {
+		issuedPreview = append(issuedPreview, string(item))
+	}
+	if len(kitPreview) == 0 {
+		kitPreview = []string{"None"}
+	}
+	if len(issuedPreview) == 0 {
+		issuedPreview = []string{"None"}
+	}
+
+	rightLines := []string{
+		brightGreen.Render(fmt.Sprintf("%s  (Player %d/%d)", p.Name, p.ID, len(m.run.Players))),
+		green.Render(fmt.Sprintf("Sex: %s  Body: %s", p.Sex, p.BodyType)),
+		green.Render(fmt.Sprintf("Height: %d ft %d in  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg)),
+		green.Render(fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental)),
+		green.Render(fmt.Sprintf("Status  Energy:%d  Hydration:%d  Morale:%d", p.Energy, p.Hydration, p.Morale)),
+		green.Render(fmt.Sprintf("Nutrition  %dkcal  %dg protein  %dg fat", p.Nutrition.CaloriesKcal, p.Nutrition.ProteinG, p.Nutrition.FatG)),
+		"",
+		brightGreen.Render("Active Ailments"),
+		strings.Join(ailments, "\n"),
+		"",
+		brightGreen.Render("Personal Kit"),
+		green.Render(strings.Join(kitPreview, ", ")),
+		"",
+		brightGreen.Render("Issued Kit"),
+		green.Render(strings.Join(issuedPreview, ", ")),
+		"",
+		dimGreen.Render(fmt.Sprintf("Try: actions p%d", p.ID)),
+		dimGreen.Render(fmt.Sprintf("Try: hunt fish p%d 300", p.ID)),
+	}
+
+	leftPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(leftWidth).
+		Height(contentHeight).
+		Render(left.String())
+
+	rightPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(rightWidth).
+		Height(contentHeight).
+		Render(strings.Join(rightLines, "\n"))
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Run Player UX") + "\n")
+	b.WriteString(dimGreen.Render("Use this screen for per-player state, ailments, kit, and command hints.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  Shift+H command library  Shift+Q back") + "\n")
+	return b.String()
+}
+
+func (m menuModel) updateRunCommandLibrary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		if m.run != nil {
+			m.screen = screenRun
+			return m, nil
+		}
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
+	}
+	return m, nil
+}
+
+func (m menuModel) viewRunCommandLibrary() string {
+	totalWidth := m.w
+	if totalWidth < 110 {
+		totalWidth = 110
+	}
+	width := totalWidth - 6
+	if width < 90 {
+		width = 90
+	}
+
+	lines := []string{
+		brightGreen.Render("In-Run Command Library"),
+		green.Render(strings.Repeat("-", width-4)),
+		brightGreen.Render("Core Flow"),
+		green.Render("next"),
+		green.Render("save"),
+		green.Render("load"),
+		green.Render("menu"),
+		"",
+		brightGreen.Render("Hunting"),
+		green.Render("hunt land [raw] [liver] [p#] [grams]"),
+		green.Render("hunt fish [raw] [liver] [p#] [grams]"),
+		green.Render("hunt air [raw] [liver] [p#] [grams]"),
+		"",
+		brightGreen.Render("Equipment Actions"),
+		green.Render("actions [p#]"),
+		green.Render("use <item> <action> [p#]"),
+		green.Render("Example: use paracord tie sticks together p1"),
+		green.Render("Example: use first aid kit treat wound p1"),
+		green.Render("Example: use rations eat p1"),
+		"",
+		brightGreen.Render("UX Shortcuts"),
+		green.Render("Shift+P  Open Player UX"),
+		green.Render("Shift+H  Open this library"),
+		green.Render("Shift+N  Next day"),
+		green.Render("Shift+S  Save"),
+		green.Render("Shift+L  Load"),
+		green.Render("Shift+Q  Back/Menu"),
+	}
+
+	panel := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(width).
+		Height(maxInt(20, m.h-8)).
+		Render(strings.Join(lines, "\n"))
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Command Library") + "\n")
+	b.WriteString(dimGreen.Render("Reference for run commands and shortcut flow.") + "\n\n")
+	b.WriteString(panel)
+	b.WriteString("\n" + dimGreen.Render("Shift+Q back") + "\n")
 	return b.String()
 }
 
