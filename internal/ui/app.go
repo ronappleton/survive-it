@@ -427,9 +427,77 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		next, cmd := m.returnToMainMenu()
 		return next, cmd
 	default:
-		m.status = "Unknown command. Try: next, save, load, menu."
+		if strings.HasPrefix(command, "hunt") || strings.HasPrefix(command, "catch") {
+			return m.handleHuntCommand(command)
+		}
+		m.status = "Unknown command. Try: next, save, load, menu, hunt land|water|air."
 		return m, nil
 	}
+}
+
+func (m menuModel) handleHuntCommand(command string) (tea.Model, tea.Cmd) {
+	if m.run == nil {
+		m.status = "No active run."
+		return m, nil
+	}
+
+	fields := strings.Fields(command)
+	domain := game.AnimalDomainLand
+	choice := game.MealChoice{
+		PortionGrams: 300,
+		Cooked:       true,
+		EatLiver:     false,
+	}
+	playerID := 1
+
+	for _, field := range fields[1:] {
+		switch field {
+		case "land":
+			domain = game.AnimalDomainLand
+		case "water", "fish":
+			domain = game.AnimalDomainWater
+		case "air", "bird":
+			domain = game.AnimalDomainAir
+		case "raw":
+			choice.Cooked = false
+		case "liver":
+			choice.EatLiver = true
+		default:
+			if strings.HasPrefix(field, "p") {
+				if parsed, err := strconv.Atoi(strings.TrimPrefix(field, "p")); err == nil && parsed > 0 {
+					playerID = parsed
+				}
+				continue
+			}
+			if grams, err := strconv.Atoi(field); err == nil && grams > 0 {
+				choice.PortionGrams = grams
+			}
+		}
+	}
+
+	catch, outcome, err := m.run.CatchAndConsume(playerID, domain, choice)
+	if err != nil {
+		m.status = fmt.Sprintf("Hunt failed: %v", err)
+		return m, nil
+	}
+
+	prep := "cooked"
+	if !choice.Cooked {
+		prep = "raw"
+	}
+	msg := fmt.Sprintf("P%d ate %dg %s (%s, %dg caught): +%dE +%dH2O +%dM | %dkcal %dgP %dgF",
+		outcome.PlayerID, outcome.PortionGrams, catch.Animal.Name, prep, catch.WeightGrams,
+		outcome.EnergyDelta, outcome.HydrationDelta, outcome.MoraleDelta,
+		outcome.Nutrition.CaloriesKcal, outcome.Nutrition.ProteinG, outcome.Nutrition.FatG)
+	if len(outcome.DiseaseEvents) > 0 {
+		names := make([]string, 0, len(outcome.DiseaseEvents))
+		for _, event := range outcome.DiseaseEvents {
+			names = append(names, event.Ailment.Name)
+		}
+		msg += " | illness risk triggered: " + strings.Join(names, ", ")
+	}
+	m.status = msg
+	return m, nil
 }
 
 func menuItems(m menuModel) []menuEntry {
@@ -4918,6 +4986,7 @@ func (m menuModel) bodyText() string {
 			fmt.Sprintf("%d", p.Energy),
 			fmt.Sprintf("%d", p.Hydration),
 			fmt.Sprintf("%d", p.Morale),
+			fmt.Sprintf("%d", len(p.Ailments)),
 		})
 	}
 
@@ -4926,7 +4995,7 @@ func (m menuModel) bodyText() string {
 		BorderStyle(border).
 		BorderHeader(true).
 		BorderRow(false).
-		Headers("Player", "Sex", "Body", "Energy", "Hydration", "Morale").
+		Headers("Player", "Sex", "Body", "Energy", "Hydration", "Morale", "Ailments").
 		Rows(rows...).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
@@ -4939,7 +5008,7 @@ func (m menuModel) bodyText() string {
 }
 
 func (m menuModel) controlsLine(totalWidth int) string {
-	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
+	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Type: hunt land|water|air [raw] [liver] [p#] [grams]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
 	maxWidth := totalWidth - 2
 	if maxWidth < 20 {
 		maxWidth = 20

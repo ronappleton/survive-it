@@ -68,6 +68,8 @@ type PlayerState struct {
 	Energy    int
 	Hydration int
 	Morale    int
+	Nutrition NutritionTotals
+	Ailments  []Ailment
 }
 
 type PlayerConfig struct {

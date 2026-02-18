@@ -21,9 +21,32 @@ func (s *RunState) AdvanceDay() {
 		p.Energy += playerWeatherImpact.Energy
 		p.Hydration += playerWeatherImpact.Hydration
 		p.Morale += playerWeatherImpact.Morale
+		applyDailyAilmentPenalties(p)
 
 		clampPlayer(p)
 	}
+}
+
+func applyDailyAilmentPenalties(playerState *PlayerState) {
+	if playerState == nil || len(playerState.Ailments) == 0 {
+		return
+	}
+
+	active := make([]Ailment, 0, len(playerState.Ailments))
+	for _, ailment := range playerState.Ailments {
+		if ailment.DaysRemaining <= 0 {
+			continue
+		}
+		playerState.Energy -= ailment.EnergyPenalty
+		playerState.Hydration -= ailment.HydrationPenalty
+		playerState.Morale -= ailment.MoralePenalty
+		ailment.DaysRemaining--
+		if ailment.DaysRemaining > 0 {
+			active = append(active, ailment)
+		}
+	}
+
+	playerState.Ailments = active
 }
 
 func clamp(number, min, max int) int {
