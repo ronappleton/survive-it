@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCreatePlayersInitializesRuntimeMetabolism(t *testing.T) {
 	players := CreatePlayers(RunConfig{
@@ -124,5 +127,34 @@ func TestEffectBarPenaltyUsesPlayerModifiers(t *testing.T) {
 	}
 	if strongPenalty.Morale <= weakPenalty.Morale {
 		t.Fatalf("expected mental to improve morale penalty, strong=%d weak=%d", strongPenalty.Morale, weakPenalty.Morale)
+	}
+}
+
+func TestApplyRealtimeMetabolismPartialDay(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 5},
+		Seed:        212,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+
+	player := &run.Players[0]
+	beforeCalories := player.CaloriesReserveKcal
+	beforeProgress := run.MetabolismProgress
+
+	run.ApplyRealtimeMetabolism(30*time.Minute, 2*time.Hour)
+
+	if run.Day != 1 {
+		t.Fatalf("expected day to remain 1, got %d", run.Day)
+	}
+	if run.MetabolismProgress <= beforeProgress || run.MetabolismProgress >= 1 {
+		t.Fatalf("expected partial progress between 0 and 1, got %.2f", run.MetabolismProgress)
+	}
+	if player.CaloriesReserveKcal >= beforeCalories {
+		t.Fatalf("expected calorie reserve to decrease during realtime metabolism, before=%d after=%d", beforeCalories, player.CaloriesReserveKcal)
 	}
 }

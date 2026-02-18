@@ -1,14 +1,16 @@
 package game
 
 func (s *RunState) AdvanceDay() {
+	s.EnsurePlayerRuntimeStats()
+	s.consumePendingDayMetabolism()
 	s.Day++
 	s.EnsureWeather()
-	s.EnsurePlayerRuntimeStats()
 	season, ok := s.CurrentSeason()
 	if !ok {
 		season = SeasonAutumn
 	}
 	weatherImpact := weatherImpactForDay(s.Scenario.Biome, season, s.Weather.Type, s.Weather.StreakDays, s.Weather.TemperatureC)
+	campImpact := s.campImpactForDay()
 
 	for i := range s.Players {
 		p := &s.Players[i]
@@ -22,12 +24,15 @@ func (s *RunState) AdvanceDay() {
 		p.Energy += playerWeatherImpact.Energy
 		p.Hydration += playerWeatherImpact.Hydration
 		p.Morale += playerWeatherImpact.Morale
+		p.Energy += campImpact.Energy
+		p.Hydration += campImpact.Hydration
+		p.Morale += campImpact.Morale
 		applyDailyAilmentPenalties(p)
-		applyDailyMetabolism(p)
 
 		clampPlayer(p)
 		refreshEffectBars(p)
 	}
+	s.progressCampState()
 }
 
 func applyDailyAilmentPenalties(playerState *PlayerState) {
@@ -74,6 +79,7 @@ func clampPlayer(playerState *PlayerState) {
 	playerState.CaloriesReserveKcal = clamp(playerState.CaloriesReserveKcal, -5000, 12000)
 	playerState.ProteinReserveG = clamp(playerState.ProteinReserveG, -250, 800)
 	playerState.FatReserveG = clamp(playerState.FatReserveG, -250, 600)
+	playerState.SugarReserveG = clamp(playerState.SugarReserveG, -300, 800)
 }
 
 type RunOutcomeStatus string

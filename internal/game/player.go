@@ -73,12 +73,21 @@ type PlayerState struct {
 	CaloriesReserveKcal int `json:"calories_reserve_kcal"`
 	ProteinReserveG     int `json:"protein_reserve_g"`
 	FatReserveG         int `json:"fat_reserve_g"`
+	SugarReserveG       int `json:"sugar_reserve_g"`
 	Hunger              int `json:"hunger"`  // 0 = satiated, 100 = starving
 	Thirst              int `json:"thirst"`  // 0 = hydrated, 100 = severely thirsty
 	Fatigue             int `json:"fatigue"` // 0 = rested, 100 = exhausted
 
 	Nutrition NutritionTotals `json:"nutrition"`
 	Ailments  []Ailment       `json:"ailments"`
+
+	metabolismCarryCalories  float64
+	metabolismCarryProtein   float64
+	metabolismCarryFat       float64
+	metabolismCarrySugar     float64
+	metabolismCarryEnergy    float64
+	metabolismCarryHydration float64
+	metabolismCarryMorale    float64
 }
 
 type PlayerConfig struct {

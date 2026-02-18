@@ -284,9 +284,11 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenRun && m.run != nil {
 			m.runPlayedFor += delta
 			dayDuration := m.autoDayDuration()
+			m.run.ApplyRealtimeMetabolism(m.runPlayedFor, dayDuration)
 			for m.runPlayedFor >= dayDuration {
 				m.advanceRunDay()
 				m.runPlayedFor -= dayDuration
+				m.run.ApplyRealtimeMetabolism(m.runPlayedFor, dayDuration)
 				out := m.run.EvaluateRun()
 				if out.Status != game.RunOutcomeOngoing {
 					break
@@ -497,7 +499,7 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		m.status = "Unknown command. Try: next, save, load, menu, hunt land|fish|air, actions, use <item> <action>."
+		m.status = "Unknown command. Try: next, save, load, menu, hunt/forage, wood/fire, shelter/craft, actions, use <item> <action>."
 		return m, nil
 	}
 }
@@ -553,10 +555,10 @@ func (m menuModel) handleHuntCommand(command string) (tea.Model, tea.Cmd) {
 	if !choice.Cooked {
 		prep = "raw"
 	}
-	msg := fmt.Sprintf("P%d ate %dg %s (%s, %dg caught): +%dE +%dH2O +%dM | %dkcal %dgP %dgF",
+	msg := fmt.Sprintf("P%d ate %dg %s (%s, %dg caught): +%dE +%dH2O +%dM | %dkcal %dgP %dgF %dgS",
 		outcome.PlayerID, outcome.PortionGrams, catch.Animal.Name, prep, catch.WeightGrams,
 		outcome.EnergyDelta, outcome.HydrationDelta, outcome.MoraleDelta,
-		outcome.Nutrition.CaloriesKcal, outcome.Nutrition.ProteinG, outcome.Nutrition.FatG)
+		outcome.Nutrition.CaloriesKcal, outcome.Nutrition.ProteinG, outcome.Nutrition.FatG, outcome.Nutrition.SugarG)
 	if len(outcome.DiseaseEvents) > 0 {
 		names := make([]string, 0, len(outcome.DiseaseEvents))
 		for _, event := range outcome.DiseaseEvents {
@@ -5081,7 +5083,7 @@ func (m menuModel) bodyText() string {
 }
 
 func (m menuModel) controlsLine(totalWidth int) string {
-	text := fmt.Sprintf(" Shift+P Players  |  Shift+H Library  |  Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Cmd: hunt land|fish|air [raw] [liver] [p#] [grams]  use <item> <action> [p#]  actions [p#]  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
+	text := fmt.Sprintf(" Shift+P Players  |  Shift+H Library  |  Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Cmd: hunt/forage  wood/fire  shelter/craft  use/actions  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
 	maxWidth := totalWidth - 2
 	if maxWidth < 20 {
 		maxWidth = 20
@@ -5252,9 +5254,9 @@ func (m menuModel) viewRunPlayers() string {
 		green.Render(fmt.Sprintf("Hunger  %s", renderEffectBar(p.Hunger))),
 		green.Render(fmt.Sprintf("Thirst  %s", renderEffectBar(p.Thirst))),
 		green.Render(fmt.Sprintf("Fatigue %s", renderEffectBar(p.Fatigue))),
-		green.Render(fmt.Sprintf("Reserves  %dkcal  %dg protein  %dg fat", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG)),
-		green.Render(fmt.Sprintf("Needs/day %dkcal  %dg protein  %dg fat", needs.CaloriesKcal, needs.ProteinG, needs.FatG)),
-		green.Render(fmt.Sprintf("Nutrition  %dkcal  %dg protein  %dg fat", p.Nutrition.CaloriesKcal, p.Nutrition.ProteinG, p.Nutrition.FatG)),
+		green.Render(fmt.Sprintf("Reserves  %dkcal  %dg protein  %dg fat  %dg sugar", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG, p.SugarReserveG)),
+		green.Render(fmt.Sprintf("Needs/day %dkcal  %dg protein  %dg fat  %dg sugar", needs.CaloriesKcal, needs.ProteinG, needs.FatG, needs.SugarG)),
+		green.Render(fmt.Sprintf("Nutrition  %dkcal  %dg protein  %dg fat  %dg sugar", p.Nutrition.CaloriesKcal, p.Nutrition.ProteinG, p.Nutrition.FatG, p.Nutrition.SugarG)),
 		"",
 		brightGreen.Render("Active Ailments"),
 		strings.Join(ailments, "\n"),
@@ -5342,6 +5344,22 @@ func (m menuModel) viewRunCommandLibrary() string {
 		green.Render("hunt land [raw] [liver] [p#] [grams]"),
 		green.Render("hunt fish [raw] [liver] [p#] [grams]"),
 		green.Render("hunt air [raw] [liver] [p#] [grams]"),
+		green.Render("forage [roots|berries|fruits|vegetables|any] [p#] [grams]"),
+		"",
+		brightGreen.Render("Camp Systems"),
+		green.Render("trees"),
+		green.Render("wood gather [kg] [p#]"),
+		green.Render("wood stock"),
+		green.Render("fire status"),
+		green.Render("fire build [woodtype] [kg] [p#]"),
+		green.Render("fire tend [woodtype] [kg] [p#]"),
+		green.Render("fire out"),
+		green.Render("shelter list"),
+		green.Render("shelter build <id> [p#]"),
+		green.Render("shelter status"),
+		green.Render("craft list"),
+		green.Render("craft make <id> [p#]"),
+		green.Render("craft inventory"),
 		"",
 		brightGreen.Render("Equipment Actions"),
 		green.Render("actions [p#]"),

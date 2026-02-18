@@ -135,13 +135,14 @@ func (n NutritionTotals) add(other NutritionTotals) NutritionTotals {
 		CaloriesKcal: n.CaloriesKcal + other.CaloriesKcal,
 		ProteinG:     n.ProteinG + other.ProteinG,
 		FatG:         n.FatG + other.FatG,
+		SugarG:       n.SugarG + other.SugarG,
 	}
 }
 
 func nutritionToPlayerEffects(n NutritionTotals) (energy, hydration, morale int) {
-	energy = clamp(n.CaloriesKcal/100+n.ProteinG/40+n.FatG/35, 0, 20)
-	hydration = clamp(n.ProteinG/90+n.FatG/120, 0, 4)
-	morale = clamp(n.CaloriesKcal/180+n.FatG/70, 0, 8)
+	energy = clamp(n.CaloriesKcal/100+n.ProteinG/40+n.FatG/35+n.SugarG/14, 0, 22)
+	hydration = clamp(n.ProteinG/90+n.FatG/120+n.SugarG/50, 0, 5)
+	morale = clamp(n.CaloriesKcal/180+n.FatG/70+n.SugarG/20, 0, 10)
 	return energy, hydration, morale
 }
 

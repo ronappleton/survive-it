@@ -42,8 +42,20 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, wood gather [kg] [p#], fire status|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
 		}
+	case "forage":
+		return s.executeForageCommand(fields[1:])
+	case "trees":
+		return s.executeTreesCommand()
+	case "wood":
+		return s.executeWoodCommand(fields[1:])
+	case "fire":
+		return s.executeFireCommand(fields[1:])
+	case "shelter":
+		return s.executeShelterCommand(fields[1:])
+	case "craft":
+		return s.executeCraftCommand(fields[1:])
 	case "actions":
 		playerID := 1
 		if len(fields) > 1 {
@@ -131,7 +143,7 @@ func (s *RunState) executeUseCommand(fields []string) RunCommandResult {
 	totalHydrationDelta := action.Hydration
 	totalMoraleDelta := action.MoraleDelta
 
-	if action.Nutrition.CaloriesKcal > 0 || action.Nutrition.ProteinG > 0 || action.Nutrition.FatG > 0 {
+	if action.Nutrition.CaloriesKcal > 0 || action.Nutrition.ProteinG > 0 || action.Nutrition.FatG > 0 || action.Nutrition.SugarG > 0 {
 		player.Nutrition = player.Nutrition.add(action.Nutrition)
 		applyMealNutritionReserves(player, action.Nutrition)
 		energyBonus, hydrationBonus, moraleBonus := nutritionToPlayerEffects(action.Nutrition)
@@ -158,11 +170,234 @@ func (s *RunState) executeUseCommand(fields []string) RunCommandResult {
 
 	msg := fmt.Sprintf("P%d used %s -> %s. %+dE %+dH2O %+dM",
 		playerID, itemCommandLabel(item), action.ID, totalEnergyDelta, totalHydrationDelta, totalMoraleDelta)
-	if action.Nutrition.CaloriesKcal > 0 || action.Nutrition.ProteinG > 0 || action.Nutrition.FatG > 0 {
-		msg += fmt.Sprintf(" | +%dkcal +%dgP +%dgF", action.Nutrition.CaloriesKcal, action.Nutrition.ProteinG, action.Nutrition.FatG)
+	if action.Nutrition.CaloriesKcal > 0 || action.Nutrition.ProteinG > 0 || action.Nutrition.FatG > 0 || action.Nutrition.SugarG > 0 {
+		msg += fmt.Sprintf(" | +%dkcal +%dgP +%dgF +%dgS", action.Nutrition.CaloriesKcal, action.Nutrition.ProteinG, action.Nutrition.FatG, action.Nutrition.SugarG)
 	}
 	msg += specialMsg
 	return RunCommandResult{Handled: true, Message: msg}
+}
+
+func (s *RunState) executeForageCommand(fields []string) RunCommandResult {
+	playerID := 1
+	category := PlantCategoryAny
+	grams := 0
+
+	for _, field := range fields {
+		if parsed := parsePlayerToken(field); parsed > 0 {
+			playerID = parsed
+			continue
+		}
+		if parsedGrams, err := strconv.Atoi(field); err == nil && parsedGrams > 0 {
+			grams = parsedGrams
+			continue
+		}
+		category = ParsePlantCategory(field)
+	}
+
+	result, err := s.ForageAndConsume(playerID, category, grams)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Forage failed: %v", err)}
+	}
+
+	return RunCommandResult{
+		Handled: true,
+		Message: fmt.Sprintf("P%d foraged %dg %s: %dkcal %dgP %dgF %dgS",
+			playerID,
+			result.HarvestGrams,
+			result.Plant.Name,
+			result.Nutrition.CaloriesKcal,
+			result.Nutrition.ProteinG,
+			result.Nutrition.FatG,
+			result.Nutrition.SugarG,
+		),
+	}
+}
+
+func (s *RunState) executeTreesCommand() RunCommandResult {
+	trees := TreesForBiome(s.Scenario.Biome)
+	if len(trees) == 0 {
+		return RunCommandResult{Handled: true, Message: "No tree resources registered for this biome."}
+	}
+	parts := make([]string, 0, len(trees))
+	for _, tree := range trees {
+		parts = append(parts, fmt.Sprintf("%s(%s)", tree.Name, tree.WoodType))
+	}
+	return RunCommandResult{Handled: true, Message: "Trees -> " + strings.Join(parts, ", ")}
+}
+
+func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood stock"}
+	}
+
+	switch fields[0] {
+	case "stock", "status":
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Wood stock: %s", formatWoodStock(s.WoodStock))}
+	case "gather":
+		playerID, amount, hasAmount, _ := parseOptionalPlayerAndNumber(fields[1:])
+		if !hasAmount {
+			amount = 0
+		}
+		tree, kg, err := s.GatherWood(playerID, amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Wood gather failed: %v", err)}
+		}
+		return RunCommandResult{
+			Handled: true,
+			Message: fmt.Sprintf("P%d gathered %.1fkg from %s (%s). Stock: %s",
+				playerID, kg, tree.Name, tree.WoodType, formatWoodStock(s.WoodStock)),
+		}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood stock"}
+	}
+}
+
+func (s *RunState) executeFireCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 || fields[0] == "status" {
+		if !s.Fire.Lit {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire: out | Wood stock: %s", formatWoodStock(s.WoodStock))}
+		}
+		return RunCommandResult{
+			Handled: true,
+			Message: fmt.Sprintf("Fire: lit (%s) intensity %d heat %dC fuel %.1fkg | Wood stock: %s",
+				s.Fire.WoodType, s.Fire.Intensity, s.Fire.HeatC, s.Fire.FuelKg, formatWoodStock(s.WoodStock)),
+		}
+	}
+
+	switch fields[0] {
+	case "out", "extinguish":
+		s.ExtinguishFire()
+		return RunCommandResult{Handled: true, Message: "Fire extinguished."}
+	case "build", "start":
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if !hasAmount {
+			amount = 1.0
+		}
+		woodType := s.Fire.WoodType
+		if woodType == "" {
+			if len(s.WoodStock) > 0 {
+				woodType = s.WoodStock[0].Type
+			} else {
+				woodType = WoodTypeHardwood
+			}
+		}
+		for _, token := range rest {
+			if parsed := parseWoodType(token); parsed != "" {
+				woodType = parsed
+				break
+			}
+		}
+		if err := s.StartFire(playerID, woodType, amount); err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire start failed: %v", err)}
+		}
+		return RunCommandResult{
+			Handled: true,
+			Message: fmt.Sprintf("P%d started fire with %.1fkg %s. Intensity %d, heat %dC.",
+				playerID, amount, woodType, s.Fire.Intensity, s.Fire.HeatC),
+		}
+	case "tend":
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if !hasAmount {
+			amount = 0.8
+		}
+		woodType := s.Fire.WoodType
+		for _, token := range rest {
+			if parsed := parseWoodType(token); parsed != "" {
+				woodType = parsed
+				break
+			}
+		}
+		if err := s.TendFire(playerID, amount, woodType); err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fire tend failed: %v", err)}
+		}
+		return RunCommandResult{
+			Handled: true,
+			Message: fmt.Sprintf("P%d tended fire with %.1fkg %s. Intensity %d, heat %dC, fuel %.1fkg.",
+				playerID, amount, woodType, s.Fire.Intensity, s.Fire.HeatC, s.Fire.FuelKg),
+		}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: fire status | fire build [woodtype] [kg] [p#] | fire tend [woodtype] [kg] [p#] | fire out"}
+	}
+}
+
+func (s *RunState) executeShelterCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 || fields[0] == "status" {
+		if s.Shelter.Type == "" || s.Shelter.Durability <= 0 {
+			return RunCommandResult{Handled: true, Message: "Shelter: none"}
+		}
+		spec, ok := shelterByID(s.Shelter.Type)
+		if !ok {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s durability %d%%", s.Shelter.Type, s.Shelter.Durability)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s durability %d%%", spec.Name, s.Shelter.Durability)}
+	}
+
+	switch fields[0] {
+	case "list":
+		options := SheltersForBiome(s.Scenario.Biome)
+		parts := make([]string, 0, len(options))
+		for _, option := range options {
+			parts = append(parts, fmt.Sprintf("%s(%s)", option.Name, option.ID))
+		}
+		return RunCommandResult{Handled: true, Message: "Shelters -> " + strings.Join(parts, ", ")}
+	case "build":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: shelter build <id> [p#]"}
+		}
+		playerID := 1
+		shelterID := fields[1]
+		if len(fields) > 2 {
+			for _, token := range fields[2:] {
+				if parsed := parsePlayerToken(token); parsed > 0 {
+					playerID = parsed
+				}
+			}
+		}
+		shelter, err := s.BuildShelter(playerID, shelterID)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter build failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d built %s. Durability 100%%.", playerID, shelter.Name)}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: shelter list | shelter build <id> [p#] | shelter status"}
+	}
+}
+
+func (s *RunState) executeCraftCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: craft list | craft make <id> [p#] | craft inventory"}
+	}
+	switch fields[0] {
+	case "inventory":
+		if len(s.CraftedItems) == 0 {
+			return RunCommandResult{Handled: true, Message: "Crafted: none"}
+		}
+		return RunCommandResult{Handled: true, Message: "Crafted: " + strings.Join(s.CraftedItems, ", ")}
+	case "list":
+		options := CraftablesForBiome(s.Scenario.Biome)
+		parts := make([]string, 0, len(options))
+		for _, option := range options {
+			parts = append(parts, fmt.Sprintf("%s(%s)", option.Name, option.ID))
+		}
+		return RunCommandResult{Handled: true, Message: "Craftables -> " + strings.Join(parts, ", ")}
+	case "make":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: craft make <id> [p#]"}
+		}
+		playerID := 1
+		for _, token := range fields[2:] {
+			if parsed := parsePlayerToken(token); parsed > 0 {
+				playerID = parsed
+			}
+		}
+		item, err := s.CraftItem(playerID, fields[1])
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Craft failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d crafted %s.", playerID, item.Name)}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: craft list | craft make <id> [p#] | craft inventory"}
+	}
 }
 
 func parseItemAndAction(tokens []string) (KitItem, string, bool) {
@@ -536,7 +771,7 @@ var equipmentActionLibrary = map[KitItem][]equipmentAction{
 		{ID: "preserve_meat", Aliases: []string{"salt meat", "cure food"}, Description: "Preserve meat to stretch food stores.", EnergyDelta: 0, MoraleDelta: 1},
 	},
 	KitEmergencyRations: {
-		{ID: "eat_ration", Aliases: []string{"eat", "ration"}, Description: "Eat ration pack for rapid calories.", Nutrition: NutritionTotals{CaloriesKcal: 650, ProteinG: 24, FatG: 26}, MoraleDelta: 2},
+		{ID: "eat_ration", Aliases: []string{"eat", "ration"}, Description: "Eat ration pack for rapid calories.", Nutrition: NutritionTotals{CaloriesKcal: 650, ProteinG: 24, FatG: 26, SugarG: 28}, MoraleDelta: 2},
 	},
 	KitDryBag: {
 		{ID: "waterproof_cache", Aliases: []string{"protect gear", "dry stash"}, Description: "Keep critical gear dry during storms.", EnergyDelta: 0, MoraleDelta: 2},

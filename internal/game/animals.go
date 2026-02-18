@@ -19,12 +19,14 @@ type NutritionPer100g struct {
 	CaloriesKcal int
 	ProteinG     int
 	FatG         int
+	SugarG       int
 }
 
 type NutritionTotals struct {
 	CaloriesKcal int `json:"calories_kcal"`
 	ProteinG     int `json:"protein_g"`
 	FatG         int `json:"fat_g"`
+	SugarG       int `json:"sugar_g"`
 }
 
 type DiseaseID string
@@ -1405,6 +1407,7 @@ func (c CatchResult) NutritionForGrams(portionGrams int) NutritionTotals {
 		CaloriesKcal: int(math.Round(float64(per100.CaloriesKcal) * float64(portionGrams) / 100.0)),
 		ProteinG:     int(math.Round(float64(per100.ProteinG) * float64(portionGrams) / 100.0)),
 		FatG:         int(math.Round(float64(per100.FatG) * float64(portionGrams) / 100.0)),
+		SugarG:       int(math.Round(float64(per100.SugarG) * float64(portionGrams) / 100.0)),
 	}
 }
 
