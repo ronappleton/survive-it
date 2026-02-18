@@ -1817,7 +1817,7 @@ func (m menuModel) viewPlayerConfig() string {
 	}
 
 	detail := m.playerEditorStatsText(current, scenarioLabel, activePlayer, playerCount)
-	ascii := m.playerEditorAsciiText(current)
+	ascii := m.playerEditorAsciiText(current, asciiWidth-4, contentHeight-4)
 	listPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
@@ -1876,10 +1876,10 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 	}, "\n")
 }
 
-func (m menuModel) playerEditorAsciiText(p game.PlayerConfig) string {
+func (m menuModel) playerEditorAsciiText(p game.PlayerConfig, widthChars, heightRows int) string {
 	return strings.Join([]string{
 		brightGreen.Render("Body Preview"),
-		green.Render(playerASCIIArt(p)),
+		renderPlayerBodyANSI(p, widthChars, heightRows),
 		dimGreen.Render("Figure scale reacts to height and build."),
 	}, "\n\n")
 }
