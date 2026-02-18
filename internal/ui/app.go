@@ -4820,11 +4820,16 @@ func (m menuModel) formatTemperatureRange(r game.TemperatureRange) string {
 	return fmt.Sprintf("%dC to %dC", r.MinC, r.MaxC)
 }
 
-func (m menuModel) currentRunTemperatureC() int {
+func (m menuModel) currentRunWeather() game.WeatherState {
 	if m.run == nil {
-		return 0
+		return game.WeatherState{}
 	}
-	return game.TemperatureForDayCelsius(m.run.Scenario.Biome, m.run.Day)
+	m.run.EnsureWeather()
+	return m.run.Weather
+}
+
+func (m menuModel) currentRunTemperatureC() int {
+	return m.currentRunWeather().TemperatureC
 }
 
 func (m menuModel) headerText() string {
@@ -4832,6 +4837,11 @@ func (m menuModel) headerText() string {
 	seasonStr := "unknown"
 	if ok {
 		seasonStr = string(season)
+	}
+	weather := m.currentRunWeather()
+	weatherLabel := game.WeatherLabel(weather.Type)
+	if weather.StreakDays > 1 {
+		weatherLabel = fmt.Sprintf("%s x%d", weatherLabel, weather.StreakDays)
 	}
 	temp := m.formatTemperature(m.currentRunTemperatureC())
 	gameTime := m.gameTimeLabel()
@@ -4841,8 +4851,8 @@ func (m menuModel) headerText() string {
 	b.WriteString(lipgloss.JoinVertical(
 		lipgloss.Left,
 		brightGreen.Render("SURVIVE IT!"),
-		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d  |  Temp: %s",
-			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day, temp)),
+		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d  |  Weather: %s  |  Temp: %s",
+			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day, weatherLabel, temp)),
 		dimGreen.Render(fmt.Sprintf("Game Time: %s  |  Next Day In: %s", gameTime, nextDayIn)),
 	))
 	return b.String()
@@ -5047,6 +5057,7 @@ func loadRunFromFile(path string, availableScenarios []game.Scenario) (game.RunS
 	if payload.Run.SeasonSetID == "" {
 		payload.Run.SeasonSetID = payload.Run.Scenario.DefaultSeasonSetID
 	}
+	payload.Run.EnsureWeather()
 
 	return payload.Run, nil
 }
@@ -5266,13 +5277,15 @@ func newRunStateWithScenarios(config game.RunConfig, scenarios []game.Scenario) 
 		return game.RunState{}, fmt.Errorf("scenario not found: %s", resolvedConfig.ScenarioID)
 	}
 
-	return game.RunState{
+	state := game.RunState{
 		Config:      resolvedConfig,
 		Scenario:    scenario,
 		SeasonSetID: scenario.DefaultSeasonSetID,
 		Day:         1,
 		Players:     game.CreatePlayers(resolvedConfig),
-	}, nil
+	}
+	state.EnsureWeather()
+	return state, nil
 }
 
 func seededRNG(seed int64) *rand.Rand {

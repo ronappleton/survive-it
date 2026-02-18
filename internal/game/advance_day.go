@@ -2,6 +2,12 @@ package game
 
 func (s *RunState) AdvanceDay() {
 	s.Day++
+	s.EnsureWeather()
+	season, ok := s.CurrentSeason()
+	if !ok {
+		season = SeasonAutumn
+	}
+	weatherImpact := weatherImpactForDay(s.Scenario.Biome, season, s.Weather.Type, s.Weather.StreakDays, s.Weather.TemperatureC)
 
 	for i := range s.Players {
 		p := &s.Players[i]
@@ -10,6 +16,11 @@ func (s *RunState) AdvanceDay() {
 		p.Energy -= physiologyProfile.EnergyDrainPerDay
 		p.Hydration -= physiologyProfile.HydrationDrainPerDay
 		p.Morale -= physiologyProfile.MoraleDrainPerDay
+
+		playerWeatherImpact := adjustWeatherImpactForPlayer(weatherImpact, *p, s.Weather.Type)
+		p.Energy += playerWeatherImpact.Energy
+		p.Hydration += playerWeatherImpact.Hydration
+		p.Morale += playerWeatherImpact.Morale
 
 		clampPlayer(p)
 	}

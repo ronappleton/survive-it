@@ -11,6 +11,7 @@ type RunState struct {
 	SeasonSetID SeasonSetID
 	Day         int
 	Players     []PlayerState
+	Weather     WeatherState
 }
 
 func NewRunState(config RunConfig) (RunState, error) {
@@ -37,13 +38,16 @@ func NewRunState(config RunConfig) (RunState, error) {
 		return RunState{}, fmt.Errorf("scenario not found: %s", resolvedConfig.ScenarioID)
 	}
 
-	return RunState{
+	state := RunState{
 		Config:      resolvedConfig,
 		Scenario:    scenario,
 		SeasonSetID: scenario.DefaultSeasonSetID,
 		Day:         1,
 		Players:     CreatePlayers(resolvedConfig),
-	}, nil
+	}
+	state.EnsureWeather()
+
+	return state, nil
 }
 
 func GetScenario(scenarios []Scenario, id ScenarioID) (Scenario, bool) {
