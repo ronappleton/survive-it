@@ -92,3 +92,37 @@ func TestAdvanceDayAppliesMetabolismPenalty(t *testing.T) {
 		t.Fatalf("expected effect bars to stay bounded, thirst=%d fatigue=%d", player.Thirst, player.Fatigue)
 	}
 }
+
+func TestEffectBarPenaltyUsesPlayerModifiers(t *testing.T) {
+	base := PlayerState{
+		Hunger:    85,
+		Thirst:    85,
+		Fatigue:   85,
+		Energy:    60,
+		Hydration: 60,
+		Morale:    60,
+	}
+
+	strong := base
+	strong.Endurance = 3
+	strong.Bushcraft = 3
+	strong.Mental = 3
+
+	weak := base
+	weak.Endurance = -3
+	weak.Bushcraft = -3
+	weak.Mental = -3
+
+	strongPenalty := effectBarPenalty(strong)
+	weakPenalty := effectBarPenalty(weak)
+
+	if strongPenalty.Energy <= weakPenalty.Energy {
+		t.Fatalf("expected endurance to improve energy penalty, strong=%d weak=%d", strongPenalty.Energy, weakPenalty.Energy)
+	}
+	if strongPenalty.Hydration <= weakPenalty.Hydration {
+		t.Fatalf("expected bushcraft to improve hydration penalty, strong=%d weak=%d", strongPenalty.Hydration, weakPenalty.Hydration)
+	}
+	if strongPenalty.Morale <= weakPenalty.Morale {
+		t.Fatalf("expected mental to improve morale penalty, strong=%d weak=%d", strongPenalty.Morale, weakPenalty.Morale)
+	}
+}

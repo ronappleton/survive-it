@@ -190,5 +190,16 @@ func effectBarPenalty(player PlayerState) statDelta {
 		out.Energy -= 3
 	}
 
+	// Core player modifiers mitigate or amplify bar-derived penalties.
+	if out.Energy < 0 {
+		out.Energy += clamp(player.Endurance, -3, 3)
+	}
+	if out.Hydration < 0 {
+		out.Hydration += clamp(player.Bushcraft, -3, 3)
+	}
+	if out.Morale < 0 {
+		out.Morale += clamp(player.Mental, -3, 3)
+	}
+
 	return out
 }
