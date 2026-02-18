@@ -37,6 +37,7 @@ const (
 	screenSetup
 	screenScenarioPicker
 	screenPlayerConfig
+	screenKitPicker
 	screenLoadRun
 	screenScenarioBuilder
 	screenRun
@@ -59,6 +60,21 @@ var (
 	brightGreen = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	dimGreen    = lipgloss.NewStyle().Foreground(lipgloss.Color("22"))
 	border      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	dosBox      = lipgloss.Border{
+		Top:          "-",
+		Bottom:       "-",
+		Left:         "|",
+		Right:        "|",
+		TopLeft:      "+",
+		TopRight:     "+",
+		BottomLeft:   "+",
+		BottomRight:  "+",
+		MiddleLeft:   "|",
+		MiddleRight:  "|",
+		Middle:       "+",
+		MiddleTop:    "+",
+		MiddleBottom: "+",
+	}
 )
 
 // --- Menu model ---
@@ -89,6 +105,7 @@ type menuModel struct {
 	setup  setupState
 	pick   scenarioPickerState
 	pcfg   playerConfigState
+	kit    kitPickerState
 	load   loadRunState
 	build  scenarioBuilderState
 
@@ -111,6 +128,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		setup:           newSetupState(),
 		pick:            newScenarioPickerState(),
 		pcfg:            newPlayerConfigState(),
+		kit:             newKitPickerState(),
 		load:            newLoadRunState(),
 		build:           newScenarioBuilderState(),
 		activeSaveSlot:  1,
@@ -161,6 +179,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenPlayerConfig {
 			return m.updatePlayerConfig(msg)
 		}
+		if m.screen == screenKitPicker {
+			return m.updateKitPicker(msg)
+		}
 		if m.screen == screenLoadRun {
 			return m.updateLoadRun(msg)
 		}
@@ -198,6 +219,9 @@ func (m menuModel) View() string {
 	}
 	if m.screen == screenPlayerConfig {
 		return m.viewPlayerConfig()
+	}
+	if m.screen == screenKitPicker {
+		return m.viewKitPicker()
 	}
 	if m.screen == screenLoadRun {
 		return m.viewLoadRun()
@@ -346,6 +370,7 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case itemStart:
 			m.setup = newSetupState()
 			m.pcfg = newPlayerConfigState()
+			m.kit = newKitPickerState()
 			m = m.ensureSetupScenarioSelection()
 			m = m.ensureSetupPlayers()
 			m.screen = screenSetup
@@ -399,6 +424,19 @@ type playerConfigState struct {
 	nameIdx      int
 	addKitIdx    int
 	addIssuedIdx int
+}
+
+type kitPickerTarget int
+
+const (
+	kitTargetPersonal kitPickerTarget = iota
+	kitTargetIssued
+)
+
+type kitPickerState struct {
+	cursor   int
+	target   kitPickerTarget
+	returnTo screen
 }
 
 type saveSlotMeta struct {
@@ -477,9 +515,11 @@ const (
 	playerRowMental
 	playerRowKitLimit
 	playerRowPersonalKit
+	playerRowEditPersonalKit
 	playerRowAddPersonalKit
 	playerRowRemovePersonalKit
 	playerRowIssuedKit
+	playerRowEditIssuedKit
 	playerRowAddIssuedKit
 	playerRowRemoveIssuedKit
 	playerRowResetIssuedKit
@@ -536,6 +576,14 @@ func newPlayerConfigState() playerConfigState {
 		nameIdx:      0,
 		addKitIdx:    0,
 		addIssuedIdx: 0,
+	}
+}
+
+func newKitPickerState() kitPickerState {
+	return kitPickerState{
+		cursor:   0,
+		target:   kitTargetPersonal,
+		returnTo: screenPlayerConfig,
 	}
 }
 
@@ -836,8 +884,22 @@ func wrapIndex(current, delta, size int) int {
 	return next % size
 }
 
+func dosRule(width int) string {
+	if width < 40 {
+		width = 40
+	}
+	if width > 100 {
+		width = 100
+	}
+	return strings.Repeat("-", width)
+}
+
+func dosTitle(title string) string {
+	return brightGreen.Render("[" + strings.ToUpper(title) + "]")
+}
+
 func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const rowCount = 7 // mode, scenario, players, run length, configure players, start, cancel
+	const rowCount = 8 // mode, scenario, players, run length, configure players, configure issued kit, start, cancel
 	m = m.ensureSetupScenarioSelection()
 	m = m.ensureSetupPlayers()
 
@@ -862,6 +924,10 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
+		if m.setup.cursor == 5 {
+			m = m.openIssuedKitPicker(screenSetup)
+			return m, nil
+		}
 		m = m.adjustSetupChoice(-1)
 		return m, nil
 	case "right":
@@ -871,6 +937,10 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.setup.cursor == 4 {
 			m.screen = screenPlayerConfig
+			return m, nil
+		}
+		if m.setup.cursor == 5 {
+			m = m.openIssuedKitPicker(screenSetup)
 			return m, nil
 		}
 		m = m.adjustSetupChoice(1)
@@ -884,8 +954,11 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenPlayerConfig
 			return m, nil
 		case 5:
-			return m.startRunFromSetup()
+			m = m.openIssuedKitPicker(screenSetup)
+			return m, nil
 		case 6:
+			return m.startRunFromSetup()
+		case 7:
 			m.screen = screenMenu
 			return m, nil
 		default:
@@ -988,6 +1061,12 @@ func (m menuModel) viewSetup() string {
 	if selected, found := findSetupScenarioByID(scenarios, m.setup.scenarioID); found {
 		scenarioLabel = selected.label
 	}
+	readyPlayers := 0
+	for _, p := range m.setup.players {
+		if len(p.Kit) > 0 {
+			readyPlayers++
+		}
+	}
 
 	rows := []struct {
 		label string
@@ -998,6 +1077,7 @@ func (m menuModel) viewSetup() string {
 		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
 		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
 		{label: "Configure Players", value: ""},
+		{label: "Configure Issued Kit", value: kitSummary(m.setup.issuedKit, 0)},
 		{label: "Start Run", value: ""},
 		{label: "Cancel", value: ""},
 	}
@@ -1005,10 +1085,11 @@ func (m menuModel) viewSetup() string {
 	var b strings.Builder
 	b.WriteString(lipgloss.JoinVertical(
 		lipgloss.Left,
-		brightGreen.Render("NEW RUN WIZARD"),
-		dimGreen.Render("Choose options, then select Start Run"),
+		dosTitle("New Run Wizard"),
+		dimGreen.Render("Step through each setup screen, then Start Run"),
+		dimGreen.Render(fmt.Sprintf("Player kits configured: %d/%d", readyPlayers, len(m.setup.players))),
 	) + "\n")
-	b.WriteString(border.Render("----------------------------------------") + "\n\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 
 	for i, row := range rows {
 		cursor := "  "
@@ -1023,11 +1104,12 @@ func (m menuModel) viewSetup() string {
 			continue
 		}
 
-		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-10s %s", row.label+":", row.value)) + "\n")
+		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-22s %s", row.label+":", row.value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  (Scenario opens picker)  Shift+Q back") + "\n")
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/confirm  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("Natural flow: Scenario -> Players -> Issued Kit -> Start Run") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
@@ -1162,14 +1244,14 @@ func (m menuModel) viewScenarioPicker() string {
 
 	detailText := m.scenarioDetailText(selected)
 	listPane := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
 		Width(listWidth).
 		Height(contentHeight).
 		Render(list.String())
 	detailPane := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
 		Width(detailWidth).
@@ -1177,7 +1259,7 @@ func (m menuModel) viewScenarioPicker() string {
 		Render(detailText)
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SCENARIO SELECT") + "\n")
+	b.WriteString(dosTitle("Scenario Select") + "\n")
 	b.WriteString(dimGreen.Render("Mode: "+modeLabel(m.setupMode())+"  |  ↑/↓ browse, Enter select, Shift+Q back") + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
 	return b.String()
@@ -1207,6 +1289,209 @@ func (m menuModel) scenarioDetailText(s game.Scenario) string {
 	b.WriteString(brightGreen.Render("Motivation") + "\n")
 	b.WriteString(green.Render(motivation))
 	return b.String()
+}
+
+func (m menuModel) openPersonalKitPicker(returnTo screen) menuModel {
+	m = m.ensureSetupPlayers()
+	m = m.normalizePlayerConfigState()
+	m.kit = newKitPickerState()
+	m.kit.target = kitTargetPersonal
+	m.kit.returnTo = returnTo
+	m.kit.cursor = 0
+	if len(m.setup.players) > 0 {
+		playerKit := m.setup.players[m.pcfg.playerIdx].Kit
+		all := game.AllKitItems()
+		for i, item := range all {
+			if hasKitItem(playerKit, item) {
+				m.kit.cursor = i
+				break
+			}
+		}
+	}
+	m.screen = screenKitPicker
+	return m
+}
+
+func (m menuModel) openIssuedKitPicker(returnTo screen) menuModel {
+	m = m.ensureSetupPlayers()
+	m.kit = newKitPickerState()
+	m.kit.target = kitTargetIssued
+	m.kit.returnTo = returnTo
+	m.kit.cursor = 0
+	all := game.AllKitItems()
+	for i, item := range all {
+		if hasKitItem(m.setup.issuedKit, item) {
+			m.kit.cursor = i
+			break
+		}
+	}
+	m.screen = screenKitPicker
+	return m
+}
+
+func (m menuModel) updateKitPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	all := game.AllKitItems()
+	if len(all) == 0 {
+		m.screen = m.kit.returnTo
+		m.status = "No kit items available."
+		return m, nil
+	}
+	if m.kit.cursor < 0 || m.kit.cursor >= len(all) {
+		m.kit.cursor = 0
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		m.screen = m.kit.returnTo
+		return m, nil
+	case "up", "k":
+		m.kit.cursor = wrapIndex(m.kit.cursor, -1, len(all))
+		return m, nil
+	case "down", "j":
+		m.kit.cursor = wrapIndex(m.kit.cursor, 1, len(all))
+		return m, nil
+	case "enter", " ":
+		m = m.toggleKitPickerSelection(all[m.kit.cursor])
+		return m, nil
+	case "R", "r":
+		if m.kit.target == kitTargetIssued {
+			m = m.resetIssuedKitRecommendations()
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
+func (m menuModel) toggleKitPickerSelection(item game.KitItem) menuModel {
+	switch m.kit.target {
+	case kitTargetPersonal:
+		if len(m.setup.players) == 0 {
+			return m
+		}
+		m = m.normalizePlayerConfigState()
+		p := &m.setup.players[m.pcfg.playerIdx]
+		if idx := indexOfKitItem(p.Kit, item); idx >= 0 {
+			p.Kit = removeKitItemAt(p.Kit, idx)
+			m.status = fmt.Sprintf("Removed %s from %s", item, playerDisplayName(*p))
+			return m
+		}
+		if len(p.Kit) >= p.KitLimit {
+			m.status = fmt.Sprintf("Limit reached for %s (%d item max).", playerDisplayName(*p), p.KitLimit)
+			return m
+		}
+		p.Kit = append(p.Kit, item)
+		m.status = fmt.Sprintf("Added %s to %s", item, playerDisplayName(*p))
+	case kitTargetIssued:
+		if idx := indexOfKitItem(m.setup.issuedKit, item); idx >= 0 {
+			m.setup.issuedKit = removeKitItemAt(m.setup.issuedKit, idx)
+			m.setup.issuedCustom = true
+			m.status = fmt.Sprintf("Removed %s from issued kit", item)
+			return m
+		}
+		m.setup.issuedKit = append(m.setup.issuedKit, item)
+		m.setup.issuedCustom = true
+		m.status = fmt.Sprintf("Added %s to issued kit", item)
+	}
+	return m
+}
+
+func playerDisplayName(p game.PlayerConfig) string {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return "player"
+	}
+	return name
+}
+
+func (m menuModel) viewKitPicker() string {
+	all := game.AllKitItems()
+	if len(all) == 0 {
+		return brightGreen.Render("No kit items available.")
+	}
+	if m.kit.cursor < 0 || m.kit.cursor >= len(all) {
+		m.kit.cursor = 0
+	}
+
+	title := "KIT PICKER"
+	sub := "Toggle with Enter"
+	selectedCount := 0
+	limit := 0
+	selected := map[game.KitItem]bool{}
+
+	if m.kit.target == kitTargetPersonal && len(m.setup.players) > 0 {
+		m = m.normalizePlayerConfigState()
+		p := m.setup.players[m.pcfg.playerIdx]
+		title = fmt.Sprintf("KIT PICKER :: PLAYER %d", m.pcfg.playerIdx+1)
+		sub = fmt.Sprintf("Name: %s  |  Limit: %d", playerDisplayName(p), p.KitLimit)
+		limit = p.KitLimit
+		selectedCount = len(p.Kit)
+		for _, item := range p.Kit {
+			selected[item] = true
+		}
+	} else {
+		title = "KIT PICKER :: ISSUED"
+		if m.setup.issuedCustom {
+			sub = "Scenario-adjusted custom issued kit"
+		} else {
+			sub = "Scenario recommendation active"
+		}
+		selectedCount = len(m.setup.issuedKit)
+		for _, item := range m.setup.issuedKit {
+			selected[item] = true
+		}
+	}
+
+	var list strings.Builder
+	for i, item := range all {
+		cursor := "  "
+		line := fmt.Sprintf("[ ] %s", item)
+		if selected[item] {
+			line = fmt.Sprintf("[*] %s", item)
+		}
+		if i == m.kit.cursor {
+			cursor = "> "
+			list.WriteString(cursor + brightGreen.Render(line) + "\n")
+		} else {
+			list.WriteString(cursor + green.Render(line) + "\n")
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(dosTitle(title) + "\n")
+	if limit > 0 {
+		b.WriteString(dimGreen.Render(fmt.Sprintf("%s  |  Selected: %d/%d", sub, selectedCount, limit)) + "\n")
+	} else {
+		b.WriteString(dimGreen.Render(fmt.Sprintf("%s  |  Selected: %d", sub, selectedCount)) + "\n")
+	}
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n")
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(maxInt(48, m.w-8)).
+		Height(maxInt(12, m.h-10)).
+		Render(list.String())
+	b.WriteString(listPane + "\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n")
+	if m.kit.target == kitTargetIssued {
+		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  R reset recommended  Shift+Q back") + "\n")
+	} else {
+		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  Shift+Q back") + "\n")
+	}
+	if m.status != "" {
+		b.WriteString(green.Render(m.status) + "\n")
+	}
+	return b.String()
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1255,10 +1540,16 @@ func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.setup.players[m.pcfg.playerIdx].Name = names[m.pcfg.nameIdx]
+		case playerRowEditPersonalKit, playerRowPersonalKit:
+			m = m.openPersonalKitPicker(screenPlayerConfig)
+			return m, nil
 		case playerRowAddPersonalKit:
 			m = m.addPersonalKitItem()
 		case playerRowRemovePersonalKit:
 			m = m.removePersonalKitItem()
+		case playerRowEditIssuedKit, playerRowIssuedKit:
+			m = m.openIssuedKitPicker(screenPlayerConfig)
+			return m, nil
 		case playerRowAddIssuedKit:
 			m = m.addIssuedKitItem()
 		case playerRowRemoveIssuedKit:
@@ -1305,10 +1596,10 @@ func (m menuModel) viewPlayerConfig() string {
 	activePlayer := m.pcfg.playerIdx + 1
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("PLAYER CONFIGURATION") + "\n")
+	b.WriteString(dosTitle("Player Configuration") + "\n")
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n")
-	b.WriteString(border.Render("------------------------------------------------------------") + "\n\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 
 	for i, row := range rows {
 		cursor := "  "
@@ -1333,9 +1624,9 @@ func (m menuModel) viewPlayerConfig() string {
 		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-24s %s", row.label+":", value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render("------------------------------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  type to edit Name  Shift+Q back") + "\n")
-	b.WriteString(dimGreen.Render("Use Add rows for kit picks and Remove rows to undo selections.") + "\n")
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/select  type for Name  Shift+Q back") + "\n")
+	b.WriteString(dimGreen.Render("Use Open Kit Picker rows for full kit selection screens.") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
@@ -1394,11 +1685,13 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 		{label: "Mental Modifier", value: fmt.Sprintf("%+d", p.Mental), kind: playerRowMental, active: true},
 		{label: "Kit Limit", value: fmt.Sprintf("%d", p.KitLimit), kind: playerRowKitLimit, active: true},
 		{label: "Personal Kit", value: kitSummary(p.Kit, p.KitLimit), kind: playerRowPersonalKit, active: true},
-		{label: "Add Personal Item", value: addKitLabel, kind: playerRowAddPersonalKit, active: len(allKit) > 0 && len(p.Kit) < p.KitLimit},
-		{label: "Remove Personal Item", value: "", kind: playerRowRemovePersonalKit, active: len(p.Kit) > 0},
+		{label: "Open Personal Kit Picker", value: "", kind: playerRowEditPersonalKit, active: len(allKit) > 0},
+		{label: "Quick Add Personal Item", value: addKitLabel, kind: playerRowAddPersonalKit, active: len(allKit) > 0 && len(p.Kit) < p.KitLimit},
+		{label: "Quick Remove Personal Item", value: "", kind: playerRowRemovePersonalKit, active: len(p.Kit) > 0},
 		{label: "Issued Kit", value: kitSummary(m.setup.issuedKit, 0), kind: playerRowIssuedKit, active: true},
-		{label: "Add Issued Item", value: addIssuedLabel, kind: playerRowAddIssuedKit, active: len(allKit) > 0},
-		{label: "Remove Issued Item", value: "", kind: playerRowRemoveIssuedKit, active: len(m.setup.issuedKit) > 0},
+		{label: "Open Issued Kit Picker", value: "", kind: playerRowEditIssuedKit, active: len(allKit) > 0},
+		{label: "Quick Add Issued Item", value: addIssuedLabel, kind: playerRowAddIssuedKit, active: len(allKit) > 0},
+		{label: "Quick Remove Issued Item", value: "", kind: playerRowRemoveIssuedKit, active: len(m.setup.issuedKit) > 0},
 		{label: "Reset Issued (Recommended)", value: "", kind: playerRowResetIssuedKit, active: true},
 		{label: "Back To Wizard", value: "", kind: playerRowBack, active: true},
 	}
@@ -1838,9 +2131,9 @@ func loadSlotMetadata(slot int) saveSlotMeta {
 func (m menuModel) viewLoadRun() string {
 	var b strings.Builder
 
-	b.WriteString(brightGreen.Render("LOAD RUN") + "\n")
+	b.WriteString(dosTitle("Load Run") + "\n")
 	b.WriteString(dimGreen.Render("Pick a save slot to load") + "\n")
-	b.WriteString(border.Render("----------------------------------------") + "\n\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 
 	for i := 0; i < saveSlotCount; i++ {
 		cursor := "  "
@@ -1863,7 +2156,7 @@ func (m menuModel) viewLoadRun() string {
 	}
 	b.WriteString(cursor + lineStyle.Render("Cancel") + "\n")
 
-	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
 	b.WriteString(dimGreen.Render("↑/↓ move  Enter select  Shift+Q back") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
@@ -2303,9 +2596,9 @@ func (m menuModel) viewScenarioBuilder() string {
 	rows := m.scenarioBuilderRows()
 
 	var b strings.Builder
-	b.WriteString(brightGreen.Render("SCENARIO BUILDER / EDITOR") + "\n")
+	b.WriteString(dosTitle("Scenario Builder / Editor") + "\n")
 	b.WriteString(dimGreen.Render("Create or edit scenarios with dynamic season phases") + "\n")
-	b.WriteString(border.Render("----------------------------------------") + "\n\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 
 	if m.build.cursor < 0 || m.build.cursor >= len(rows) {
 		m.build.cursor = 0
@@ -2343,7 +2636,7 @@ func (m menuModel) viewScenarioBuilder() string {
 		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-18s %s", row.label+":", value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
 	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  type in text fields  Shift+Q back") + "\n")
 	b.WriteString(dimGreen.Render("Phase days: 0 means until end (only valid on the last phase)") + "\n")
 	if m.status != "" {
@@ -2365,7 +2658,7 @@ func (m menuModel) viewRun() string {
 	}
 
 	headerRows := 4
-	controlsRows := 1
+	controlsRows := 3
 	inputRows := 4
 	bodyRows := totalHeight - headerRows - controlsRows - inputRows
 	if bodyRows < 8 {
@@ -2382,7 +2675,7 @@ func (m menuModel) viewRun() string {
 	}
 
 	paneStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
 		Width(totalWidth - 4)
@@ -2407,8 +2700,8 @@ func (m menuModel) viewRun() string {
 func (m menuModel) viewMenu() string {
 	title := lipgloss.JoinVertical(
 		lipgloss.Left,
-		brightGreen.Render("SURVIVE IT"),
-		dimGreen.Render("alpha"),
+		dosTitle("Survive It"),
+		dimGreen.Render("DOS Survival Terminal"),
 	)
 	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
 
@@ -2417,7 +2710,7 @@ func (m menuModel) viewMenu() string {
 	var b strings.Builder
 	b.WriteString(title + "\n")
 	b.WriteString(ver + "\n")
-	b.WriteString(border.Render("----------------------------------------") + "\n\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 
 	for i, it := range items {
 		cursor := "  "
@@ -2431,8 +2724,8 @@ func (m menuModel) viewMenu() string {
 		b.WriteString(cursor + line + "\n")
 	}
 
-	b.WriteString("\n" + border.Render("----------------------------------------") + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ to move, Enter to select, Shift+Q to quit") + "\n")
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
+	b.WriteString(dimGreen.Render("↑/↓ move  Enter select  Shift+Q quit") + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + green.Render(m.status) + "\n")
 	}
@@ -2515,7 +2808,7 @@ func (m menuModel) bodyText() string {
 	}
 
 	t := table.New().
-		Border(lipgloss.NormalBorder()).
+		Border(dosBox).
 		BorderStyle(border).
 		BorderHeader(true).
 		BorderRow(false).
@@ -2537,7 +2830,9 @@ func (m menuModel) controlsLine(totalWidth int) string {
 	if maxWidth < 20 {
 		maxWidth = 20
 	}
-	return border.Width(maxWidth).Render(text)
+	return border.Width(maxWidth).Render(strings.Repeat("-", maxWidth)) +
+		"\n" + border.Width(maxWidth).Render(text) +
+		"\n" + border.Width(maxWidth).Render(strings.Repeat("-", maxWidth))
 }
 
 func (m menuModel) footerText() string {
