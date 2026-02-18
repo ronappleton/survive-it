@@ -3408,9 +3408,7 @@ func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
 		m = m.ensureSetupPlayers()
 	case builderRowBiome:
 		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
-		if strings.TrimSpace(m.build.wildlifeText) == "" {
-			m.build.wildlifeText = strings.Join(game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx]), ", ")
-		}
+		m.build.wildlifeText = strings.Join(game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx]), ", ")
 	case builderRowWildlife:
 		m.build.wildlifeText = strings.Join(game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx]), ", ")
 	case builderRowDaysMode:
