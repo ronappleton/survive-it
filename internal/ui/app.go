@@ -44,6 +44,7 @@ const (
 	screenLoadRun
 	screenScenarioBuilder
 	screenBuilderScenarioPicker
+	screenOptions
 	screenPhaseEditor
 	screenRun
 )
@@ -91,6 +92,7 @@ const (
 	itemStart menuItem = iota
 	itemLoadRun
 	itemScenarioBuilder
+	itemOptions
 	itemInstallUpdate
 	itemQuit
 )
@@ -121,6 +123,7 @@ type menuModel struct {
 	load   loadRunState
 	build  scenarioBuilderState
 	phase  phaseEditorState
+	opts   optionsState
 
 	run             *game.RunState
 	runInput        string
@@ -132,6 +135,9 @@ type menuModel struct {
 	updateAvailable bool
 	updateStatus    string
 	err             string
+
+	lastTickAt   time.Time
+	runPlayedFor time.Duration
 }
 
 func newMenuModel(cfg AppConfig) menuModel {
@@ -149,6 +155,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		load:            newLoadRunState(),
 		build:           newScenarioBuilderState(),
 		phase:           newPhaseEditorState(),
+		opts:            newOptionsState(),
 		activeSaveSlot:  1,
 		customScenarios: customScenarios,
 	}
@@ -158,9 +165,9 @@ func (m menuModel) Init() tea.Cmd {
 	// Approximate 1024x768 using typical terminal cells at ~8x16 px.
 	resizeCmd := resizeTerminalBestEffort(128, 48)
 	if m.cfg.NoUpdate {
-		return resizeCmd
+		return tea.Batch(resizeCmd, clockTickCmd())
 	}
-	return tea.Batch(resizeCmd, checkUpdateCmd(m.cfg.Version, true))
+	return tea.Batch(resizeCmd, checkUpdateCmd(m.cfg.Version, true), clockTickCmd())
 }
 
 type updateResultMsg struct {
@@ -168,6 +175,10 @@ type updateResultMsg struct {
 	err       error
 	available bool
 	auto      bool
+}
+
+type clockTickMsg struct {
+	at time.Time
 }
 
 type savedRun struct {
@@ -218,6 +229,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenBuilderScenarioPicker {
 			return m.updateBuilderScenarioPicker(msg)
 		}
+		if m.screen == screenOptions {
+			return m.updateOptions(msg)
+		}
 		if m.screen == screenPhaseEditor {
 			return m.updatePhaseEditor(msg)
 		}
@@ -243,6 +257,35 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, nil
+	case clockTickMsg:
+		if m.lastTickAt.IsZero() {
+			m.lastTickAt = msg.at
+			return m, clockTickCmd()
+		}
+
+		delta := msg.at.Sub(m.lastTickAt)
+		m.lastTickAt = msg.at
+		if delta < 0 {
+			delta = 0
+		}
+
+		if m.screen == screenRun && m.run != nil {
+			m.runPlayedFor += delta
+			dayDuration := time.Duration(m.opts.dayHours) * time.Hour
+			if dayDuration <= 0 {
+				dayDuration = 2 * time.Hour
+			}
+			for m.runPlayedFor >= dayDuration {
+				m.advanceRunDay()
+				m.runPlayedFor -= dayDuration
+				out := m.run.EvaluateRun()
+				if out.Status != game.RunOutcomeOngoing {
+					break
+				}
+			}
+		}
+
+		return m, clockTickCmd()
 	case tea.WindowSizeMsg:
 		m.w = msg.Width
 		m.h = msg.Height
@@ -277,6 +320,9 @@ func (m menuModel) View() string {
 	}
 	if m.screen == screenBuilderScenarioPicker {
 		return m.viewBuilderScenarioPicker()
+	}
+	if m.screen == screenOptions {
+		return m.viewOptions()
 	}
 	if m.screen == screenPhaseEditor {
 		return m.viewPhaseEditor()
@@ -392,6 +438,7 @@ func menuItems(m menuModel) []menuEntry {
 		{label: "Start", action: itemStart},
 		{label: "Load Run", action: itemLoadRun},
 		{label: "Scenario Builder", action: itemScenarioBuilder},
+		{label: "Options", action: itemOptions},
 	}
 	if m.updateAvailable && !m.cfg.NoUpdate {
 		items = append(items, menuEntry{label: "Install Update", action: itemInstallUpdate})
@@ -441,6 +488,9 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.build.playerCountIdx = m.setup.playerCountIdx
 			m.screen = screenScenarioBuilder
 			return m, nil
+		case itemOptions:
+			m.screen = screenOptions
+			return m, nil
 		case itemInstallUpdate:
 			if m.busy {
 				return m, nil
@@ -456,6 +506,155 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func temperatureUnitLabel(unit temperatureUnit) string {
+	switch unit {
+	case tempUnitFahrenheit:
+		return "Fahrenheit (F)"
+	default:
+		return "Celsius (C)"
+	}
+}
+
+func (m menuModel) normalizeOptionsState() menuModel {
+	units := temperatureUnits()
+	if m.opts.tempUnitIdx < 0 || m.opts.tempUnitIdx >= len(units) {
+		m.opts.tempUnitIdx = 0
+	}
+	m.opts.tempUnit = units[m.opts.tempUnitIdx]
+
+	dayOptions := dayDurationHoursOptions()
+	if m.opts.dayHoursIdx < 0 || m.opts.dayHoursIdx >= len(dayOptions) {
+		m.opts.dayHoursIdx = 0
+	}
+	m.opts.dayHours = dayOptions[m.opts.dayHoursIdx]
+	if m.opts.dayHours < 1 {
+		m.opts.dayHours = 2
+	}
+	if m.opts.cursor < 0 || m.opts.cursor > 2 {
+		m.opts.cursor = 0
+	}
+	return m
+}
+
+func (m menuModel) adjustOptionsChoice(delta int) menuModel {
+	m = m.normalizeOptionsState()
+	switch m.opts.cursor {
+	case 0:
+		m.opts.tempUnitIdx = wrapIndex(m.opts.tempUnitIdx, delta, len(temperatureUnits()))
+	case 1:
+		m.opts.dayHoursIdx = wrapIndex(m.opts.dayHoursIdx, delta, len(dayDurationHoursOptions()))
+	}
+	return m.normalizeOptionsState()
+}
+
+func (m menuModel) updateOptions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m = m.normalizeOptionsState()
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
+	case "up", "k":
+		m.opts.cursor = wrapIndex(m.opts.cursor, -1, 3)
+		return m, nil
+	case "down", "j":
+		m.opts.cursor = wrapIndex(m.opts.cursor, 1, 3)
+		return m, nil
+	case "left":
+		m = m.adjustOptionsChoice(-1)
+		return m, nil
+	case "right":
+		m = m.adjustOptionsChoice(1)
+		return m, nil
+	case "enter":
+		if m.opts.cursor == 2 {
+			next, cmd := m.returnToMainMenu()
+			return next, cmd
+		}
+		m = m.adjustOptionsChoice(1)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m menuModel) viewOptions() string {
+	m = m.normalizeOptionsState()
+	rows := []struct {
+		label string
+		value string
+	}{
+		{label: "Temperature Unit", value: temperatureUnitLabel(m.opts.tempUnit)},
+		{label: "Auto Day Length", value: fmt.Sprintf("%d hour(s)", m.opts.dayHours)},
+		{label: "Back", value: ""},
+	}
+
+	totalWidth := m.w
+	if totalWidth < 90 {
+		totalWidth = 90
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 30 {
+		listWidth = 30
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 44 {
+		detailWidth = 44
+	}
+
+	var list strings.Builder
+	for i, row := range rows {
+		cursor := "  "
+		style := green
+		if i == m.opts.cursor {
+			cursor = "> "
+			style = brightGreen
+		}
+		if row.value == "" {
+			list.WriteString(cursor + style.Render(row.label) + "\n")
+			continue
+		}
+		list.WriteString(cursor + style.Render(fmt.Sprintf("%-20s %s", row.label+":", row.value)) + "\n")
+	}
+
+	detail := strings.Join([]string{
+		brightGreen.Render("Gameplay Options"),
+		green.Render(fmt.Sprintf("Temperature Display: %s", temperatureUnitLabel(m.opts.tempUnit))),
+		green.Render(fmt.Sprintf("Auto Day Length: %d hour(s)", m.opts.dayHours)),
+		"",
+		dimGreen.Render("Temperature controls display only for now."),
+		dimGreen.Render("During a run, each full Auto Day Length advances one game day automatically."),
+	}, "\n")
+
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Options") + "\n")
+	b.WriteString(dimGreen.Render("Configure display and pacing defaults.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change  Enter select  Shift+Q back") + "\n")
+	return b.String()
+}
+
 type setupScenarioOption struct {
 	scenario game.Scenario
 	label    string
@@ -463,6 +662,21 @@ type setupScenarioOption struct {
 
 type scenarioPickerState struct {
 	cursor int
+}
+
+type temperatureUnit string
+
+const (
+	tempUnitCelsius    temperatureUnit = "celsius"
+	tempUnitFahrenheit temperatureUnit = "fahrenheit"
+)
+
+type optionsState struct {
+	cursor      int
+	tempUnitIdx int
+	dayHoursIdx int
+	tempUnit    temperatureUnit
+	dayHours    int
 }
 
 type builderScenarioPickerState struct {
@@ -691,6 +905,33 @@ func newSetupState() setupState {
 
 func newScenarioPickerState() scenarioPickerState {
 	return scenarioPickerState{cursor: 0}
+}
+
+func temperatureUnits() []temperatureUnit {
+	return []temperatureUnit{tempUnitCelsius, tempUnitFahrenheit}
+}
+
+func dayDurationHoursOptions() []int {
+	return []int{1, 2, 3, 4, 6, 8, 12}
+}
+
+func newOptionsState() optionsState {
+	dayOptions := dayDurationHoursOptions()
+	defaultDayHours := 2
+	defaultDayIdx := 0
+	for i, hours := range dayOptions {
+		if hours == defaultDayHours {
+			defaultDayIdx = i
+			break
+		}
+	}
+	return optionsState{
+		cursor:      0,
+		tempUnitIdx: 0,
+		dayHoursIdx: defaultDayIdx,
+		tempUnit:    tempUnitCelsius,
+		dayHours:    defaultDayHours,
+	}
 }
 
 func newBuilderScenarioPickerState() builderScenarioPickerState {
@@ -1343,6 +1584,7 @@ func (m menuModel) startRunFromSetup() (tea.Model, tea.Cmd) {
 	}
 
 	m.run = &state
+	m.runPlayedFor = 0
 	m.screen = screenRun
 	m.status = ""
 	return m, nil
@@ -1987,8 +2229,10 @@ func (m menuModel) scenarioDetailText(s game.Scenario) string {
 	var b strings.Builder
 	wildlife := scenarioWildlife(s)
 	insects := game.InsectsForBiome(s.Biome)
+	tempRange := game.TemperatureRangeForBiome(s.Biome)
 	b.WriteString(brightGreen.Render(s.Name) + "\n")
 	b.WriteString(green.Render(fmt.Sprintf("Biome: %s", s.Biome)) + "\n")
+	b.WriteString(green.Render(fmt.Sprintf("Temperature Range: %s", m.formatTemperatureRange(tempRange))) + "\n")
 	b.WriteString(green.Render(fmt.Sprintf("Default Days: %d", s.DefaultDays)) + "\n\n")
 	b.WriteString(brightGreen.Render("Wildlife") + "\n")
 	b.WriteString(green.Render(strings.Join(wildlife, ", ")) + "\n")
@@ -3229,6 +3473,7 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		m.run = &state
+		m.runPlayedFor = 0
 		if slot, ok := slotNumberFromPath(selected.Path); ok {
 			m.activeSaveSlot = slot
 		}
@@ -4141,6 +4386,7 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 		green.Render(fmt.Sprintf("Mode: %s", modeLabel(setupModes()[m.build.modeIdx]))),
 		green.Render(fmt.Sprintf("Player Count: %d", setupPlayerCounts()[m.build.playerCountIdx])),
 		green.Render(fmt.Sprintf("Biome: %s", builderBiomes()[m.build.biomeIdx])),
+		green.Render(fmt.Sprintf("Temperature Range: %s", m.formatTemperatureRange(game.TemperatureRangeForBiome(builderBiomes()[m.build.biomeIdx])))),
 		green.Render(fmt.Sprintf("Wildlife: %s", strings.Join(wildlifePreview, ", "))),
 		green.Render(fmt.Sprintf("Insects (Auto): %s", strings.Join(game.InsectsForBiome(builderBiomes()[m.build.biomeIdx]), ", "))),
 		green.Render(fmt.Sprintf("Default Days: %s", map[bool]string{true: m.build.customDays, false: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])}[m.build.useCustomDays])),
@@ -4539,6 +4785,12 @@ func checkUpdateCmd(currentVersion string, auto bool) tea.Cmd {
 	}
 }
 
+func clockTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return clockTickMsg{at: t}
+	})
+}
+
 func applyUpdateCmd(currentVersion string) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(150 * time.Millisecond)
@@ -4551,19 +4803,45 @@ func applyUpdateCmd(currentVersion string) tea.Cmd {
 	}
 }
 
+func convertToFahrenheit(c int) int {
+	return int(float64(c)*9.0/5.0 + 32.0)
+}
+
+func (m menuModel) formatTemperature(celsius int) string {
+	if m.opts.tempUnit == tempUnitFahrenheit {
+		return fmt.Sprintf("%dF", convertToFahrenheit(celsius))
+	}
+	return fmt.Sprintf("%dC", celsius)
+}
+
+func (m menuModel) formatTemperatureRange(r game.TemperatureRange) string {
+	if m.opts.tempUnit == tempUnitFahrenheit {
+		return fmt.Sprintf("%dF to %dF", convertToFahrenheit(r.MinC), convertToFahrenheit(r.MaxC))
+	}
+	return fmt.Sprintf("%dC to %dC", r.MinC, r.MaxC)
+}
+
+func (m menuModel) currentRunTemperatureC() int {
+	if m.run == nil {
+		return 0
+	}
+	return game.TemperatureForDayCelsius(m.run.Scenario.Biome, m.run.Day)
+}
+
 func (m menuModel) headerText() string {
 	season, ok := m.run.CurrentSeason()
 	seasonStr := "unknown"
 	if ok {
 		seasonStr = string(season)
 	}
+	temp := m.formatTemperature(m.currentRunTemperatureC())
 
 	var b strings.Builder
 	b.WriteString(lipgloss.JoinVertical(
 		lipgloss.Left,
 		brightGreen.Render("SURVIVE IT!"),
-		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d",
-			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day)),
+		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d  |  Temp: %s",
+			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day, temp)),
 	))
 	return b.String()
 }
@@ -4616,7 +4894,7 @@ func (m menuModel) bodyText() string {
 }
 
 func (m menuModel) controlsLine(totalWidth int) string {
-	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Shift+Q Menu ", m.activeSaveSlot)
+	text := fmt.Sprintf(" Shift+N Next Day  |  Shift+S Save Slot %d  |  Shift+L Load  |  Auto Day: %dh  |  Shift+Q Menu ", m.activeSaveSlot, m.opts.dayHours)
 	maxWidth := totalWidth - 2
 	if maxWidth < 20 {
 		maxWidth = 20

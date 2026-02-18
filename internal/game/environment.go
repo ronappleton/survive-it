@@ -1,6 +1,15 @@
 package game
 
-import "strings"
+import (
+	"fmt"
+	"hash/fnv"
+	"strings"
+)
+
+type TemperatureRange struct {
+	MinC int
+	MaxC int
+}
 
 func WildlifeForBiome(biome string) []string {
 	b := strings.ToLower(strings.TrimSpace(biome))
@@ -38,4 +47,44 @@ func InsectsForBiome(biome string) []string {
 	default:
 		return []string{"Mosquitoes", "Ticks", "Flies"}
 	}
+}
+
+func TemperatureRangeForBiome(biome string) TemperatureRange {
+	b := strings.ToLower(strings.TrimSpace(biome))
+	switch {
+	case strings.Contains(b, "forest"):
+		return TemperatureRange{MinC: 4, MaxC: 22}
+	case strings.Contains(b, "rainforest"), strings.Contains(b, "temperate_rainforest"), strings.Contains(b, "vancouver"):
+		return TemperatureRange{MinC: 2, MaxC: 18}
+	case strings.Contains(b, "boreal"), strings.Contains(b, "subarctic"), strings.Contains(b, "arctic"), strings.Contains(b, "tundra"):
+		return TemperatureRange{MinC: -25, MaxC: 5}
+	case strings.Contains(b, "mountain"), strings.Contains(b, "highland"), strings.Contains(b, "montane"):
+		return TemperatureRange{MinC: -8, MaxC: 16}
+	case strings.Contains(b, "jungle"), strings.Contains(b, "tropical"), strings.Contains(b, "wetlands"), strings.Contains(b, "swamp"), strings.Contains(b, "island"):
+		return TemperatureRange{MinC: 22, MaxC: 37}
+	case strings.Contains(b, "savanna"), strings.Contains(b, "badlands"):
+		return TemperatureRange{MinC: 14, MaxC: 36}
+	case strings.Contains(b, "desert"), strings.Contains(b, "dry"):
+		return TemperatureRange{MinC: 3, MaxC: 45}
+	case strings.Contains(b, "coast"), strings.Contains(b, "delta"), strings.Contains(b, "lake"):
+		return TemperatureRange{MinC: 4, MaxC: 24}
+	default:
+		return TemperatureRange{MinC: 8, MaxC: 24}
+	}
+}
+
+func TemperatureForDayCelsius(biome string, day int) int {
+	r := TemperatureRangeForBiome(biome)
+	if r.MaxC <= r.MinC {
+		return r.MinC
+	}
+	if day < 1 {
+		day = 1
+	}
+	span := r.MaxC - r.MinC
+
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%s:%d", strings.ToLower(strings.TrimSpace(biome)), day)))
+	offset := int(h.Sum32() % uint32(span+1))
+	return r.MinC + offset
 }
