@@ -427,7 +427,7 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.busy = true
-			m.status = "Installing update…"
+			m.status = "Downloading update…"
 			return m, applyUpdateCmd(m.cfg.Version)
 		case itemQuit:
 			return m, tea.Quit
@@ -3563,7 +3563,11 @@ func (m menuModel) viewMenu() string {
 	header.WriteString(dimGreen.Render("DOS Survival Terminal") + "\n")
 	header.WriteString(dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate)) + "\n")
 	if m.busy {
-		header.WriteString(green.Render("Checking for updates...") + "\n")
+		busyLine := strings.TrimSpace(m.status)
+		if busyLine == "" {
+			busyLine = "Checking for updates..."
+		}
+		header.WriteString(green.Render(busyLine) + "\n")
 	} else if m.updateAvailable {
 		header.WriteString(brightGreen.Render(m.updateStatus) + "\n")
 		header.WriteString(dimGreen.Render("Select INSTALL UPDATE from the menu.") + "\n")
