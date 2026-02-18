@@ -15,8 +15,8 @@ func TestCreatePlayersInitializesRuntimeMetabolism(t *testing.T) {
 	}
 
 	p := players[0]
-	if p.CaloriesReserveKcal <= 0 || p.ProteinReserveG <= 0 || p.FatReserveG <= 0 {
-		t.Fatalf("expected positive initialized reserves, got kcal=%d protein=%d fat=%d", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG)
+	if p.CaloriesReserveKcal <= 0 || p.ProteinReserveG <= 0 || p.FatReserveG <= 0 || p.SugarReserveG <= 0 {
+		t.Fatalf("expected positive initialized reserves, got kcal=%d protein=%d fat=%d sugar=%d", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG, p.SugarReserveG)
 	}
 	if p.Hunger < 0 || p.Hunger > 100 || p.Thirst < 0 || p.Thirst > 100 || p.Fatigue < 0 || p.Fatigue > 100 {
 		t.Fatalf("expected initialized effect bars in range 0..100, got hunger=%d thirst=%d fatigue=%d", p.Hunger, p.Thirst, p.Fatigue)
@@ -144,6 +144,7 @@ func TestApplyRealtimeMetabolismPartialDay(t *testing.T) {
 
 	player := &run.Players[0]
 	beforeCalories := player.CaloriesReserveKcal
+	beforeHydration := player.Hydration
 	beforeProgress := run.MetabolismProgress
 
 	run.ApplyRealtimeMetabolism(30*time.Minute, 2*time.Hour)
@@ -156,5 +157,55 @@ func TestApplyRealtimeMetabolismPartialDay(t *testing.T) {
 	}
 	if player.CaloriesReserveKcal >= beforeCalories {
 		t.Fatalf("expected calorie reserve to decrease during realtime metabolism, before=%d after=%d", beforeCalories, player.CaloriesReserveKcal)
+	}
+	if player.Hydration >= beforeHydration {
+		t.Fatalf("expected hydration to decrease during realtime progression, before=%d after=%d", beforeHydration, player.Hydration)
+	}
+}
+
+func TestDailyDeficiencyEffectsApplyMalnutritionAndDehydration(t *testing.T) {
+	player := PlayerState{
+		ID:                  1,
+		BodyType:            BodyTypeNeutral,
+		WeightKg:            75,
+		Energy:              70,
+		Hydration:           25,
+		Morale:              70,
+		CaloriesReserveKcal: -1800,
+		ProteinReserveG:     -120,
+		FatReserveG:         -90,
+		SugarReserveG:       -80,
+	}
+	refreshEffectBars(&player)
+	player.NutritionDeficitDays = 4
+	player.DehydrationDays = 2
+
+	applyDailyDeficiencyEffects(&player)
+
+	if player.NutritionDeficitDays < 5 {
+		t.Fatalf("expected nutrition deficit streak to increase, got %d", player.NutritionDeficitDays)
+	}
+	if player.DehydrationDays < 3 {
+		t.Fatalf("expected dehydration streak to increase, got %d", player.DehydrationDays)
+	}
+	if player.Energy >= 70 {
+		t.Fatalf("expected deficiency effects to reduce energy, got %d", player.Energy)
+	}
+
+	foundMalnutrition := false
+	foundDehydration := false
+	for _, ailment := range player.Ailments {
+		if ailment.Type == AilmentMalnutrition {
+			foundMalnutrition = true
+		}
+		if ailment.Type == AilmentDehydration {
+			foundDehydration = true
+		}
+	}
+	if !foundMalnutrition {
+		t.Fatalf("expected malnutrition ailment under sustained deficit")
+	}
+	if !foundDehydration {
+		t.Fatalf("expected dehydration ailment under sustained low hydration")
 	}
 }

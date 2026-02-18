@@ -5257,6 +5257,7 @@ func (m menuModel) viewRunPlayers() string {
 		green.Render(fmt.Sprintf("Reserves  %dkcal  %dg protein  %dg fat  %dg sugar", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG, p.SugarReserveG)),
 		green.Render(fmt.Sprintf("Needs/day %dkcal  %dg protein  %dg fat  %dg sugar", needs.CaloriesKcal, needs.ProteinG, needs.FatG, needs.SugarG)),
 		green.Render(fmt.Sprintf("Nutrition  %dkcal  %dg protein  %dg fat  %dg sugar", p.Nutrition.CaloriesKcal, p.Nutrition.ProteinG, p.Nutrition.FatG, p.Nutrition.SugarG)),
+		green.Render(fmt.Sprintf("Deficit Streak  Nutrition:%d day(s)  Dehydration:%d day(s)", p.NutritionDeficitDays, p.DehydrationDays)),
 		"",
 		brightGreen.Render("Active Ailments"),
 		strings.Join(ailments, "\n"),

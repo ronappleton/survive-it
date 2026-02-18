@@ -16,6 +16,7 @@ func (s *RunState) ApplyRealtimeMetabolism(elapsed time.Duration, dayDuration ti
 
 	for i := range s.Players {
 		applyMetabolismFraction(&s.Players[i], delta)
+		applyPhysiologyFraction(&s.Players[i], delta)
 	}
 	s.MetabolismProgress = target
 }
@@ -28,6 +29,7 @@ func (s *RunState) consumePendingDayMetabolism() {
 	if remaining > 0 {
 		for i := range s.Players {
 			applyMetabolismFraction(&s.Players[i], remaining)
+			applyPhysiologyFraction(&s.Players[i], remaining)
 		}
 	}
 	s.MetabolismProgress = 0

@@ -70,13 +70,15 @@ type PlayerState struct {
 	Morale    int       `json:"morale"`
 
 	// Runtime-only survival reserves and bars. These are not editable in setup.
-	CaloriesReserveKcal int `json:"calories_reserve_kcal"`
-	ProteinReserveG     int `json:"protein_reserve_g"`
-	FatReserveG         int `json:"fat_reserve_g"`
-	SugarReserveG       int `json:"sugar_reserve_g"`
-	Hunger              int `json:"hunger"`  // 0 = satiated, 100 = starving
-	Thirst              int `json:"thirst"`  // 0 = hydrated, 100 = severely thirsty
-	Fatigue             int `json:"fatigue"` // 0 = rested, 100 = exhausted
+	CaloriesReserveKcal  int `json:"calories_reserve_kcal"`
+	ProteinReserveG      int `json:"protein_reserve_g"`
+	FatReserveG          int `json:"fat_reserve_g"`
+	SugarReserveG        int `json:"sugar_reserve_g"`
+	Hunger               int `json:"hunger"`  // 0 = satiated, 100 = starving
+	Thirst               int `json:"thirst"`  // 0 = hydrated, 100 = severely thirsty
+	Fatigue              int `json:"fatigue"` // 0 = rested, 100 = exhausted
+	NutritionDeficitDays int `json:"nutrition_deficit_days"`
+	DehydrationDays      int `json:"dehydration_days"`
 
 	Nutrition NutritionTotals `json:"nutrition"`
 	Ailments  []Ailment       `json:"ailments"`
@@ -88,6 +90,9 @@ type PlayerState struct {
 	metabolismCarryEnergy    float64
 	metabolismCarryHydration float64
 	metabolismCarryMorale    float64
+	physiologyCarryEnergy    float64
+	physiologyCarryHydration float64
+	physiologyCarryMorale    float64
 }
 
 type PlayerConfig struct {

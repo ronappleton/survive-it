@@ -39,6 +39,7 @@ const (
 	AilmentFoodPoison    AilmentType = "food_poisoning"
 	AilmentGIInfection   AilmentType = "gi_infection"
 	AilmentDehydration   AilmentType = "dehydration"
+	AilmentMalnutrition  AilmentType = "malnutrition"
 	AilmentRespInfection AilmentType = "resp_infection"
 	AilmentEnvenomation  AilmentType = "envenomation"
 )

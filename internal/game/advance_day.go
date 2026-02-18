@@ -14,11 +14,6 @@ func (s *RunState) AdvanceDay() {
 
 	for i := range s.Players {
 		p := &s.Players[i]
-		physiologyProfile := PhysiologyFor(p.BodyType)
-
-		p.Energy -= physiologyProfile.EnergyDrainPerDay
-		p.Hydration -= physiologyProfile.HydrationDrainPerDay
-		p.Morale -= physiologyProfile.MoraleDrainPerDay
 
 		playerWeatherImpact := adjustWeatherImpactForPlayer(weatherImpact, *p, s.Weather.Type)
 		p.Energy += playerWeatherImpact.Energy
@@ -28,6 +23,7 @@ func (s *RunState) AdvanceDay() {
 		p.Hydration += campImpact.Hydration
 		p.Morale += campImpact.Morale
 		applyDailyAilmentPenalties(p)
+		applyDailyDeficiencyEffects(p)
 
 		clampPlayer(p)
 		refreshEffectBars(p)
