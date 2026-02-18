@@ -94,6 +94,33 @@ func ConsumeCatch(seed int64, day int, player *PlayerState, catch CatchResult, c
 			Name:      risk.Name,
 			Ailment:   ailment,
 		})
+
+		// Vomiting can occur as an additional symptom for many diseases.
+		if ailment.Type != AilmentVomiting {
+			vomitChance := adjustedVomitChance(risk, choice)
+			if vomitChance > 0 {
+				vomitID := DiseaseID(fmt.Sprintf("%s_vomit", risk.ID))
+				if deterministicRiskRoll(seed, catch.Animal.ID, vomitID, day, player.ID) <= vomitChance {
+					vomitAilment := Ailment{
+						Type:             AilmentVomiting,
+						Name:             "Vomiting",
+						DaysRemaining:    1,
+						EnergyPenalty:    2,
+						HydrationPenalty: 4,
+						MoralePenalty:    3,
+					}
+					player.applyAilment(vomitAilment)
+					player.Energy = clamp(player.Energy-vomitAilment.EnergyPenalty, 0, 100)
+					player.Hydration = clamp(player.Hydration-vomitAilment.HydrationPenalty, 0, 100)
+					player.Morale = clamp(player.Morale-vomitAilment.MoralePenalty, 0, 100)
+					outcome.DiseaseEvents = append(outcome.DiseaseEvents, DiseaseEvent{
+						DiseaseID: vomitID,
+						Name:      risk.Name + " (vomiting symptom)",
+						Ailment:   vomitAilment,
+					})
+				}
+			}
+		}
 	}
 
 	return outcome
@@ -149,6 +176,57 @@ func adjustedDiseaseChance(risk DiseaseRisk, choice MealChoice) float64 {
 	return chance
 }
 
+func adjustedVomitChance(risk DiseaseRisk, choice MealChoice) float64 {
+	chance := risk.VomitChance
+	if chance <= 0 {
+		chance = inferredVomitChance(risk)
+	}
+	if chance <= 0 {
+		return 0
+	}
+
+	switch risk.CarrierPart {
+	case "liver":
+		if !choice.EatLiver {
+			return 0
+		}
+		chance *= 1.25
+	case "blood":
+		chance *= 1.15
+	case "respiratory":
+		chance *= 0.60
+	}
+
+	if choice.Cooked {
+		chance *= 0.80
+	} else {
+		chance *= 1.30
+	}
+
+	if chance > 0.95 {
+		return 0.95
+	}
+	return chance
+}
+
+func inferredVomitChance(risk DiseaseRisk) float64 {
+	switch risk.Effect.Type {
+	case AilmentVomiting:
+		return 0.90
+	case AilmentFoodPoison:
+		return 0.75
+	case AilmentGIInfection:
+		return 0.55
+	case AilmentParasites:
+		return 0.35
+	case AilmentEnvenomation:
+		return 0.35
+	default:
+		// Keep some chance for unspecified GI-like reactions.
+		return clampFloat(risk.BaseChance*3.0, 0.05, 0.45)
+	}
+}
+
 func deterministicRiskRoll(seed int64, animalID string, diseaseID DiseaseID, day, playerID int) float64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s:%s:%d:%d", seed, animalID, diseaseID, day, playerID)))
@@ -182,4 +260,14 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func clampFloat(number, min, max float64) float64 {
+	if number < min {
+		return min
+	}
+	if number > max {
+		return max
+	}
+	return number
 }

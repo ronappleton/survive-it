@@ -83,6 +83,7 @@ func TestConsumeCatchCanTriggerLiverDisease(t *testing.T) {
 					ID:          "test_liver",
 					Name:        "Liver Worms",
 					BaseChance:  1,
+					VomitChance: 1,
 					CarrierPart: "liver",
 					Effect: AilmentTemplate{
 						Type:             AilmentVomiting,
@@ -105,6 +106,53 @@ func TestConsumeCatchCanTriggerLiverDisease(t *testing.T) {
 	}
 	if len(player.Ailments) == 0 {
 		t.Fatalf("expected ailment added to player")
+	}
+}
+
+func TestConsumeCatchCanApplyVomitingSymptomChance(t *testing.T) {
+	player := &PlayerState{ID: 1, Energy: 90, Hydration: 90, Morale: 90}
+	catch := CatchResult{
+		Animal: AnimalSpec{
+			ID:               "test_boar",
+			Name:             "Test Boar",
+			EdibleYieldRatio: 0.5,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 170, ProteinG: 30, FatG: 4},
+			DiseaseRisks: []DiseaseRisk{
+				{
+					ID:          "test_food_poison",
+					Name:        "Food Poisoning Risk",
+					BaseChance:  1,
+					VomitChance: 1,
+					CarrierPart: "any",
+					Effect: AilmentTemplate{
+						Type:             AilmentFoodPoison,
+						Name:             "Food Poisoning",
+						Days:             2,
+						EnergyPenalty:    3,
+						HydrationPenalty: 5,
+						MoralePenalty:    4,
+					},
+				},
+			},
+		},
+		WeightGrams: 3000,
+		EdibleGrams: 1500,
+	}
+
+	outcome := ConsumeCatch(777, 3, player, catch, MealChoice{PortionGrams: 200, Cooked: false})
+	if len(outcome.DiseaseEvents) < 2 {
+		t.Fatalf("expected disease event plus vomiting symptom, got %d events", len(outcome.DiseaseEvents))
+	}
+
+	foundVomiting := false
+	for _, ailment := range player.Ailments {
+		if ailment.Type == AilmentVomiting {
+			foundVomiting = true
+			break
+		}
+	}
+	if !foundVomiting {
+		t.Fatalf("expected vomiting ailment to be applied")
 	}
 }
 

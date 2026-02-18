@@ -63,6 +63,7 @@ type DiseaseRisk struct {
 	ID          DiseaseID
 	Name        string
 	BaseChance  float64
+	VomitChance float64
 	CarrierPart string // muscle, liver, blood, skin, respiratory, any
 	Effect      AilmentTemplate
 }
