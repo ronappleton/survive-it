@@ -38,6 +38,7 @@ const (
 	screenMenu screen = iota
 	screenSetup
 	screenScenarioPicker
+	screenStatsBuilder
 	screenPlayerConfig
 	screenKitPicker
 	screenLoadRun
@@ -112,6 +113,7 @@ type menuModel struct {
 	screen screen
 	setup  setupState
 	pick   scenarioPickerState
+	sbuild statsBuilderState
 	pcfg   playerConfigState
 	kit    kitPickerState
 	load   loadRunState
@@ -138,6 +140,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		idx:             0,
 		setup:           newSetupState(),
 		pick:            newScenarioPickerState(),
+		sbuild:          newStatsBuilderState(),
 		pcfg:            newPlayerConfigState(),
 		kit:             newKitPickerState(),
 		load:            newLoadRunState(),
@@ -194,6 +197,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenScenarioPicker {
 			return m.updateScenarioPicker(msg)
 		}
+		if m.screen == screenStatsBuilder {
+			return m.updateStatsBuilder(msg)
+		}
 		if m.screen == screenPlayerConfig {
 			return m.updatePlayerConfig(msg)
 		}
@@ -247,6 +253,9 @@ func (m menuModel) View() string {
 	}
 	if m.screen == screenScenarioPicker {
 		return m.viewScenarioPicker()
+	}
+	if m.screen == screenStatsBuilder {
+		return m.viewStatsBuilder()
 	}
 	if m.screen == screenPlayerConfig {
 		return m.viewPlayerConfig()
@@ -447,6 +456,12 @@ type scenarioPickerState struct {
 	cursor int
 }
 
+type statsBuilderState struct {
+	cursor    int
+	playerIdx int
+	returnTo  screen
+}
+
 type playerConfigState struct {
 	cursor    int
 	playerIdx int
@@ -564,6 +579,28 @@ type scenarioBuilderRow struct {
 	active   bool
 }
 
+type statsBuilderRowKind int
+
+const (
+	statsRowPlayer statsBuilderRowKind = iota
+	statsRowSex
+	statsRowBodyType
+	statsRowWeightKg
+	statsRowHeightFt
+	statsRowHeightIn
+	statsRowEndurance
+	statsRowBushcraft
+	statsRowMental
+	statsRowBack
+)
+
+type statsBuilderRow struct {
+	label  string
+	value  string
+	kind   statsBuilderRowKind
+	active bool
+}
+
 type playerConfigRowKind int
 
 const (
@@ -627,6 +664,14 @@ func newSetupState() setupState {
 
 func newScenarioPickerState() scenarioPickerState {
 	return scenarioPickerState{cursor: 0}
+}
+
+func newStatsBuilderState() statsBuilderState {
+	return statsBuilderState{
+		cursor:    0,
+		playerIdx: 0,
+		returnTo:  screenSetup,
+	}
 }
 
 func newPlayerConfigState() playerConfigState {
@@ -970,6 +1015,9 @@ func (m menuModel) ensureSetupPlayers() menuModel {
 	if len(m.setup.players) > 0 && m.pcfg.playerIdx >= len(m.setup.players) {
 		m.pcfg.playerIdx = len(m.setup.players) - 1
 	}
+	if len(m.setup.players) > 0 && m.sbuild.playerIdx >= len(m.setup.players) {
+		m.sbuild.playerIdx = len(m.setup.players) - 1
+	}
 
 	return m
 }
@@ -1089,7 +1137,7 @@ func (m menuModel) returnToMainMenu() (menuModel, tea.Cmd) {
 }
 
 func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const rowCount = 8 // mode, scenario, players, run length, configure players, configure issued kit, start, cancel
+	const rowCount = 9 // mode, scenario, players, run length, stats, player/kit, issued kit, start, cancel
 	m = m.ensureSetupScenarioSelection()
 	m = m.ensureSetupPlayers()
 
@@ -1111,12 +1159,18 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.setup.cursor == 4 {
+			m.sbuild.returnTo = screenSetup
+			m.sbuild.playerIdx = 0
+			m.screen = screenStatsBuilder
+			return m, nil
+		}
+		if m.setup.cursor == 5 {
 			m.pcfg.returnTo = screenSetup
 			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
-		if m.setup.cursor == 5 {
+		if m.setup.cursor == 6 {
 			m = m.openIssuedKitPicker(screenSetup)
 			return m, nil
 		}
@@ -1128,12 +1182,18 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.setup.cursor == 4 {
+			m.sbuild.returnTo = screenSetup
+			m.sbuild.playerIdx = 0
+			m.screen = screenStatsBuilder
+			return m, nil
+		}
+		if m.setup.cursor == 5 {
 			m.pcfg.returnTo = screenSetup
 			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
-		if m.setup.cursor == 5 {
+		if m.setup.cursor == 6 {
 			m = m.openIssuedKitPicker(screenSetup)
 			return m, nil
 		}
@@ -1145,16 +1205,21 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.openScenarioPicker()
 			return m, nil
 		case 4:
+			m.sbuild.returnTo = screenSetup
+			m.sbuild.playerIdx = 0
+			m.screen = screenStatsBuilder
+			return m, nil
+		case 5:
 			m.pcfg.returnTo = screenSetup
 			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
-		case 5:
+		case 6:
 			m = m.openIssuedKitPicker(screenSetup)
 			return m, nil
-		case 6:
-			return m.startRunFromSetup()
 		case 7:
+			return m.startRunFromSetup()
+		case 8:
 			next, cmd := m.returnToMainMenu()
 			return next, cmd
 		default:
@@ -1272,6 +1337,7 @@ func (m menuModel) viewSetup() string {
 		{label: "Scenario", value: scenarioLabel},
 		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
 		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
+		{label: "Configure Player Stats", value: ""},
 		{label: "Configure Players & Kit", value: ""},
 		{label: "Configure Issued Kit", value: kitSummary(m.setup.issuedKit, 0)},
 		{label: "Start Run", value: ""},
@@ -1334,7 +1400,7 @@ func (m menuModel) viewSetup() string {
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Player kits configured: %d/%d", readyPlayers, len(m.setup.players))) + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
 	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/confirm  Shift+Q back") + "\n")
-	b.WriteString(dimGreen.Render("Natural flow: Scenario -> Players -> Issued Kit -> Start Run") + "\n")
+	b.WriteString(dimGreen.Render("Natural flow: Scenario -> Player Stats -> Player Kit -> Issued Kit -> Start Run") + "\n")
 	if m.status != "" {
 		b.WriteString(green.Render(m.status) + "\n")
 	}
@@ -1354,6 +1420,7 @@ func (m menuModel) setupDetailText(activeLabel, scenarioLabel string, readyPlaye
 		green.Render(activeLabel),
 		"",
 		dimGreen.Render("Enter on Scenario opens detailed selector."),
+		dimGreen.Render("Configure Player Stats opens Stats Builder."),
 		dimGreen.Render("Configure Players & Kit opens Player Editor."),
 		dimGreen.Render("Configure Issued Kit opens Kit Picker."),
 	}
@@ -1508,6 +1575,248 @@ func (m menuModel) viewScenarioPicker() string {
 	b.WriteString(dosTitle("Scenario Select") + "\n")
 	b.WriteString(dimGreen.Render("Mode: "+modeLabel(m.setupMode())+"  |  ↑/↓ browse, Enter select, Shift+Q back") + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	return b.String()
+}
+
+func (m menuModel) normalizeStatsBuilderState() menuModel {
+	if len(m.setup.players) > 0 {
+		if m.sbuild.playerIdx < 0 || m.sbuild.playerIdx >= len(m.setup.players) {
+			m.sbuild.playerIdx = 0
+		}
+	} else {
+		m.sbuild.playerIdx = 0
+	}
+
+	rows := m.statsBuilderRows()
+	if len(rows) > 0 {
+		if m.sbuild.cursor < 0 || m.sbuild.cursor >= len(rows) {
+			m.sbuild.cursor = 0
+		}
+	} else {
+		m.sbuild.cursor = 0
+	}
+
+	return m
+}
+
+func (m menuModel) statsBuilderRows() []statsBuilderRow {
+	if len(m.setup.players) == 0 {
+		return nil
+	}
+	playerIdx := m.sbuild.playerIdx
+	if playerIdx < 0 || playerIdx >= len(m.setup.players) {
+		playerIdx = 0
+	}
+	p := m.setup.players[playerIdx]
+
+	return []statsBuilderRow{
+		{label: "Player", value: playerEditorSlotLabel(playerIdx, len(m.setup.players)), kind: statsRowPlayer, active: true},
+		{label: "Sex", value: string(p.Sex), kind: statsRowSex, active: true},
+		{label: "Body Type", value: string(p.BodyType), kind: statsRowBodyType, active: true},
+		{label: "Weight (kg)", value: fmt.Sprintf("%d", p.WeightKg), kind: statsRowWeightKg, active: true},
+		{label: "Height (ft)", value: fmt.Sprintf("%d", p.HeightFt), kind: statsRowHeightFt, active: true},
+		{label: "Height (in)", value: fmt.Sprintf("%d", p.HeightIn), kind: statsRowHeightIn, active: true},
+		{label: "Endurance Modifier", value: fmt.Sprintf("%+d", p.Endurance), kind: statsRowEndurance, active: true},
+		{label: "Bushcraft Modifier", value: fmt.Sprintf("%+d", p.Bushcraft), kind: statsRowBushcraft, active: true},
+		{label: "Mental Modifier", value: fmt.Sprintf("%+d", p.Mental), kind: statsRowMental, active: true},
+		{label: "Back To Wizard", value: "", kind: statsRowBack, active: true},
+	}
+}
+
+func statsBuilderRowSupportsCycle(kind statsBuilderRowKind) bool {
+	switch kind {
+	case statsRowPlayer, statsRowSex, statsRowBodyType, statsRowWeightKg, statsRowHeightFt,
+		statsRowHeightIn, statsRowEndurance, statsRowBushcraft, statsRowMental:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m menuModel) adjustStatsBuilderChoice(delta int) menuModel {
+	if len(m.setup.players) == 0 {
+		return m
+	}
+	m = m.normalizeStatsBuilderState()
+	rows := m.statsBuilderRows()
+	if len(rows) == 0 || m.sbuild.cursor < 0 || m.sbuild.cursor >= len(rows) {
+		return m
+	}
+	row := rows[m.sbuild.cursor]
+	if !row.active {
+		return m
+	}
+
+	p := &m.setup.players[m.sbuild.playerIdx]
+	switch row.kind {
+	case statsRowPlayer:
+		m.sbuild.playerIdx = wrapIndex(m.sbuild.playerIdx, delta, len(m.setup.players))
+	case statsRowSex:
+		options := playerConfigSexes()
+		idx := indexOfSex(options, p.Sex)
+		p.Sex = options[wrapIndex(idx, delta, len(options))]
+	case statsRowBodyType:
+		options := playerConfigBodyTypes()
+		idx := indexOfBodyType(options, p.BodyType)
+		p.BodyType = options[wrapIndex(idx, delta, len(options))]
+	case statsRowWeightKg:
+		p.WeightKg = clampInt(p.WeightKg+delta, 35, 220)
+	case statsRowHeightFt:
+		p.HeightFt = clampInt(p.HeightFt+delta, 4, 7)
+	case statsRowHeightIn:
+		p.HeightIn = clampInt(p.HeightIn+delta, 0, 11)
+	case statsRowEndurance:
+		p.Endurance = clampInt(p.Endurance+delta, -3, 3)
+	case statsRowBushcraft:
+		p.Bushcraft = clampInt(p.Bushcraft+delta, -3, 3)
+	case statsRowMental:
+		p.Mental = clampInt(p.Mental+delta, -3, 3)
+	}
+	return m
+}
+
+func (m menuModel) updateStatsBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+	m = m.normalizeStatsBuilderState()
+	rows := m.statsBuilderRows()
+	if len(rows) == 0 {
+		m.screen = screenSetup
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		if m.sbuild.returnTo == 0 {
+			m.sbuild.returnTo = screenSetup
+		}
+		m.screen = m.sbuild.returnTo
+		return m, nil
+	case "up", "k":
+		m.sbuild.cursor = wrapIndex(m.sbuild.cursor, -1, len(rows))
+		return m, nil
+	case "down", "j":
+		m.sbuild.cursor = wrapIndex(m.sbuild.cursor, 1, len(rows))
+		return m, nil
+	case "left":
+		m = m.adjustStatsBuilderChoice(-1)
+		return m, nil
+	case "right":
+		m = m.adjustStatsBuilderChoice(1)
+		return m, nil
+	case "enter":
+		row := rows[m.sbuild.cursor]
+		if !row.active {
+			return m, nil
+		}
+		if row.kind == statsRowBack {
+			if m.sbuild.returnTo == 0 {
+				m.sbuild.returnTo = screenSetup
+			}
+			m.screen = m.sbuild.returnTo
+			return m, nil
+		}
+		if statsBuilderRowSupportsCycle(row.kind) {
+			m = m.adjustStatsBuilderChoice(1)
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m menuModel) viewStatsBuilder() string {
+	m = m.ensureSetupScenarioSelection()
+	m = m.ensureSetupPlayers()
+	m = m.normalizeStatsBuilderState()
+	rows := m.statsBuilderRows()
+	if len(rows) == 0 {
+		return brightGreen.Render("No players available. Return to wizard and choose player count.")
+	}
+
+	scenarioLabel := "Unknown scenario"
+	if selected, found := m.selectedSetupScenario(); found {
+		scenarioLabel = selected.Name
+	}
+
+	playerCount := len(m.setup.players)
+	activePlayer := m.sbuild.playerIdx + 1
+	current := m.setup.players[m.sbuild.playerIdx]
+
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 34 {
+		listWidth = 34
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
+
+	var list strings.Builder
+	for i, row := range rows {
+		cursor := "  "
+		lineStyle := green
+		if i == m.sbuild.cursor {
+			cursor = "> "
+			lineStyle = brightGreen
+		}
+		if !row.active {
+			lineStyle = dimGreen
+		}
+		if row.value == "" {
+			list.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			continue
+		}
+		list.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-22s %s", row.label+":", row.value)) + "\n")
+	}
+
+	detail := strings.Join([]string{
+		brightGreen.Render("Player Stats"),
+		green.Render(fmt.Sprintf("Mode: %s", modeLabel(m.setupMode()))),
+		green.Render(fmt.Sprintf("Scenario: %s", scenarioLabel)),
+		green.Render(fmt.Sprintf("Player Slot: %d/%d", activePlayer, playerCount)),
+		green.Render(fmt.Sprintf("Sex: %s  |  Body: %s", current.Sex, current.BodyType)),
+		green.Render(fmt.Sprintf("Height: %d ft %d in  |  Weight: %d kg", current.HeightFt, current.HeightIn, current.WeightKg)),
+		green.Render(fmt.Sprintf("Modifiers  End:%+d  Bush:%+d  Ment:%+d", current.Endurance, current.Bushcraft, current.Mental)),
+		"",
+		brightGreen.Render("Notes"),
+		dimGreen.Render("Use ←/→ to adjust selected stat."),
+		dimGreen.Render("Use Player row to switch between players."),
+	}, "\n")
+
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Stats Builder") + "\n")
+	b.WriteString(dimGreen.Render("Configure player stats for this run.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter cycle/select  Shift+Q back") + "\n")
+	if m.status != "" {
+		b.WriteString(green.Render(m.status) + "\n")
+	}
 	return b.String()
 }
 
