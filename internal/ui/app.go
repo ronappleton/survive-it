@@ -272,8 +272,8 @@ func (m menuModel) View() string {
 func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "Q", "esc":
-		m.screen = screenMenu
-		return m, nil
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
 
 	case "N":
 		m.advanceRunDay()
@@ -361,8 +361,8 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		m = m.openLoadRun(screenRun)
 		return m, nil
 	case "menu", "back":
-		m.screen = screenMenu
-		return m, nil
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
 	default:
 		m.status = "Unknown command. Try: next, save, load, menu."
 		return m, nil
@@ -981,6 +981,15 @@ func dosTitle(title string) string {
 	return brightGreen.Render("[" + strings.ToUpper(title) + "]")
 }
 
+func (m menuModel) returnToMainMenu() (menuModel, tea.Cmd) {
+	m.screen = screenMenu
+	if m.cfg.NoUpdate || m.busy {
+		return m, nil
+	}
+	m.busy = true
+	return m, checkUpdateCmd(m.cfg.Version, true)
+}
+
 func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	const rowCount = 8 // mode, scenario, players, run length, configure players, configure issued kit, start, cancel
 	m = m.ensureSetupScenarioSelection()
@@ -990,8 +999,8 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "Q", "q", "esc":
-		m.screen = screenMenu
-		return m, nil
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
 	case "up", "k":
 		m.setup.cursor = wrapIndex(m.setup.cursor, -1, rowCount)
 		return m, nil
@@ -1045,8 +1054,8 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 6:
 			return m.startRunFromSetup()
 		case 7:
-			m.screen = screenMenu
-			return m, nil
+			next, cmd := m.returnToMainMenu()
+			return next, cmd
 		default:
 			m = m.adjustSetupChoice(1)
 			return m, nil
@@ -2439,10 +2448,10 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "Q", "q", "esc":
 		if m.loadReturn == 0 {
-			m.screen = screenMenu
-		} else {
-			m.screen = m.loadReturn
+			next, cmd := m.returnToMainMenu()
+			return next, cmd
 		}
+		m.screen = m.loadReturn
 		return m, nil
 	case "up", "k":
 		m.load.cursor = wrapIndex(m.load.cursor, -1, rowCount)
@@ -2453,10 +2462,10 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.load.cursor >= len(m.load.entries) {
 			if m.loadReturn == 0 {
-				m.screen = screenMenu
-			} else {
-				m.screen = m.loadReturn
+				next, cmd := m.returnToMainMenu()
+				return next, cmd
 			}
+			m.screen = m.loadReturn
 			return m, nil
 		}
 
@@ -2711,8 +2720,8 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "Q", "q", "esc":
-		m.screen = screenMenu
-		return m, nil
+		next, cmd := m.returnToMainMenu()
+		return next, cmd
 	case "up", "k":
 		m.build.cursor = wrapIndex(m.build.cursor, -1, len(rows))
 		return m, nil
@@ -2749,8 +2758,8 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenPlayerConfig
 			return m, nil
 		case builderRowCancel:
-			m.screen = screenMenu
-			return m, nil
+			next, cmd := m.returnToMainMenu()
+			return next, cmd
 		default:
 			if m.scenarioBuilderRowSupportsCycle(row) {
 				m = m.adjustScenarioBuilderChoice(1)
