@@ -117,6 +117,7 @@ type gameUI struct {
 	runMessages []string
 	runInput    string
 	status      string
+	runFocus    int
 
 	lastTick     time.Time
 	runPlayedFor time.Duration
@@ -634,6 +635,7 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.run = &run
 	ui.runMessages = nil
 	ui.runPlayedFor = 0
+	ui.runFocus = 0
 	ui.runInput = ""
 	ui.status = ""
 	ui.appendRunMessage("Run started")
@@ -670,6 +672,7 @@ func (ui *gameUI) updateLoad() {
 		r.EnsurePlayerRuntimeStats()
 		ui.run = &r
 		ui.runPlayedFor = 0
+		ui.runFocus = 0
 		ui.status = ""
 		ui.runMessages = nil
 		ui.appendRunMessage("Loaded " + filepath.Base(entry.Path))
@@ -727,6 +730,16 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.screen = screenMenu
 		return
 	}
+	if len(ui.run.Players) > 0 {
+		if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRightBracket) {
+			ui.runFocus = wrapIndex(ui.runFocus+1, len(ui.run.Players))
+		}
+		if rl.IsKeyPressed(rl.KeyLeftBracket) {
+			ui.runFocus = wrapIndex(ui.runFocus-1, len(ui.run.Players))
+		}
+	} else {
+		ui.runFocus = 0
+	}
 	ui.runPlayedFor += delta
 	dayDuration := ui.autoDayDuration()
 	ui.run.ApplyRealtimeMetabolism(ui.runPlayedFor, dayDuration)
@@ -773,14 +786,42 @@ func (ui *gameUI) drawRun() {
 	if ui.run == nil {
 		return
 	}
-	top := rl.NewRectangle(20, 20, float32(ui.width-40), 120)
-	left := rl.NewRectangle(20, 152, float32(ui.width)*0.62, float32(ui.height)-252)
-	right := rl.NewRectangle(left.X+left.Width+16, 152, float32(ui.width)-left.Width-56, float32(ui.height)-252)
-	bottom := rl.NewRectangle(20, float32(ui.height-88), float32(ui.width-40), 60)
-	drawPanel(top, "Run")
-	drawPanel(left, "Message History")
-	drawPanel(right, "Players")
-	drawPanel(bottom, "Command Input")
+	outer := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+	topH := float32(194)
+	bottomH := float32(86)
+	if outer.Height < 470 {
+		topH = 164
+		bottomH = 76
+	}
+	middleTop := outer.Y + topH
+	bottomTop := outer.Y + outer.Height - bottomH
+	if bottomTop-middleTop < 180 {
+		bottomTop = middleTop + 180
+	}
+	splitX := outer.X + outer.Width*0.66
+	top := rl.NewRectangle(outer.X, outer.Y, outer.Width, topH)
+	left := rl.NewRectangle(outer.X, middleTop, splitX-outer.X, bottomTop-middleTop)
+	right := rl.NewRectangle(splitX, middleTop, outer.X+outer.Width-splitX, bottomTop-middleTop)
+	bottom := rl.NewRectangle(outer.X, bottomTop, outer.Width, outer.Y+outer.Height-bottomTop)
+
+	rl.DrawRectangleRec(outer, rl.Fade(colorPanel, 0.92))
+	rl.DrawRectangleRec(top, rl.Fade(colorPanel, 0.98))
+	rl.DrawRectangleRec(left, rl.Fade(colorPanel, 0.92))
+	rl.DrawRectangleRec(right, rl.Fade(colorPanel, 0.9))
+	rl.DrawRectangleRec(bottom, rl.Fade(colorPanel, 0.98))
+
+	drawUILine(outer.X, outer.Y, outer.X+outer.Width, outer.Y, 2, colorBorder)
+	drawUILine(outer.X, outer.Y+outer.Height, outer.X+outer.Width, outer.Y+outer.Height, 2, colorBorder)
+	drawUILine(outer.X, outer.Y, outer.X, outer.Y+outer.Height, 2, colorBorder)
+	drawUILine(outer.X+outer.Width, outer.Y, outer.X+outer.Width, outer.Y+outer.Height, 2, colorBorder)
+	drawUILine(outer.X, middleTop, outer.X+outer.Width, middleTop, 2, rl.Fade(colorBorder, 0.85))
+	drawUILine(outer.X, bottomTop, outer.X+outer.Width, bottomTop, 2, rl.Fade(colorBorder, 0.85))
+	drawUILine(splitX, middleTop, splitX, bottomTop, 2, rl.Fade(colorBorder, 0.8))
+
+	rl.DrawText("RUN STATUS", int32(top.X)+12, int32(top.Y)+8, 20, colorAccent)
+	rl.DrawText("MESSAGE HISTORY", int32(left.X)+12, int32(left.Y)+8, 18, colorAccent)
+	rl.DrawText("PLAYERS", int32(right.X)+12, int32(right.Y)+8, 18, colorAccent)
+	rl.DrawText("COMMAND INPUT", int32(bottom.X)+12, int32(bottom.Y)+8, 18, colorAccent)
 
 	season := "unknown"
 	if s, ok := ui.run.CurrentSeason(); ok {
@@ -788,50 +829,83 @@ func (ui *gameUI) drawRun() {
 	}
 	weather := game.WeatherLabel(ui.run.Weather.Type)
 	header := fmt.Sprintf("SURVIVE IT!   Mode: %s   Scenario: %s   Day: %d   Season: %s   Weather: %s   Temp: %dC", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.run.Weather.TemperatureC)
-	rl.DrawText(header, int32(top.X)+14, int32(top.Y)+38, 22, colorAccent)
+	rl.DrawText(header, int32(top.X)+14, int32(top.Y)+38, 21, colorAccent)
 	nextIn := ui.autoDayDuration() - ui.runPlayedFor
 	if nextIn < 0 {
 		nextIn = 0
 	}
-	rl.DrawText(fmt.Sprintf("Game Time: Day %d %s   Next Day In: %s", ui.run.Day, formatClockDuration(ui.runPlayedFor), formatClockDuration(nextIn)), int32(top.X)+14, int32(top.Y)+72, 20, colorText)
+	rl.DrawText(fmt.Sprintf("Game Time: Day %d %s   Next Day In: %s", ui.run.Day, formatClockDuration(ui.runPlayedFor), formatClockDuration(nextIn)), int32(top.X)+14, int32(top.Y)+66, 19, colorText)
 
-	lineY := int32(left.Y) + 42
-	start := len(ui.runMessages) - 18
+	focus := game.PlayerState{}
+	if len(ui.run.Players) > 0 {
+		ui.runFocus = clampInt(ui.runFocus, 0, len(ui.run.Players)-1)
+		focus = ui.run.Players[ui.runFocus]
+		rl.DrawText(fmt.Sprintf("Focus Player: %s (%d/%d)   TAB or [ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(top.X)+14, int32(top.Y)+90, 18, colorDim)
+	}
+
+	barInset := float32(14)
+	barGap := float32(12)
+	row1Y := top.Y + 124
+	row2Y := row1Y + 34
+	row1W := (top.Width - barInset*2 - barGap*3) / 4
+	row2W := (top.Width - barInset*2 - barGap*2) / 3
+	condition := runConditionScore(focus)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset, row1Y, row1W, 18), "Condition", condition, false)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*1, row1Y, row1W, 18), "Energy", focus.Energy, false)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*2, row1Y, row1W, 18), "Hydration", focus.Hydration, false)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*3, row1Y, row1W, 18), "Morale", focus.Morale, false)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset, row2Y, row2W, 18), "Hunger", focus.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row2W+barGap)*1, row2Y, row2W, 18), "Thirst", focus.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row2W+barGap)*2, row2Y, row2W, 18), "Fatigue", focus.Fatigue, true)
+
+	lineY := int32(left.Y) + 38
+	maxMessageLines := int((left.Height - 50) / 23)
+	if maxMessageLines < 4 {
+		maxMessageLines = 4
+	}
+	start := len(ui.runMessages) - maxMessageLines
 	if start < 0 {
 		start = 0
 	}
 	for i := start; i < len(ui.runMessages); i++ {
-		if lineY > int32(left.Y+left.Height)-28 {
+		if lineY > int32(left.Y+left.Height)-26 {
 			break
 		}
 		rl.DrawText(ui.runMessages[i], int32(left.X)+12, lineY, 18, colorText)
 		lineY += 23
 	}
 
-	py := int32(right.Y) + 40
+	py := int32(right.Y) + 36
 	for i := range ui.run.Players {
 		p := ui.run.Players[i]
-		line := fmt.Sprintf("%d. %s", p.ID, p.Name)
-		rl.DrawText(line, int32(right.X)+12, py, 20, colorAccent)
-		py += 24
-		stats := fmt.Sprintf("E:%d  H2O:%d  M:%d  Hu:%d  Th:%d  Fa:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue)
-		rl.DrawText(stats, int32(right.X)+20, py, 18, colorText)
-		py += 28
-		if py > int32(right.Y+right.Height)-40 {
+		if i == ui.runFocus {
+			rl.DrawRectangle(int32(right.X)+6, py-4, int32(right.Width)-12, 54, rl.Fade(colorAccent, 0.16))
+		}
+		name := fmt.Sprintf("P%d %s", p.ID, p.Name)
+		rl.DrawText(name, int32(right.X)+12, py, 19, colorAccent)
+		py += 22
+		overview := fmt.Sprintf("Cond:%d  E:%d  H2O:%d  M:%d", runConditionScore(p), p.Energy, p.Hydration, p.Morale)
+		rl.DrawText(overview, int32(right.X)+16, py, 17, colorText)
+		py += 20
+		effects := fmt.Sprintf("Hu:%d  Th:%d  Fa:%d  Ailments:%d", p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments))
+		rl.DrawText(effects, int32(right.X)+16, py, 17, colorDim)
+		py += 22
+		if py > int32(right.Y+right.Height)-44 {
 			break
 		}
 	}
 
-	cmdHint := "Commands: next | save | load | menu | hunt ... | fire ... | craft ...    Hotkeys: S save  L load  Esc menu"
-	rl.DrawText(cmdHint, int32(bottom.X)+12, int32(bottom.Y)-24, 17, colorDim)
+	cmdHint := "Commands: next | save | load | menu | hunt ... | fire ... | craft ...   Hotkeys: S save  L load  Esc menu"
+	rl.DrawText(cmdHint, int32(bottom.X)+14, int32(bottom.Y)+34, 17, colorDim)
 	in := strings.TrimSpace(ui.runInput)
 	if in == "" {
-		rl.DrawText("> ", int32(bottom.X)+14, int32(bottom.Y)+20, 24, colorText)
+		rl.DrawText("> ", int32(bottom.X)+14, int32(bottom.Y)+56, 24, colorText)
 	} else {
-		rl.DrawText("> "+ui.runInput+"_", int32(bottom.X)+14, int32(bottom.Y)+20, 24, colorAccent)
+		rl.DrawText("> "+ui.runInput+"_", int32(bottom.X)+14, int32(bottom.Y)+56, 24, colorAccent)
 	}
 	if strings.TrimSpace(ui.status) != "" {
-		rl.DrawText(ui.status, int32(bottom.X)+420, int32(bottom.Y)+20, 20, colorWarn)
+		statusX := int32(bottom.X + bottom.Width*0.45)
+		rl.DrawText(ui.status, statusX, int32(bottom.Y)+56, 20, colorWarn)
 	}
 }
 
@@ -1336,4 +1410,56 @@ func formatClockDuration(d time.Duration) string {
 	minutes := (total % 3600) / 60
 	seconds := total % 60
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+
+func drawUILine(x1 float32, y1 float32, x2 float32, y2 float32, thickness float32, clr rl.Color) {
+	rl.DrawLineEx(rl.Vector2{X: x1, Y: y1}, rl.Vector2{X: x2, Y: y2}, thickness, clr)
+}
+
+func drawRunStatBar(rect rl.Rectangle, label string, value int, danger bool) {
+	v := clampInt(value, 0, 100)
+	fillWidth := (rect.Width - 2) * float32(v) / 100
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	rl.DrawText(fmt.Sprintf("%s %d%%", label, v), int32(rect.X)+2, int32(rect.Y)-16, 15, colorText)
+	rl.DrawRectangleRec(rect, rl.NewColor(8, 16, 12, 255))
+	if fillWidth > 0 {
+		fill := rl.NewRectangle(rect.X+1, rect.Y+1, fillWidth, rect.Height-2)
+		rl.DrawRectangleRec(fill, runBarColor(v, danger))
+	}
+	rl.DrawRectangleLinesEx(rect, 1.4, rl.Fade(colorBorder, 0.75))
+}
+
+func runBarColor(value int, danger bool) rl.Color {
+	v := clampInt(value, 0, 100)
+	if danger {
+		if v >= 70 {
+			return rl.NewColor(242, 84, 84, 230)
+		}
+		if v >= 40 {
+			return rl.NewColor(255, 190, 92, 235)
+		}
+		return rl.NewColor(60, 236, 136, 230)
+	}
+	if v >= 70 {
+		return rl.NewColor(60, 236, 136, 230)
+	}
+	if v >= 40 {
+		return rl.NewColor(255, 190, 92, 235)
+	}
+	return rl.NewColor(242, 84, 84, 230)
+}
+
+func runConditionScore(player game.PlayerState) int {
+	condition := 0
+	condition += player.Energy
+	condition += player.Hydration
+	condition += player.Morale
+	condition += 100 - clampInt(player.Hunger, 0, 100)
+	condition += 100 - clampInt(player.Thirst, 0, 100)
+	condition += 100 - clampInt(player.Fatigue, 0, 100)
+	condition /= 6
+	condition -= len(player.Ailments) * 5
+	return clampInt(condition, 0, 100)
 }
