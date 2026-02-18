@@ -1558,6 +1558,52 @@ func (m menuModel) viewKitPicker() string {
 		}
 	}
 
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 36 {
+		listWidth = 36
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
+
+	activeItem := all[m.kit.cursor]
+	selectedList := make([]string, 0, len(selected))
+	for _, item := range all {
+		if selected[item] {
+			selectedList = append(selectedList, string(item))
+		}
+	}
+	selectedText := "none selected"
+	if len(selectedList) > 0 {
+		selectedText = strings.Join(selectedList, "\n- ")
+		selectedText = "- " + selectedText
+	}
+
+	var detail strings.Builder
+	detail.WriteString(brightGreen.Render("Selected Items") + "\n")
+	if limit > 0 {
+		detail.WriteString(green.Render(fmt.Sprintf("Count: %d/%d", selectedCount, limit)) + "\n\n")
+	} else {
+		detail.WriteString(green.Render(fmt.Sprintf("Count: %d", selectedCount)) + "\n\n")
+	}
+	detail.WriteString(green.Render(selectedText) + "\n\n")
+	detail.WriteString(brightGreen.Render("Focused Item") + "\n")
+	detail.WriteString(green.Render(string(activeItem)) + "\n")
+	detail.WriteString(dimGreen.Render(kitItemFlavorText(activeItem)) + "\n\n")
+	detail.WriteString(dimGreen.Render("Enter toggles focused item on/off.") + "\n")
+	if m.kit.target == kitTargetIssued {
+		detail.WriteString(dimGreen.Render("Shift+R resets issued kit to recommendation.") + "\n")
+	}
+
 	var b strings.Builder
 	b.WriteString(dosTitle(title) + "\n")
 	if limit > 0 {
@@ -1565,16 +1611,23 @@ func (m menuModel) viewKitPicker() string {
 	} else {
 		b.WriteString(dimGreen.Render(fmt.Sprintf("%s  |  Selected: %d", sub, selectedCount)) + "\n")
 	}
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n")
+	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
 	listPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
-		Width(maxInt(48, m.w-8)).
-		Height(maxInt(12, m.h-10)).
+		Width(listWidth).
+		Height(contentHeight).
 		Render(list.String())
-	b.WriteString(listPane + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n")
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail.String())
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
 	if m.kit.target == kitTargetIssued {
 		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  R reset recommended  Shift+Q back") + "\n")
 	} else {
@@ -1591,6 +1644,26 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func kitItemFlavorText(item game.KitItem) string {
+	name := strings.ToLower(string(item))
+	switch {
+	case strings.Contains(name, "knife"), strings.Contains(name, "hatchet"), strings.Contains(name, "saw"), strings.Contains(name, "machete"):
+		return "Tool item: useful for shelter building, carving, and camp maintenance."
+	case strings.Contains(name, "water"), strings.Contains(name, "canteen"), strings.Contains(name, "purification"):
+		return "Water item: improves hydration safety and access."
+	case strings.Contains(name, "ferro"), strings.Contains(name, "fire"), strings.Contains(name, "magnifying"):
+		return "Fire item: improves fire-start options and heat reliability."
+	case strings.Contains(name, "tarp"), strings.Contains(name, "blanket"), strings.Contains(name, "sleep"), strings.Contains(name, "thermal"):
+		return "Shelter item: helps with exposure management and recovery."
+	case strings.Contains(name, "fishing"), strings.Contains(name, "snare"), strings.Contains(name, "bow"):
+		return "Food item: supports hunting or fishing strategy."
+	case strings.Contains(name, "first aid"), strings.Contains(name, "insect"), strings.Contains(name, "net"):
+		return "Protection item: helps reduce injury/insect burden."
+	default:
+		return "General survival item: evaluate role against scenario conditions."
+	}
 }
 
 func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1699,20 +1772,24 @@ func (m menuModel) viewPlayerConfig() string {
 	current := m.setup.players[m.pcfg.playerIdx]
 
 	totalWidth := m.w
-	if totalWidth < 100 {
-		totalWidth = 100
+	if totalWidth < 128 {
+		totalWidth = 128
 	}
 	contentHeight := m.h - 9
 	if contentHeight < 16 {
 		contentHeight = 16
 	}
 	listWidth := totalWidth / 3
-	if listWidth < 36 {
-		listWidth = 36
+	if listWidth < 34 {
+		listWidth = 34
 	}
-	detailWidth := totalWidth - listWidth - 4
-	if detailWidth < 52 {
-		detailWidth = 52
+	statsWidth := totalWidth / 3
+	if statsWidth < 38 {
+		statsWidth = 38
+	}
+	asciiWidth := totalWidth - listWidth - statsWidth - 6
+	if asciiWidth < 34 {
+		asciiWidth = 34
 	}
 
 	var list strings.Builder
@@ -1739,7 +1816,8 @@ func (m menuModel) viewPlayerConfig() string {
 		list.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-24s %s", row.label+":", value)) + "\n")
 	}
 
-	detail := m.playerEditorDetailText(current, scenarioLabel, activePlayer, playerCount)
+	detail := m.playerEditorStatsText(current, scenarioLabel, activePlayer, playerCount)
+	ascii := m.playerEditorAsciiText(current)
 	listPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
@@ -1747,19 +1825,26 @@ func (m menuModel) viewPlayerConfig() string {
 		Width(listWidth).
 		Height(contentHeight).
 		Render(list.String())
-	detailPane := lipgloss.NewStyle().
+	statsPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
 		Padding(0, 1).
-		Width(detailWidth).
+		Width(statsWidth).
 		Height(contentHeight).
 		Render(detail)
+	asciiPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(asciiWidth).
+		Height(contentHeight).
+		Render(ascii)
 
 	var b strings.Builder
 	b.WriteString(dosTitle("Player Editor") + "\n")
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n\n")
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, statsPane, asciiPane))
 	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/select  type for Name  Shift+Q back") + "\n")
 	b.WriteString(dimGreen.Render("Use Open Kit Picker rows for full kit selection screens.") + "\n")
 	if m.status != "" {
@@ -1769,12 +1854,11 @@ func (m menuModel) viewPlayerConfig() string {
 	return b.String()
 }
 
-func (m menuModel) playerEditorDetailText(p game.PlayerConfig, scenarioLabel string, activePlayer, playerCount int) string {
+func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel string, activePlayer, playerCount int) string {
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		name = fmt.Sprintf("Player %d", activePlayer)
 	}
-	ascii := playerASCIIArt(p)
 
 	return strings.Join([]string{
 		brightGreen.Render(name),
@@ -1785,11 +1869,19 @@ func (m menuModel) playerEditorDetailText(p game.PlayerConfig, scenarioLabel str
 		green.Render(fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental)),
 		green.Render(fmt.Sprintf("Kit  %d/%d selected", len(p.Kit), p.KitLimit)),
 		"",
-		brightGreen.Render("Body Preview"),
-		green.Render(ascii),
-		"",
-		dimGreen.Render("Figure shape adjusts with height/weight/body type."),
+		brightGreen.Render("Player Notes"),
+		dimGreen.Render("Adjust height/weight/body and preview updates live."),
+		dimGreen.Render("Use quick name or type custom name directly."),
+		dimGreen.Render("Kit limit is constrained by selected game mode."),
 	}, "\n")
+}
+
+func (m menuModel) playerEditorAsciiText(p game.PlayerConfig) string {
+	return strings.Join([]string{
+		brightGreen.Render("Body Preview"),
+		green.Render(playerASCIIArt(p)),
+		dimGreen.Render("Figure scale reacts to height and build."),
+	}, "\n\n")
 }
 
 func playerASCIIArt(p game.PlayerConfig) string {
@@ -1812,13 +1904,13 @@ func playerASCIIArt(p game.PlayerConfig) string {
 	bodyWidth := 3
 	switch {
 	case weight >= 105:
-		bodyWidth = 7
+		bodyWidth = 8
 	case weight >= 90:
-		bodyWidth = 6
+		bodyWidth = 7
 	case weight >= 75:
-		bodyWidth = 5
+		bodyWidth = 6
 	case weight >= 60:
-		bodyWidth = 4
+		bodyWidth = 5
 	}
 
 	switch p.BodyType {
@@ -1832,35 +1924,59 @@ func playerASCIIArt(p game.PlayerConfig) string {
 	if bodyWidth < 3 {
 		bodyWidth = 3
 	}
-	if bodyWidth > 8 {
-		bodyWidth = 8
+	if bodyWidth > 10 {
+		bodyWidth = 10
 	}
 
 	legRows := 3
 	switch {
 	case heightScore >= 38:
-		legRows = 6
+		legRows = 7
 	case heightScore >= 32:
-		legRows = 5
+		legRows = 6
 	case heightScore >= 26:
-		legRows = 4
+		legRows = 5
 	}
-	armSpan := bodyWidth + 2
-	shoulders := strings.Repeat("=", bodyWidth)
-	torso := strings.Repeat("|", bodyWidth)
+	shoulderWidth := bodyWidth + 4
+	figureWidth := maxInt(22, shoulderWidth+12)
+	torsoFill := "#"
+	if p.BodyType == game.BodyTypeFemale {
+		torsoFill = "*"
+	}
+	if p.BodyType == game.BodyTypeNeutral {
+		torsoFill = "+"
+	}
+
+	center := func(text string) string {
+		padding := (figureWidth - len(text)) / 2
+		if padding < 0 {
+			padding = 0
+		}
+		return strings.Repeat(" ", padding) + text
+	}
+
+	armLine := "/" + strings.Repeat(" ", shoulderWidth+2) + "\\"
+	shoulderLine := "." + strings.Repeat("_", shoulderWidth) + "."
+	torsoLine := "| " + strings.Repeat(torsoFill, bodyWidth) + " |"
+	waistLine := "|" + strings.Repeat("_", bodyWidth+2) + "|"
+	legGap := maxInt(2, bodyWidth-1)
+	shin := maxInt(1, bodyWidth/3)
 
 	var b strings.Builder
-	b.WriteString("    ___\n")
-	b.WriteString("   (o o)\n")
-	b.WriteString("    \\_/\n")
-	b.WriteString(" " + strings.Repeat("-", armSpan) + shoulders + strings.Repeat("-", armSpan) + "\n")
+	b.WriteString(center(" ___ ") + "\n")
+	b.WriteString(center("/o o\\") + "\n")
+	b.WriteString(center("\\_^_/") + "\n")
+	b.WriteString(center(shoulderLine) + "\n")
+	b.WriteString(center(armLine) + "\n")
 	for i := 0; i < 2; i++ {
-		b.WriteString(strings.Repeat(" ", armSpan+1) + torso + "\n")
+		b.WriteString(center(torsoLine) + "\n")
 	}
-	b.WriteString(strings.Repeat(" ", armSpan+1) + "/" + strings.Repeat(" ", bodyWidth-2) + "\\\n")
+	b.WriteString(center(waistLine) + "\n")
 	for i := 0; i < legRows; i++ {
-		b.WriteString(strings.Repeat(" ", armSpan+1) + "/ " + strings.Repeat(" ", bodyWidth-3) + "\\\n")
+		spread := legGap + i/2
+		b.WriteString(center("/"+strings.Repeat(" ", shin)+"\\"+strings.Repeat(" ", spread)+"/"+strings.Repeat(" ", shin)+"\\") + "\n")
 	}
+	b.WriteString(center("/_"+strings.Repeat("_", shin)+"\\"+strings.Repeat(" ", legGap+legRows/2)+"/"+strings.Repeat("_", shin)+"_\\") + "\n")
 	return b.String()
 }
 
