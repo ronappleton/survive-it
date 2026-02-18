@@ -652,7 +652,7 @@ func newSetupState() setupState {
 		cursor:         0,
 		modeIdx:        0,
 		scenarioID:     "",
-		playerCountIdx: 1, // 2 players by default
+		playerCountIdx: 0, // Alone defaults to 1 player
 		runLengthIdx:   0,
 	}
 	s.players = make([]game.PlayerConfig, setupPlayerCounts()[s.playerCountIdx])
@@ -706,7 +706,7 @@ func newScenarioBuilderState() scenarioBuilderState {
 		selectedIdx:    0,
 		name:           "",
 		modeIdx:        0,
-		playerCountIdx: 1,
+		playerCountIdx: 0,
 		biomeIdx:       0,
 		wildlifeText:   strings.Join(game.WildlifeForBiome(defaultBiome), ", "),
 		useCustomDays:  false,
