@@ -271,10 +271,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.screen == screenRun && m.run != nil {
 			m.runPlayedFor += delta
-			dayDuration := time.Duration(m.opts.dayHours) * time.Hour
-			if dayDuration <= 0 {
-				dayDuration = 2 * time.Hour
-			}
+			dayDuration := m.autoDayDuration()
 			for m.runPlayedFor >= dayDuration {
 				m.advanceRunDay()
 				m.runPlayedFor -= dayDuration
@@ -341,6 +338,7 @@ func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "N":
 		m.advanceRunDay()
+		m.runPlayedFor = 0
 		return m, nil
 	case "S":
 		if m.run == nil {
@@ -408,6 +406,7 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "next":
 		m.advanceRunDay()
+		m.runPlayedFor = 0
 		return m, nil
 	case "save":
 		if m.run == nil {
@@ -4659,7 +4658,7 @@ func (m menuModel) viewRun() string {
 		totalWidth = 60
 	}
 
-	headerRows := 4
+	headerRows := 5
 	controlsRows := 3
 	inputRows := 4
 	bodyRows := totalHeight - headerRows - controlsRows - inputRows
@@ -4835,6 +4834,8 @@ func (m menuModel) headerText() string {
 		seasonStr = string(season)
 	}
 	temp := m.formatTemperature(m.currentRunTemperatureC())
+	gameTime := m.gameTimeLabel()
+	nextDayIn := m.nextDayCountdownLabel()
 
 	var b strings.Builder
 	b.WriteString(lipgloss.JoinVertical(
@@ -4842,8 +4843,42 @@ func (m menuModel) headerText() string {
 		brightGreen.Render("SURVIVE IT!"),
 		dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Season: %s  |  Day: %d  |  Temp: %s",
 			modeLabel(m.run.Config.Mode), m.run.Scenario.Name, seasonStr, m.run.Day, temp)),
+		dimGreen.Render(fmt.Sprintf("Game Time: %s  |  Next Day In: %s", gameTime, nextDayIn)),
 	))
 	return b.String()
+}
+
+func (m menuModel) autoDayDuration() time.Duration {
+	if m.opts.dayHours < 1 {
+		return 2 * time.Hour
+	}
+	return time.Duration(m.opts.dayHours) * time.Hour
+}
+
+func (m menuModel) gameTimeLabel() string {
+	if m.run == nil {
+		return "Day 0 00:00:00"
+	}
+	return fmt.Sprintf("Day %d %s", m.run.Day, formatClockDuration(m.runPlayedFor))
+}
+
+func (m menuModel) nextDayCountdownLabel() string {
+	remaining := m.autoDayDuration() - m.runPlayedFor
+	if remaining < 0 {
+		remaining = 0
+	}
+	return formatClockDuration(remaining)
+}
+
+func formatClockDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	totalSeconds := int(d / time.Second)
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
 func modeLabel(mode game.GameMode) string {
