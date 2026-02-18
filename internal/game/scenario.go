@@ -4,6 +4,7 @@ type Scenario struct {
 	ID                 ScenarioID
 	Name               string
 	Biome              string
+	Wildlife           []string
 	Description        string
 	Daunting           string
 	Motivation         string

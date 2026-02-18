@@ -448,12 +448,10 @@ type scenarioPickerState struct {
 }
 
 type playerConfigState struct {
-	cursor       int
-	playerIdx    int
-	nameIdx      int
-	addKitIdx    int
-	addIssuedIdx int
-	returnTo     screen
+	cursor    int
+	playerIdx int
+	addKitIdx int
+	returnTo  screen
 }
 
 type kitPickerTarget int
@@ -491,6 +489,7 @@ type scenarioBuilderState struct {
 	modeIdx        int
 	playerCountIdx int
 	biomeIdx       int
+	wildlifeText   string
 	useCustomDays  bool
 	defaultDaysIdx int
 	customDays     string
@@ -535,6 +534,7 @@ const (
 	builderRowMode
 	builderRowPlayerCount
 	builderRowBiome
+	builderRowWildlife
 	builderRowDaysMode
 	builderRowDaysPreset
 	builderRowDaysCustom
@@ -561,7 +561,6 @@ type playerConfigRowKind int
 const (
 	playerRowPlayer playerConfigRowKind = iota
 	playerRowName
-	playerRowQuickName
 	playerRowSex
 	playerRowBodyType
 	playerRowWeightKg
@@ -575,10 +574,7 @@ const (
 	playerRowEditPersonalKit
 	playerRowAddPersonalKit
 	playerRowRemovePersonalKit
-	playerRowIssuedKit
 	playerRowEditIssuedKit
-	playerRowAddIssuedKit
-	playerRowRemoveIssuedKit
 	playerRowResetIssuedKit
 	playerRowBack
 )
@@ -628,12 +624,10 @@ func newScenarioPickerState() scenarioPickerState {
 
 func newPlayerConfigState() playerConfigState {
 	return playerConfigState{
-		cursor:       0,
-		playerIdx:    0,
-		nameIdx:      0,
-		addKitIdx:    0,
-		addIssuedIdx: 0,
-		returnTo:     screenSetup,
+		cursor:    0,
+		playerIdx: 0,
+		addKitIdx: 0,
+		returnTo:  screenSetup,
 	}
 }
 
@@ -653,6 +647,7 @@ func newLoadRunState() loadRunState {
 }
 
 func newScenarioBuilderState() scenarioBuilderState {
+	defaultBiome := builderBiomes()[0]
 	return scenarioBuilderState{
 		cursor:         0,
 		selectedIdx:    0,
@@ -660,6 +655,7 @@ func newScenarioBuilderState() scenarioBuilderState {
 		modeIdx:        0,
 		playerCountIdx: 1,
 		biomeIdx:       0,
+		wildlifeText:   strings.Join(game.WildlifeForBiome(defaultBiome), ", "),
 		useCustomDays:  false,
 		defaultDaysIdx: 1,
 		customDays:     "60",
@@ -749,6 +745,72 @@ func defaultKitLimitForMode(mode game.GameMode) int {
 	return maxKitLimitForMode(mode)
 }
 
+func issuedKitOptionsForMode(mode game.GameMode) []game.KitItem {
+	switch mode {
+	case game.ModeNakedAndAfraid:
+		return []game.KitItem{
+			game.KitSixInchKnife,
+			game.KitMachete,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitSnareWire,
+			game.KitTarp,
+			game.KitMosquitoNet,
+			game.KitInsectRepellent,
+		}
+	case game.ModeNakedAndAfraidXL:
+		return []game.KitItem{
+			game.KitSixInchKnife,
+			game.KitMachete,
+			game.KitHatchet,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitMetalCup,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitGillNet,
+			game.KitSnareWire,
+			game.KitBowArrows,
+			game.KitTarp,
+			game.KitMosquitoNet,
+			game.KitInsectRepellent,
+		}
+	default: // Alone
+		return []game.KitItem{
+			game.KitHatchet,
+			game.KitSixInchKnife,
+			game.KitFoldingSaw,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitGillNet,
+			game.KitSnareWire,
+			game.KitBowArrows,
+			game.KitTarp,
+			game.KitSleepingBag,
+			game.KitMosquitoNet,
+		}
+	}
+}
+
 func playerConfigSuggestedNames() []string {
 	return []string{
 		"Sophia", "Daniel", "Maya", "Ethan", "Harper",
@@ -818,13 +880,19 @@ func recommendedIssuedKitForScenario(mode game.GameMode, scenario game.Scenario)
 		kit = append(kit, game.KitHatchet, game.KitParacord50ft, game.KitFerroRod, game.KitCookingPot)
 	}
 
+	targetCount := 4
 	if mode == game.ModeNakedAndAfraid {
-		return firstNKitItems(kit, 2)
+		targetCount = 2
 	}
 	if mode == game.ModeNakedAndAfraidXL {
-		return firstNKitItems(kit, 3)
+		targetCount = 3
 	}
-	return firstNKitItems(kit, 4)
+	allowed := issuedKitOptionsForMode(mode)
+	filtered := filterKitItemsToAllowed(kit, allowed)
+	if len(filtered) == 0 {
+		filtered = append([]game.KitItem(nil), allowed...)
+	}
+	return firstNKitItems(filtered, targetCount)
 }
 
 func firstNKitItems(items []game.KitItem, n int) []game.KitItem {
@@ -832,6 +900,27 @@ func firstNKitItems(items []game.KitItem, n int) []game.KitItem {
 		return append([]game.KitItem(nil), items...)
 	}
 	return append([]game.KitItem(nil), items[:n]...)
+}
+
+func filterKitItemsToAllowed(items []game.KitItem, allowed []game.KitItem) []game.KitItem {
+	if len(items) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := make(map[game.KitItem]struct{}, len(allowed))
+	for _, item := range allowed {
+		allowedSet[item] = struct{}{}
+	}
+	filtered := make([]game.KitItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowedSet[item]; !ok {
+			continue
+		}
+		if hasKitItem(filtered, item) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func (m menuModel) ensureSetupPlayers() menuModel {
@@ -974,9 +1063,6 @@ func wrapIndex(current, delta, size int) int {
 func dosRule(width int) string {
 	if width < 40 {
 		width = 40
-	}
-	if width > 100 {
-		width = 100
 	}
 	return strings.Repeat("-", width)
 }
@@ -1432,15 +1518,28 @@ func (m menuModel) scenarioDetailText(s game.Scenario) string {
 	}
 
 	var b strings.Builder
+	wildlife := scenarioWildlife(s)
+	insects := game.InsectsForBiome(s.Biome)
 	b.WriteString(brightGreen.Render(s.Name) + "\n")
 	b.WriteString(green.Render(fmt.Sprintf("Biome: %s", s.Biome)) + "\n")
 	b.WriteString(green.Render(fmt.Sprintf("Default Days: %d", s.DefaultDays)) + "\n\n")
+	b.WriteString(brightGreen.Render("Wildlife") + "\n")
+	b.WriteString(green.Render(strings.Join(wildlife, ", ")) + "\n")
+	b.WriteString(brightGreen.Render("Insects (Auto)") + "\n")
+	b.WriteString(green.Render(strings.Join(insects, ", ")) + "\n\n")
 	b.WriteString(dimGreen.Render(desc) + "\n\n")
 	b.WriteString(brightGreen.Render("Daunting") + "\n")
 	b.WriteString(green.Render(daunting) + "\n\n")
 	b.WriteString(brightGreen.Render("Motivation") + "\n")
 	b.WriteString(green.Render(motivation))
 	return b.String()
+}
+
+func scenarioWildlife(s game.Scenario) []string {
+	if len(s.Wildlife) > 0 {
+		return append([]string(nil), s.Wildlife...)
+	}
+	return game.WildlifeForBiome(s.Biome)
 }
 
 func (m menuModel) openPersonalKitPicker(returnTo screen) menuModel {
@@ -1452,7 +1551,7 @@ func (m menuModel) openPersonalKitPicker(returnTo screen) menuModel {
 	m.kit.cursor = 0
 	if len(m.setup.players) > 0 {
 		playerKit := m.setup.players[m.pcfg.playerIdx].Kit
-		all := game.AllKitItems()
+		all := m.kitPickerItems()
 		for i, item := range all {
 			if hasKitItem(playerKit, item) {
 				m.kit.cursor = i
@@ -1470,7 +1569,7 @@ func (m menuModel) openIssuedKitPicker(returnTo screen) menuModel {
 	m.kit.target = kitTargetIssued
 	m.kit.returnTo = returnTo
 	m.kit.cursor = 0
-	all := game.AllKitItems()
+	all := m.kitPickerItems()
 	for i, item := range all {
 		if hasKitItem(m.setup.issuedKit, item) {
 			m.kit.cursor = i
@@ -1481,8 +1580,22 @@ func (m menuModel) openIssuedKitPicker(returnTo screen) menuModel {
 	return m
 }
 
+func (m menuModel) kitPickerItems() []game.KitItem {
+	if m.kit.target == kitTargetIssued {
+		items := append([]game.KitItem(nil), issuedKitOptionsForMode(m.setupMode())...)
+		for _, selected := range m.setup.issuedKit {
+			if hasKitItem(items, selected) {
+				continue
+			}
+			items = append(items, selected)
+		}
+		return items
+	}
+	return game.AllKitItems()
+}
+
 func (m menuModel) updateKitPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	all := game.AllKitItems()
+	all := m.kitPickerItems()
 	if len(all) == 0 {
 		m.screen = m.kit.returnTo
 		m.status = "No kit items available."
@@ -1566,7 +1679,7 @@ func playerEditorSlotLabel(idx, total int) string {
 }
 
 func (m menuModel) viewKitPicker() string {
-	all := game.AllKitItems()
+	all := m.kitPickerItems()
 	if len(all) == 0 {
 		return brightGreen.Render("No kit items available.")
 	}
@@ -1618,21 +1731,33 @@ func (m menuModel) viewKitPicker() string {
 		}
 	}
 
-	totalWidth := m.w
-	if totalWidth < 100 {
-		totalWidth = 100
+	totalWidth := m.w - 2
+	if totalWidth < 92 {
+		totalWidth = 92
 	}
 	contentHeight := m.h - 8
 	if contentHeight < 16 {
 		contentHeight = 16
 	}
-	listWidth := totalWidth / 3
-	if listWidth < 36 {
-		listWidth = 36
+	listPaneTotal := totalWidth / 3
+	if listPaneTotal < 42 {
+		listPaneTotal = 42
 	}
-	detailWidth := totalWidth - listWidth - 4
-	if detailWidth < 52 {
-		detailWidth = 52
+	if listPaneTotal > 58 {
+		listPaneTotal = 58
+	}
+	detailPaneTotal := totalWidth - listPaneTotal
+	if detailPaneTotal < 44 {
+		detailPaneTotal = 44
+		listPaneTotal = totalWidth - detailPaneTotal
+	}
+	listWidth := listPaneTotal - 4
+	if listWidth < 24 {
+		listWidth = 24
+	}
+	detailWidth := detailPaneTotal - 4
+	if detailWidth < 30 {
+		detailWidth = 30
 	}
 
 	activeItem := all[m.kit.cursor]
@@ -1671,7 +1796,7 @@ func (m menuModel) viewKitPicker() string {
 	} else {
 		b.WriteString(dimGreen.Render(fmt.Sprintf("%s  |  Selected: %d", sub, selectedCount)) + "\n")
 	}
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
+	b.WriteString(border.Render(dosRule(totalWidth)) + "\n\n")
 	listPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
@@ -1687,7 +1812,7 @@ func (m menuModel) viewKitPicker() string {
 		Height(contentHeight).
 		Render(detail.String())
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
+	b.WriteString("\n" + border.Render(dosRule(totalWidth)) + "\n")
 	if m.kit.target == kitTargetIssued {
 		b.WriteString(dimGreen.Render("↑/↓ move  Enter toggle  R reset recommended  Shift+Q back") + "\n")
 	} else {
@@ -1766,26 +1891,16 @@ func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch row.kind {
-		case playerRowQuickName:
-			names := playerConfigSuggestedNames()
-			if len(names) == 0 || len(m.setup.players) == 0 {
-				return m, nil
-			}
-			m.setup.players[m.pcfg.playerIdx].Name = names[m.pcfg.nameIdx]
-		case playerRowEditPersonalKit, playerRowPersonalKit:
+		case playerRowEditPersonalKit:
 			m = m.openPersonalKitPicker(screenPlayerConfig)
 			return m, nil
 		case playerRowAddPersonalKit:
 			m = m.addPersonalKitItem()
 		case playerRowRemovePersonalKit:
 			m = m.removePersonalKitItem()
-		case playerRowEditIssuedKit, playerRowIssuedKit:
+		case playerRowEditIssuedKit:
 			m = m.openIssuedKitPicker(screenPlayerConfig)
 			return m, nil
-		case playerRowAddIssuedKit:
-			m = m.addIssuedKitItem()
-		case playerRowRemoveIssuedKit:
-			m = m.removeIssuedKitItem()
 		case playerRowResetIssuedKit:
 			m = m.resetIssuedKitRecommendations()
 		case playerRowBack:
@@ -1923,6 +2038,17 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 	if activePlayer == 1 {
 		editing = "Editing: YOU"
 	}
+	renderKitList := func(items []game.KitItem) string {
+		if len(items) == 0 {
+			return green.Render("- none")
+		}
+		lines := make([]string, 0, len(items))
+		for _, item := range items {
+			lines = append(lines, green.Render("- "+string(item)))
+		}
+		return strings.Join(lines, "\n")
+	}
+	issuedModeLine := green.Render(fmt.Sprintf("Issued options follow %s rules.", modeLabel(m.setupMode())))
 
 	return strings.Join([]string{
 		brightGreen.Render(name),
@@ -1934,9 +2060,16 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 		green.Render(fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental)),
 		green.Render(fmt.Sprintf("Kit  %d/%d selected", len(p.Kit), p.KitLimit)),
 		"",
+		brightGreen.Render("Selected Personal Kit"),
+		renderKitList(p.Kit),
+		"",
+		brightGreen.Render("Selected Issued Kit"),
+		renderKitList(m.setup.issuedKit),
+		issuedModeLine,
+		"",
 		brightGreen.Render("Player Notes"),
 		dimGreen.Render("Adjust height/weight/body and preview updates live."),
-		dimGreen.Render("Use quick name or type custom name directly."),
+		dimGreen.Render("Type directly in Name to customize your player."),
 		dimGreen.Render("Kit limit is constrained by selected game mode."),
 	}, "\n")
 }
@@ -2051,41 +2184,26 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 	}
 
 	allKit := game.AllKitItems()
-	names := playerConfigSuggestedNames()
-	if len(names) == 0 {
-		names = []string{"Player"}
-	}
 	playerIdx := m.pcfg.playerIdx
 	if playerIdx < 0 || playerIdx >= len(m.setup.players) {
 		playerIdx = 0
 	}
-	nameIdx := m.pcfg.nameIdx
-	if nameIdx < 0 || nameIdx >= len(names) {
-		nameIdx = 0
-	}
 	addKitIdx := m.pcfg.addKitIdx
-	addIssuedIdx := m.pcfg.addIssuedIdx
 	if len(allKit) > 0 {
 		if addKitIdx < 0 || addKitIdx >= len(allKit) {
 			addKitIdx = 0
-		}
-		if addIssuedIdx < 0 || addIssuedIdx >= len(allKit) {
-			addIssuedIdx = 0
 		}
 	}
 
 	p := m.setup.players[playerIdx]
 	addKitLabel := ""
-	addIssuedLabel := ""
 	if len(allKit) > 0 {
 		addKitLabel = string(allKit[addKitIdx])
-		addIssuedLabel = string(allKit[addIssuedIdx])
 	}
 
 	return []playerConfigRow{
 		{label: "Player", value: playerEditorSlotLabel(playerIdx, len(m.setup.players)), kind: playerRowPlayer, active: true},
 		{label: "Name", value: p.Name, kind: playerRowName, active: true},
-		{label: "Quick Name", value: names[nameIdx], kind: playerRowQuickName, active: true},
 		{label: "Sex", value: string(p.Sex), kind: playerRowSex, active: true},
 		{label: "Body Type", value: string(p.BodyType), kind: playerRowBodyType, active: true},
 		{label: "Weight (kg)", value: fmt.Sprintf("%d", p.WeightKg), kind: playerRowWeightKg, active: true},
@@ -2095,14 +2213,10 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 		{label: "Bushcraft Modifier", value: fmt.Sprintf("%+d", p.Bushcraft), kind: playerRowBushcraft, active: true},
 		{label: "Mental Modifier", value: fmt.Sprintf("%+d", p.Mental), kind: playerRowMental, active: true},
 		{label: "Kit Limit", value: fmt.Sprintf("%d", p.KitLimit), kind: playerRowKitLimit, active: true},
-		{label: "Personal Kit", value: kitSummary(p.Kit, p.KitLimit), kind: playerRowPersonalKit, active: true},
 		{label: "Open Personal Kit Picker", value: "", kind: playerRowEditPersonalKit, active: len(allKit) > 0},
 		{label: "Quick Add Personal Item", value: addKitLabel, kind: playerRowAddPersonalKit, active: len(allKit) > 0 && len(p.Kit) < p.KitLimit},
 		{label: "Quick Remove Personal Item", value: "", kind: playerRowRemovePersonalKit, active: len(p.Kit) > 0},
-		{label: "Issued Kit", value: kitSummary(m.setup.issuedKit, 0), kind: playerRowIssuedKit, active: true},
-		{label: "Open Issued Kit Picker", value: "", kind: playerRowEditIssuedKit, active: len(allKit) > 0},
-		{label: "Quick Add Issued Item", value: addIssuedLabel, kind: playerRowAddIssuedKit, active: len(allKit) > 0},
-		{label: "Quick Remove Issued Item", value: "", kind: playerRowRemoveIssuedKit, active: len(m.setup.issuedKit) > 0},
+		{label: "Open Issued Kit Picker", value: "", kind: playerRowEditIssuedKit, active: len(issuedKitOptionsForMode(m.setupMode())) > 0},
 		{label: "Reset Issued (Recommended)", value: "", kind: playerRowResetIssuedKit, active: true},
 		{label: "Back To Wizard", value: "", kind: playerRowBack, active: true},
 	}
@@ -2110,10 +2224,9 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 
 func (m menuModel) playerConfigRowSupportsCycle(kind playerConfigRowKind) bool {
 	switch kind {
-	case playerRowPlayer, playerRowQuickName, playerRowSex, playerRowBodyType,
-		playerRowWeightKg, playerRowHeightFt, playerRowHeightIn, playerRowEndurance,
-		playerRowBushcraft, playerRowMental, playerRowKitLimit, playerRowAddPersonalKit,
-		playerRowAddIssuedKit:
+	case playerRowPlayer, playerRowSex, playerRowBodyType, playerRowWeightKg,
+		playerRowHeightFt, playerRowHeightIn, playerRowEndurance, playerRowBushcraft,
+		playerRowMental, playerRowKitLimit, playerRowAddPersonalKit:
 		return true
 	default:
 		return false
@@ -2138,8 +2251,6 @@ func (m menuModel) adjustPlayerConfigChoice(delta int) menuModel {
 	switch row.kind {
 	case playerRowPlayer:
 		m.pcfg.playerIdx = wrapIndex(m.pcfg.playerIdx, delta, len(m.setup.players))
-	case playerRowQuickName:
-		m.pcfg.nameIdx = wrapIndex(m.pcfg.nameIdx, delta, len(playerConfigSuggestedNames()))
 	case playerRowSex:
 		options := playerConfigSexes()
 		idx := indexOfSex(options, p.Sex)
@@ -2168,8 +2279,6 @@ func (m menuModel) adjustPlayerConfigChoice(delta int) menuModel {
 		}
 	case playerRowAddPersonalKit:
 		m.pcfg.addKitIdx = wrapIndex(m.pcfg.addKitIdx, delta, len(game.AllKitItems()))
-	case playerRowAddIssuedKit:
-		m.pcfg.addIssuedIdx = wrapIndex(m.pcfg.addIssuedIdx, delta, len(game.AllKitItems()))
 	}
 
 	return m
@@ -2272,47 +2381,6 @@ func (m menuModel) removePersonalKitItem() menuModel {
 	return m
 }
 
-func (m menuModel) addIssuedKitItem() menuModel {
-	m = m.normalizePlayerConfigState()
-	items := game.AllKitItems()
-	if len(items) == 0 {
-		return m
-	}
-	item := items[m.pcfg.addIssuedIdx]
-	if hasKitItem(m.setup.issuedKit, item) {
-		m.status = fmt.Sprintf("%s is already in issued kit.", item)
-		return m
-	}
-	m.setup.issuedKit = append(m.setup.issuedKit, item)
-	m.setup.issuedCustom = true
-	m.status = fmt.Sprintf("Added %s to issued kit.", item)
-	return m
-}
-
-func (m menuModel) removeIssuedKitItem() menuModel {
-	m = m.normalizePlayerConfigState()
-	if len(m.setup.issuedKit) == 0 {
-		return m
-	}
-
-	items := game.AllKitItems()
-	if len(items) > 0 {
-		selected := items[m.pcfg.addIssuedIdx]
-		if idx := indexOfKitItem(m.setup.issuedKit, selected); idx >= 0 {
-			m.setup.issuedKit = removeKitItemAt(m.setup.issuedKit, idx)
-			m.setup.issuedCustom = true
-			m.status = fmt.Sprintf("Removed %s from issued kit.", selected)
-			return m
-		}
-	}
-
-	removed := m.setup.issuedKit[len(m.setup.issuedKit)-1]
-	m.setup.issuedKit = m.setup.issuedKit[:len(m.setup.issuedKit)-1]
-	m.setup.issuedCustom = true
-	m.status = fmt.Sprintf("Removed %s from issued kit.", removed)
-	return m
-}
-
 func (m menuModel) resetIssuedKitRecommendations() menuModel {
 	scenario, found := m.selectedSetupScenario()
 	if !found {
@@ -2334,26 +2402,13 @@ func (m menuModel) normalizePlayerConfigState() menuModel {
 		m.pcfg.playerIdx = 0
 	}
 
-	names := playerConfigSuggestedNames()
-	if len(names) > 0 {
-		if m.pcfg.nameIdx < 0 || m.pcfg.nameIdx >= len(names) {
-			m.pcfg.nameIdx = 0
-		}
-	} else {
-		m.pcfg.nameIdx = 0
-	}
-
 	items := game.AllKitItems()
 	if len(items) > 0 {
 		if m.pcfg.addKitIdx < 0 || m.pcfg.addKitIdx >= len(items) {
 			m.pcfg.addKitIdx = 0
 		}
-		if m.pcfg.addIssuedIdx < 0 || m.pcfg.addIssuedIdx >= len(items) {
-			m.pcfg.addIssuedIdx = 0
-		}
 	} else {
 		m.pcfg.addKitIdx = 0
-		m.pcfg.addIssuedIdx = 0
 	}
 
 	return m
@@ -2825,6 +2880,11 @@ func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
 		m = m.ensureSetupPlayers()
 	case builderRowBiome:
 		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
+		if strings.TrimSpace(m.build.wildlifeText) == "" {
+			m.build.wildlifeText = strings.Join(game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx]), ", ")
+		}
+	case builderRowWildlife:
+		m.build.wildlifeText = strings.Join(game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx]), ", ")
 	case builderRowDaysMode:
 		m.build.useCustomDays = !m.build.useCustomDays
 	case builderRowDaysPreset:
@@ -2885,11 +2945,17 @@ func (m menuModel) saveScenarioFromBuilder() (tea.Model, tea.Cmd) {
 	} else {
 		scenarioID = m.customScenarios[m.build.selectedIdx-1].Scenario.ID
 	}
+	biome := builderBiomes()[m.build.biomeIdx]
+	wildlife := normalizedCSVList(m.build.wildlifeText)
+	if len(wildlife) == 0 {
+		wildlife = game.WildlifeForBiome(biome)
+	}
 
 	scenario := game.Scenario{
 		ID:          scenarioID,
 		Name:        name,
-		Biome:       builderBiomes()[m.build.biomeIdx],
+		Biome:       biome,
+		Wildlife:    wildlife,
 		Description: "Custom scenario crafted in the scenario editor.",
 		Daunting:    "Custom conditions can become severe without careful planning.",
 		Motivation:  "Adapt, persist, and complete your own survival blueprint.",
@@ -2954,7 +3020,7 @@ func (m menuModel) deleteScenarioFromBuilder() (tea.Model, tea.Cmd) {
 
 func (m menuModel) scenarioBuilderRowSupportsCycle(row scenarioBuilderRow) bool {
 	switch row.kind {
-	case builderRowScenario, builderRowMode, builderRowPlayerCount, builderRowBiome, builderRowDaysMode, builderRowDaysPreset:
+	case builderRowScenario, builderRowMode, builderRowPlayerCount, builderRowBiome, builderRowWildlife, builderRowDaysMode, builderRowDaysPreset:
 		return true
 	default:
 		return false
@@ -2977,6 +3043,7 @@ func (m menuModel) scenarioBuilderRows() []scenarioBuilderRow {
 		{label: "Game Mode", value: modeLabel(setupModes()[m.build.modeIdx]), kind: builderRowMode, active: true},
 		{label: "Player Count", value: fmt.Sprintf("%d", setupPlayerCounts()[m.build.playerCountIdx]), kind: builderRowPlayerCount, active: true},
 		{label: "Biome", value: builderBiomes()[m.build.biomeIdx], kind: builderRowBiome, active: true},
+		{label: "Wildlife", value: m.build.wildlifeText, kind: builderRowWildlife, active: true},
 		{label: "Days Mode", value: map[bool]string{true: "Custom", false: "Preset"}[m.build.useCustomDays], kind: builderRowDaysMode, active: true},
 		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx]), kind: builderRowDaysPreset, active: !m.build.useCustomDays},
 		{label: "Days Custom", value: m.build.customDays, kind: builderRowDaysCustom, active: m.build.useCustomDays},
@@ -3006,6 +3073,12 @@ func (m menuModel) appendScenarioBuilderText(runes []rune) menuModel {
 	switch row.kind {
 	case builderRowName:
 		m.build.name += text
+	case builderRowWildlife:
+		for _, r := range runes {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == ',' || r == '-' {
+				m.build.wildlifeText += string(r)
+			}
+		}
 	case builderRowDaysCustom:
 		for _, r := range runes {
 			if r >= '0' && r <= '9' {
@@ -3040,6 +3113,8 @@ func (m menuModel) backspaceScenarioBuilderText() menuModel {
 	switch row.kind {
 	case builderRowName:
 		m.build.name = backspace(m.build.name)
+	case builderRowWildlife:
+		m.build.wildlifeText = backspace(m.build.wildlifeText)
 	case builderRowDaysCustom:
 		m.build.customDays = backspace(m.build.customDays)
 	case builderRowSeasonProfileID:
@@ -3077,6 +3152,11 @@ func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
 	loaded.name = record.Scenario.Name
 	loaded.modeIdx = selectedModeIndex(record.PreferredMode)
 	loaded.biomeIdx = selectedBiomeIndex(record.Scenario.Biome)
+	if len(record.Scenario.Wildlife) > 0 {
+		loaded.wildlifeText = strings.Join(record.Scenario.Wildlife, ", ")
+	} else {
+		loaded.wildlifeText = strings.Join(game.WildlifeForBiome(record.Scenario.Biome), ", ")
+	}
 
 	if idx := indexOfInt(builderDefaultDays(), record.Scenario.DefaultDays); idx >= 0 {
 		loaded.useCustomDays = false
@@ -3169,6 +3249,9 @@ func (m menuModel) viewScenarioBuilder() string {
 		if row.kind == builderRowName && strings.TrimSpace(value) == "" {
 			value = "<type name>"
 		}
+		if row.kind == builderRowWildlife && strings.TrimSpace(value) == "" {
+			value = "<comma separated animals>"
+		}
 		if row.kind == builderRowDaysCustom && strings.TrimSpace(value) == "" {
 			value = "<type days>"
 		}
@@ -3244,6 +3327,10 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 			green.Render("Persists scenario into survive-it-scenarios.json."),
 		)
 	}
+	wildlifePreview := normalizedCSVList(m.build.wildlifeText)
+	if len(wildlifePreview) == 0 {
+		wildlifePreview = game.WildlifeForBiome(builderBiomes()[m.build.biomeIdx])
+	}
 
 	return strings.Join([]string{
 		brightGreen.Render("Current Scenario Draft"),
@@ -3251,6 +3338,8 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 		green.Render(fmt.Sprintf("Mode: %s", modeLabel(setupModes()[m.build.modeIdx]))),
 		green.Render(fmt.Sprintf("Player Count: %d", setupPlayerCounts()[m.build.playerCountIdx])),
 		green.Render(fmt.Sprintf("Biome: %s", builderBiomes()[m.build.biomeIdx])),
+		green.Render(fmt.Sprintf("Wildlife: %s", strings.Join(wildlifePreview, ", "))),
+		green.Render(fmt.Sprintf("Insects (Auto): %s", strings.Join(game.InsectsForBiome(builderBiomes()[m.build.biomeIdx]), ", "))),
 		green.Render(fmt.Sprintf("Default Days: %s", map[bool]string{true: m.build.customDays, false: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])}[m.build.useCustomDays])),
 		green.Render(fmt.Sprintf("Season Profile ID: %s", strings.TrimSpace(m.build.seasonSetID))),
 		"",
@@ -3957,6 +4046,25 @@ func parseNonNegativeInt(raw string) (int, error) {
 		return 0, fmt.Errorf("negative")
 	}
 	return parsed, nil
+}
+
+func normalizedCSVList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func selectedSeasonIndex(season game.SeasonID) int {
