@@ -43,7 +43,8 @@ func TestValidateDataFilePath(t *testing.T) {
 		"/tmp/survive-it-save-1.json",
 		"../survive-it-save-1.json",
 		"nested/survive-it-save-1.json",
-		"survive-it-save-4.json",
+		"survive-it-save-.json",
+		"survive-it-save-*.json",
 	}
 	for _, path := range rejected {
 		if err := validateDataFilePath(path); err == nil {

@@ -8,6 +8,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +42,7 @@ const (
 	screenKitPicker
 	screenLoadRun
 	screenScenarioBuilder
+	screenPhaseEditor
 	screenRun
 )
 
@@ -75,6 +78,7 @@ var (
 		MiddleTop:    "+",
 		MiddleBottom: "+",
 	}
+	saveFilePattern = regexp.MustCompile(`^survive-it-save-[a-zA-Z0-9._-]+\.json$`)
 )
 
 // --- Menu model ---
@@ -85,8 +89,6 @@ const (
 	itemStart menuItem = iota
 	itemLoadRun
 	itemScenarioBuilder
-	itemCheckUpdate
-	itemInstallUpdate
 	itemQuit
 )
 
@@ -108,6 +110,7 @@ type menuModel struct {
 	kit    kitPickerState
 	load   loadRunState
 	build  scenarioBuilderState
+	phase  phaseEditorState
 
 	run             *game.RunState
 	runInput        string
@@ -116,6 +119,8 @@ type menuModel struct {
 	loadReturn      screen
 	status          string
 	busy            bool
+	updateAvailable bool
+	updateStatus    string
 	err             string
 }
 
@@ -131,6 +136,7 @@ func newMenuModel(cfg AppConfig) menuModel {
 		kit:             newKitPickerState(),
 		load:            newLoadRunState(),
 		build:           newScenarioBuilderState(),
+		phase:           newPhaseEditorState(),
 		activeSaveSlot:  1,
 		customScenarios: customScenarios,
 	}
@@ -138,12 +144,18 @@ func newMenuModel(cfg AppConfig) menuModel {
 
 func (m menuModel) Init() tea.Cmd {
 	// Approximate 1024x768 using typical terminal cells at ~8x16 px.
-	return resizeTerminalBestEffort(128, 48)
+	resizeCmd := resizeTerminalBestEffort(128, 48)
+	if m.cfg.NoUpdate {
+		return resizeCmd
+	}
+	return tea.Batch(resizeCmd, checkUpdateCmd(m.cfg.Version, true))
 }
 
 type updateResultMsg struct {
-	status string
-	err    error
+	status    string
+	err       error
+	available bool
+	auto      bool
 }
 
 type savedRun struct {
@@ -188,16 +200,27 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenScenarioBuilder {
 			return m.updateScenarioBuilder(msg)
 		}
+		if m.screen == screenPhaseEditor {
+			return m.updatePhaseEditor(msg)
+		}
 
 		return m.updateMenu(msg)
 	case updateResultMsg:
 		m.busy = false
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Update check failed: %v", msg.err)
+			if !msg.auto {
+				m.status = fmt.Sprintf("Update check failed: %v", msg.err)
+			}
+			m.updateAvailable = false
+			m.updateStatus = ""
 
 			return m, nil
 		}
-		m.status = msg.status
+		m.updateAvailable = msg.available
+		m.updateStatus = msg.status
+		if !msg.auto || msg.available {
+			m.status = msg.status
+		}
 
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -229,6 +252,9 @@ func (m menuModel) View() string {
 	if m.screen == screenScenarioBuilder {
 		return m.viewScenarioBuilder()
 	}
+	if m.screen == screenPhaseEditor {
+		return m.viewPhaseEditor()
+	}
 	if m.screen == screenRun {
 		return m.viewRun()
 	}
@@ -257,9 +283,7 @@ func (m menuModel) updateRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Saved run to slot %d (%s)", m.activeSaveSlot, path)
 		return m, nil
 	case "L":
-		m.load = newLoadRunState()
-		m.loadReturn = screenRun
-		m.screen = screenLoadRun
+		m = m.openLoadRun(screenRun)
 		return m, nil
 	case "enter":
 		return m.submitRunInput()
@@ -326,9 +350,7 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Saved run to slot %d", m.activeSaveSlot)
 		return m, nil
 	case "load":
-		m.load = newLoadRunState()
-		m.loadReturn = screenRun
-		m.screen = screenLoadRun
+		m = m.openLoadRun(screenRun)
 		return m, nil
 	case "menu", "back":
 		m.screen = screenMenu
@@ -344,8 +366,6 @@ func menuItems() []string {
 		"Start",
 		"Load Run",
 		"Scenario Builder",
-		"Check for updates",
-		"Install Update",
 		"Quit",
 	}
 }
@@ -359,6 +379,20 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "Q", "q":
 		return m, tea.Quit
+	case "U", "u":
+		if !m.updateAvailable || m.cfg.NoUpdate {
+			return m, nil
+		}
+		m.busy = true
+		m.status = "Installing update…"
+		return m, applyUpdateCmd(m.cfg.Version)
+	case "R", "r":
+		if m.cfg.NoUpdate {
+			return m, nil
+		}
+		m.busy = true
+		m.status = "Checking for updates…"
+		return m, checkUpdateCmd(m.cfg.Version, false)
 	case "up", "k":
 		m.idx = wrapIndex(m.idx, -1, itemCount)
 		return m, nil
@@ -377,30 +411,12 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = ""
 			return m, nil
 		case itemLoadRun:
-			m.load = newLoadRunState()
-			m.loadReturn = screenMenu
-			m.screen = screenLoadRun
+			m = m.openLoadRun(screenMenu)
 			return m, nil
 		case itemScenarioBuilder:
 			m.build = newScenarioBuilderState()
 			m.screen = screenScenarioBuilder
 			return m, nil
-		case itemCheckUpdate:
-			if m.cfg.NoUpdate {
-				m.status = "Update checks disabled (--no-update)."
-				return m, nil
-			}
-			m.busy = true
-			m.status = "Checking for updates…"
-			return m, checkUpdateCmd(m.cfg.Version)
-		case itemInstallUpdate:
-			if m.cfg.NoUpdate {
-				m.status = "Update checks disabled (--no-update)."
-				return m, nil
-			}
-			m.busy = true
-			m.status = "Installing update…"
-			return m, applyUpdateCmd(m.cfg.Version)
 		case itemQuit:
 			return m, tea.Quit
 		}
@@ -424,6 +440,7 @@ type playerConfigState struct {
 	nameIdx      int
 	addKitIdx    int
 	addIssuedIdx int
+	returnTo     screen
 }
 
 type kitPickerTarget int
@@ -445,10 +462,13 @@ type saveSlotMeta struct {
 	Exists    bool
 	Summary   string
 	ErrDetail string
+	Run       *game.RunState
+	SavedAt   time.Time
 }
 
 type loadRunState struct {
-	cursor int
+	cursor  int
+	entries []saveSlotMeta
 }
 
 type scenarioBuilderState struct {
@@ -469,6 +489,10 @@ type phaseBuilderPhase struct {
 	days      string
 }
 
+type phaseEditorState struct {
+	cursor int
+}
+
 type scenarioBuilderRowKind int
 
 const (
@@ -480,10 +504,8 @@ const (
 	builderRowDaysPreset
 	builderRowDaysCustom
 	builderRowSeasonProfileID
-	builderRowPhaseSeason
-	builderRowPhaseDays
-	builderRowAddPhase
-	builderRowRemovePhase
+	builderRowEditPhases
+	builderRowPlayerEditor
 	builderRowSave
 	builderRowDelete
 	builderRowCancel
@@ -576,6 +598,7 @@ func newPlayerConfigState() playerConfigState {
 		nameIdx:      0,
 		addKitIdx:    0,
 		addIssuedIdx: 0,
+		returnTo:     screenSetup,
 	}
 }
 
@@ -588,7 +611,10 @@ func newKitPickerState() kitPickerState {
 }
 
 func newLoadRunState() loadRunState {
-	return loadRunState{cursor: 0}
+	return loadRunState{
+		cursor:  0,
+		entries: nil,
+	}
 }
 
 func newScenarioBuilderState() scenarioBuilderState {
@@ -607,6 +633,10 @@ func newScenarioBuilderState() scenarioBuilderState {
 			{seasonIdx: 1, days: "0"},
 		},
 	}
+}
+
+func newPhaseEditorState() phaseEditorState {
+	return phaseEditorState{cursor: 0}
 }
 
 func setupModes() []game.GameMode {
@@ -685,6 +715,19 @@ func playerConfigSuggestedNames() []string {
 		"Emma", "Olivia", "Jack", "Tom", "Freya",
 		"Jordan", "Morgan", "Taylor", "Alex", "Noah",
 	}
+}
+
+func defaultPlayerNameForIndex(idx int) string {
+	names := playerConfigSuggestedNames()
+	if len(names) == 0 {
+		return fmt.Sprintf("Player %d", idx+1)
+	}
+	base := names[idx%len(names)]
+	if idx >= len(names) {
+		cycle := idx/len(names) + 1
+		return fmt.Sprintf("%s %d", base, cycle)
+	}
+	return base
 }
 
 func playerConfigSexes() []game.Sex {
@@ -766,6 +809,9 @@ func (m menuModel) ensureSetupPlayers() menuModel {
 	defaultLimit := defaultKitLimitForMode(mode)
 	maxLimit := maxKitLimitForMode(mode)
 	for i := range m.setup.players {
+		if strings.TrimSpace(m.setup.players[i].Name) == "" {
+			m.setup.players[i].Name = defaultPlayerNameForIndex(i)
+		}
 		if m.setup.players[i].KitLimit <= 0 {
 			m.setup.players[i].KitLimit = defaultLimit
 		}
@@ -921,6 +967,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.setup.cursor == 4 {
+			m.pcfg.returnTo = screenSetup
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
@@ -936,6 +983,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.setup.cursor == 4 {
+			m.pcfg.returnTo = screenSetup
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
@@ -951,6 +999,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.openScenarioPicker()
 			return m, nil
 		case 4:
+			m.pcfg.returnTo = screenSetup
 			m.screen = screenPlayerConfig
 			return m, nil
 		case 5:
@@ -1082,15 +1131,24 @@ func (m menuModel) viewSetup() string {
 		{label: "Cancel", value: ""},
 	}
 
-	var b strings.Builder
-	b.WriteString(lipgloss.JoinVertical(
-		lipgloss.Left,
-		dosTitle("New Run Wizard"),
-		dimGreen.Render("Step through each setup screen, then Start Run"),
-		dimGreen.Render(fmt.Sprintf("Player kits configured: %d/%d", readyPlayers, len(m.setup.players))),
-	) + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 34 {
+		listWidth = 34
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
 
+	var list strings.Builder
 	for i, row := range rows {
 		cursor := "  "
 		lineStyle := green
@@ -1100,21 +1158,59 @@ func (m menuModel) viewSetup() string {
 		}
 
 		if row.value == "" {
-			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			list.WriteString(cursor + lineStyle.Render(row.label) + "\n")
 			continue
 		}
 
-		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-22s %s", row.label+":", row.value)) + "\n")
+		list.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-22s %s", row.label+":", row.value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/confirm  Shift+Q back") + "\n")
+	detail := m.setupDetailText(rows[m.setup.cursor].label, scenarioLabel, readyPlayers, len(m.setup.players))
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("New Run Wizard") + "\n")
+	b.WriteString(dimGreen.Render("Step through setup screens, then start run.") + "\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Player kits configured: %d/%d", readyPlayers, len(m.setup.players))) + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/confirm  Shift+Q back") + "\n")
 	b.WriteString(dimGreen.Render("Natural flow: Scenario -> Players -> Issued Kit -> Start Run") + "\n")
 	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+		b.WriteString(green.Render(m.status) + "\n")
 	}
 
 	return b.String()
+}
+
+func (m menuModel) setupDetailText(activeLabel, scenarioLabel string, readyPlayers, totalPlayers int) string {
+	lines := []string{
+		brightGreen.Render("Run Setup Summary"),
+		green.Render(fmt.Sprintf("Mode: %s", modeLabel(m.setupMode()))),
+		green.Render(fmt.Sprintf("Scenario: %s", scenarioLabel)),
+		green.Render(fmt.Sprintf("Players Ready: %d/%d", readyPlayers, totalPlayers)),
+		green.Render(fmt.Sprintf("Issued Kit: %s", kitSummary(m.setup.issuedKit, 0))),
+		"",
+		brightGreen.Render("Active Step"),
+		green.Render(activeLabel),
+		"",
+		dimGreen.Render("Enter on Scenario opens detailed selector."),
+		dimGreen.Render("Configure Players opens Player Editor."),
+		dimGreen.Render("Configure Issued Kit opens Kit Picker."),
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m menuModel) setupMode() game.GameMode {
@@ -1185,7 +1281,10 @@ func (m menuModel) updateScenarioPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "Q", "q", "esc":
-		m.screen = screenSetup
+		if m.pcfg.returnTo == 0 {
+			m.pcfg.returnTo = screenSetup
+		}
+		m.screen = m.pcfg.returnTo
 		return m, nil
 	case "up", "k":
 		m.pick.cursor = wrapIndex(m.pick.cursor, -1, len(options))
@@ -1557,7 +1656,10 @@ func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case playerRowResetIssuedKit:
 			m = m.resetIssuedKitRecommendations()
 		case playerRowBack:
-			m.screen = screenSetup
+			if m.pcfg.returnTo == 0 {
+				m.pcfg.returnTo = screenSetup
+			}
+			m.screen = m.pcfg.returnTo
 			return m, nil
 		default:
 			if m.playerConfigRowSupportsCycle(row.kind) {
@@ -1594,13 +1696,26 @@ func (m menuModel) viewPlayerConfig() string {
 
 	playerCount := len(m.setup.players)
 	activePlayer := m.pcfg.playerIdx + 1
+	current := m.setup.players[m.pcfg.playerIdx]
 
-	var b strings.Builder
-	b.WriteString(dosTitle("Player Configuration") + "\n")
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 9
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 36 {
+		listWidth = 36
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
 
+	var list strings.Builder
 	for i, row := range rows {
 		cursor := "  "
 		lineStyle := green
@@ -1613,7 +1728,7 @@ func (m menuModel) viewPlayerConfig() string {
 		}
 
 		if row.value == "" {
-			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			list.WriteString(cursor + lineStyle.Render(row.label) + "\n")
 			continue
 		}
 
@@ -1621,16 +1736,131 @@ func (m menuModel) viewPlayerConfig() string {
 		if row.kind == playerRowName && strings.TrimSpace(value) == "" {
 			value = "<auto/random or type custom name>"
 		}
-		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-24s %s", row.label+":", value)) + "\n")
+		list.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-24s %s", row.label+":", value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/select  type for Name  Shift+Q back") + "\n")
+	detail := m.playerEditorDetailText(current, scenarioLabel, activePlayer, playerCount)
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Player Editor") + "\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
+	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/select  type for Name  Shift+Q back") + "\n")
 	b.WriteString(dimGreen.Render("Use Open Kit Picker rows for full kit selection screens.") + "\n")
 	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+		b.WriteString(green.Render(m.status) + "\n")
 	}
 
+	return b.String()
+}
+
+func (m menuModel) playerEditorDetailText(p game.PlayerConfig, scenarioLabel string, activePlayer, playerCount int) string {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = fmt.Sprintf("Player %d", activePlayer)
+	}
+	ascii := playerASCIIArt(p)
+
+	return strings.Join([]string{
+		brightGreen.Render(name),
+		green.Render(fmt.Sprintf("Player Slot: %d/%d", activePlayer, playerCount)),
+		green.Render(fmt.Sprintf("Scenario: %s", scenarioLabel)),
+		green.Render(fmt.Sprintf("Sex: %s  |  Body: %s", p.Sex, p.BodyType)),
+		green.Render(fmt.Sprintf("Height: %d ft %d in  |  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg)),
+		green.Render(fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental)),
+		green.Render(fmt.Sprintf("Kit  %d/%d selected", len(p.Kit), p.KitLimit)),
+		"",
+		brightGreen.Render("Body Preview"),
+		green.Render(ascii),
+		"",
+		dimGreen.Render("Figure shape adjusts with height/weight/body type."),
+	}, "\n")
+}
+
+func playerASCIIArt(p game.PlayerConfig) string {
+	heightScore := (p.HeightFt-4)*12 + p.HeightIn
+	switch {
+	case heightScore < 14:
+		heightScore = 14
+	case heightScore > 48:
+		heightScore = 48
+	}
+
+	weight := p.WeightKg
+	if weight < 45 {
+		weight = 45
+	}
+	if weight > 140 {
+		weight = 140
+	}
+
+	bodyWidth := 3
+	switch {
+	case weight >= 105:
+		bodyWidth = 7
+	case weight >= 90:
+		bodyWidth = 6
+	case weight >= 75:
+		bodyWidth = 5
+	case weight >= 60:
+		bodyWidth = 4
+	}
+
+	switch p.BodyType {
+	case game.BodyTypeMale:
+		bodyWidth++
+	case game.BodyTypeFemale:
+		if bodyWidth > 3 {
+			bodyWidth--
+		}
+	}
+	if bodyWidth < 3 {
+		bodyWidth = 3
+	}
+	if bodyWidth > 8 {
+		bodyWidth = 8
+	}
+
+	legRows := 3
+	switch {
+	case heightScore >= 38:
+		legRows = 6
+	case heightScore >= 32:
+		legRows = 5
+	case heightScore >= 26:
+		legRows = 4
+	}
+	armSpan := bodyWidth + 2
+	shoulders := strings.Repeat("=", bodyWidth)
+	torso := strings.Repeat("|", bodyWidth)
+
+	var b strings.Builder
+	b.WriteString("    ___\n")
+	b.WriteString("   (o o)\n")
+	b.WriteString("    \\_/\n")
+	b.WriteString(" " + strings.Repeat("-", armSpan) + shoulders + strings.Repeat("-", armSpan) + "\n")
+	for i := 0; i < 2; i++ {
+		b.WriteString(strings.Repeat(" ", armSpan+1) + torso + "\n")
+	}
+	b.WriteString(strings.Repeat(" ", armSpan+1) + "/" + strings.Repeat(" ", bodyWidth-2) + "\\\n")
+	for i := 0; i < legRows; i++ {
+		b.WriteString(strings.Repeat(" ", armSpan+1) + "/ " + strings.Repeat(" ", bodyWidth-3) + "\\\n")
+	}
 	return b.String()
 }
 
@@ -2046,7 +2276,10 @@ func isCustomScenarioID(id game.ScenarioID) bool {
 }
 
 func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	rowCount := saveSlotCount + 1 // slots + cancel
+	rowCount := len(m.load.entries) + 1 // files + cancel
+	if rowCount <= 1 {
+		rowCount = 1
+	}
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -2065,7 +2298,7 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.load.cursor = wrapIndex(m.load.cursor, 1, rowCount)
 		return m, nil
 	case "enter":
-		if m.load.cursor == saveSlotCount {
+		if m.load.cursor >= len(m.load.entries) {
 			if m.loadReturn == 0 {
 				m.screen = screenMenu
 			} else {
@@ -2074,40 +2307,78 @@ func (m menuModel) updateLoadRun(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		slot := m.load.cursor + 1
-		state, err := loadRunFromFile(savePathForSlot(slot), m.availableScenarios())
+		selected := m.load.entries[m.load.cursor]
+		state, err := loadRunFromFile(selected.Path, m.availableScenarios())
 		if err != nil {
 			m.status = fmt.Sprintf("Load failed: %v", err)
 			return m, nil
 		}
 
 		m.run = &state
-		m.activeSaveSlot = slot
+		if slot, ok := slotNumberFromPath(selected.Path); ok {
+			m.activeSaveSlot = slot
+		}
 		m.screen = screenRun
-		m.status = fmt.Sprintf("Loaded slot %d", slot)
+		m.status = fmt.Sprintf("Loaded %s", selected.Path)
 		return m, nil
 	}
 
 	return m, nil
 }
 
-func loadSlotMetadata(slot int) saveSlotMeta {
-	path := savePathForSlot(slot)
+func (m menuModel) openLoadRun(returnTo screen) menuModel {
+	m.load = newLoadRunState()
+	m.loadReturn = returnTo
+	m.load.entries = loadRunEntries()
+	m.screen = screenLoadRun
+	if len(m.load.entries) == 0 {
+		m.status = "No saves found. Use Shift+S during a run to create one."
+	}
+	return m
+}
+
+func loadRunEntries() []saveSlotMeta {
+	dirEntries, err := os.ReadDir(".")
+	if err != nil {
+		return nil
+	}
+	paths := make([]string, 0, len(dirEntries))
+	for _, entry := range dirEntries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if saveFilePattern.MatchString(name) {
+			paths = append(paths, name)
+		}
+	}
+	sort.Strings(paths)
+
+	entries := make([]saveSlotMeta, 0, len(paths))
+	for _, path := range paths {
+		meta := loadRunMetadata(path)
+		entries = append(entries, meta)
+	}
+	return entries
+}
+
+func loadRunMetadata(path string) saveSlotMeta {
 	meta := saveSlotMeta{
-		Slot: slot,
 		Path: path,
+	}
+	if slot, ok := slotNumberFromPath(path); ok {
+		meta.Slot = slot
 	}
 
 	data, err := readDataFile(path, maxSaveFileBytes)
 	if err != nil {
+		meta.Exists = false
 		if errors.Is(err, os.ErrNotExist) {
-			meta.Exists = false
-			meta.Summary = "Empty"
-			return meta
+			meta.Summary = "Missing"
+		} else {
+			meta.Summary = "Unreadable save"
+			meta.ErrDetail = err.Error()
 		}
-		meta.Exists = true
-		meta.Summary = "Unreadable save"
-		meta.ErrDetail = err.Error()
 		return meta
 	}
 
@@ -2120,6 +2391,8 @@ func loadSlotMetadata(slot int) saveSlotMeta {
 	}
 
 	meta.Exists = true
+	meta.SavedAt = payload.SavedAt
+	meta.Run = &payload.Run
 	meta.Summary = fmt.Sprintf("%s | Day %d | %s",
 		payload.Run.Scenario.Name,
 		payload.Run.Day,
@@ -2128,41 +2401,148 @@ func loadSlotMetadata(slot int) saveSlotMeta {
 	return meta
 }
 
+func slotNumberFromPath(path string) (int, bool) {
+	name := strings.TrimSpace(path)
+	if !strings.HasPrefix(name, "survive-it-save-") || !strings.HasSuffix(name, ".json") {
+		return 0, false
+	}
+	raw := strings.TrimPrefix(name, "survive-it-save-")
+	raw = strings.TrimSuffix(raw, ".json")
+	slot, err := strconv.Atoi(raw)
+	if err != nil || slot < 1 {
+		return 0, false
+	}
+	return slot, true
+}
+
 func (m menuModel) viewLoadRun() string {
-	var b strings.Builder
+	if m.load.cursor < 0 || m.load.cursor > len(m.load.entries) {
+		m.load.cursor = 0
+	}
 
-	b.WriteString(dosTitle("Load Run") + "\n")
-	b.WriteString(dimGreen.Render("Pick a save slot to load") + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 34 {
+		listWidth = 34
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
 
-	for i := 0; i < saveSlotCount; i++ {
+	var list strings.Builder
+	if len(m.load.entries) == 0 {
+		list.WriteString(dimGreen.Render("  No save files found.") + "\n")
+	}
+	for i, entry := range m.load.entries {
 		cursor := "  "
-		lineStyle := green
+		style := green
 		if i == m.load.cursor {
 			cursor = "> "
-			lineStyle = brightGreen
+			style = brightGreen
 		}
+		label := entry.Path
+		if entry.Slot > 0 {
+			label = fmt.Sprintf("Slot %d (%s)", entry.Slot, entry.Path)
+		}
+		list.WriteString(cursor + style.Render(label) + "\n")
+	}
+	cancelCursor := "  "
+	cancelStyle := green
+	if m.load.cursor == len(m.load.entries) {
+		cancelCursor = "> "
+		cancelStyle = brightGreen
+	}
+	list.WriteString("\n" + cancelCursor + cancelStyle.Render("Cancel") + "\n")
 
-		meta := loadSlotMetadata(i + 1)
-		line := fmt.Sprintf("Slot %d: %s", meta.Slot, meta.Summary)
-		b.WriteString(cursor + lineStyle.Render(line) + "\n")
+	detail := "Select a save to inspect details."
+	if len(m.load.entries) > 0 && m.load.cursor < len(m.load.entries) {
+		detail = m.loadDetailText(m.load.entries[m.load.cursor])
 	}
 
-	cursor := "  "
-	lineStyle := green
-	if m.load.cursor == saveSlotCount {
-		cursor = "> "
-		lineStyle = brightGreen
-	}
-	b.WriteString(cursor + lineStyle.Render("Cancel") + "\n")
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
 
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  Enter select  Shift+Q back") + "\n")
+	var b strings.Builder
+	b.WriteString(dosTitle("Load Run") + "\n")
+	b.WriteString(dimGreen.Render("Left: save files. Right: run overview and scenario details.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  Enter load  Shift+Q back") + "\n")
 	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+		b.WriteString(green.Render(m.status) + "\n")
+	}
+	return b.String()
+}
+
+func (m menuModel) loadDetailText(meta saveSlotMeta) string {
+	if !meta.Exists {
+		if meta.ErrDetail != "" {
+			return brightGreen.Render(meta.Path) + "\n\n" + dimGreen.Render("Unreadable save: "+meta.ErrDetail)
+		}
+		return brightGreen.Render(meta.Path) + "\n\n" + dimGreen.Render("Save file missing.")
+	}
+	if meta.Run == nil {
+		return brightGreen.Render(meta.Path) + "\n\n" + dimGreen.Render("No run metadata.")
+	}
+	run := meta.Run
+	mode := modeLabel(run.Config.Mode)
+	season, ok := run.CurrentSeason()
+	seasonLabel := "unknown"
+	if ok {
+		seasonLabel = string(season)
 	}
 
-	return b.String()
+	var players strings.Builder
+	for _, p := range run.Players {
+		players.WriteString(fmt.Sprintf("- %s (%s, %s) E:%d H:%d M:%d\n",
+			p.Name, p.Sex, p.BodyType, p.Energy, p.Hydration, p.Morale))
+	}
+	if len(run.Players) == 0 {
+		players.WriteString("- none\n")
+	}
+
+	scDesc := strings.TrimSpace(run.Scenario.Description)
+	if scDesc == "" {
+		scDesc = "No description."
+	}
+	daunting := strings.TrimSpace(run.Scenario.Daunting)
+	if daunting == "" {
+		daunting = "No daunting note."
+	}
+
+	return strings.Join([]string{
+		brightGreen.Render(run.Scenario.Name),
+		green.Render(fmt.Sprintf("Saved: %s", meta.SavedAt.Local().Format("2006-01-02 15:04"))),
+		green.Render(fmt.Sprintf("Mode: %s  |  Day: %d  |  Season: %s", mode, run.Day, seasonLabel)),
+		green.Render(fmt.Sprintf("Days Run So Far: %d", run.Day)),
+		"",
+		brightGreen.Render("Players"),
+		green.Render(players.String()),
+		brightGreen.Render("Scenario"),
+		dimGreen.Render(scDesc),
+		"",
+		brightGreen.Render("Daunting"),
+		green.Render(daunting),
+	}, "\n")
 }
 
 func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2206,25 +2586,17 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.saveScenarioFromBuilder()
 		case builderRowDelete:
 			return m.deleteScenarioFromBuilder()
+		case builderRowEditPhases:
+			m.phase = newPhaseEditorState()
+			m.screen = screenPhaseEditor
+			return m, nil
+		case builderRowPlayerEditor:
+			m = m.ensureSetupPlayers()
+			m.pcfg.returnTo = screenScenarioBuilder
+			m.screen = screenPlayerConfig
+			return m, nil
 		case builderRowCancel:
 			m.screen = screenMenu
-			return m, nil
-		case builderRowAddPhase:
-			if len(m.build.phases) >= maxBuilderPhases {
-				m.status = fmt.Sprintf("Maximum phases reached (%d).", maxBuilderPhases)
-				return m, nil
-			}
-			m.build.phases = append(m.build.phases, phaseBuilderPhase{
-				seasonIdx: m.build.phases[len(m.build.phases)-1].seasonIdx,
-				days:      "0",
-			})
-			return m, nil
-		case builderRowRemovePhase:
-			if len(m.build.phases) <= 1 {
-				m.status = "At least one phase is required."
-				return m, nil
-			}
-			m.build.phases = m.build.phases[:len(m.build.phases)-1]
 			return m, nil
 		default:
 			if m.scenarioBuilderRowSupportsCycle(row) {
@@ -2256,7 +2628,6 @@ func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
 		return m
 	}
 
-	seasonOptions := builderSeasonOptions()
 	scenarioChoices := builderScenarioChoices(m.customScenarios)
 	switch row.kind {
 	case builderRowScenario:
@@ -2270,11 +2641,6 @@ func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
 		m.build.useCustomDays = !m.build.useCustomDays
 	case builderRowDaysPreset:
 		m.build.defaultDaysIdx = wrapIndex(m.build.defaultDaysIdx, delta, len(builderDefaultDays()))
-	case builderRowPhaseSeason:
-		idx := row.phaseIdx
-		if idx >= 0 && idx < len(m.build.phases) {
-			m.build.phases[idx].seasonIdx = wrapIndex(m.build.phases[idx].seasonIdx, delta, len(seasonOptions))
-		}
 	}
 
 	return m
@@ -2400,7 +2766,7 @@ func (m menuModel) deleteScenarioFromBuilder() (tea.Model, tea.Cmd) {
 
 func (m menuModel) scenarioBuilderRowSupportsCycle(row scenarioBuilderRow) bool {
 	switch row.kind {
-	case builderRowScenario, builderRowMode, builderRowBiome, builderRowDaysMode, builderRowDaysPreset, builderRowPhaseSeason:
+	case builderRowScenario, builderRowMode, builderRowBiome, builderRowDaysMode, builderRowDaysPreset:
 		return true
 	default:
 		return false
@@ -2423,35 +2789,12 @@ func (m menuModel) scenarioBuilderRows() []scenarioBuilderRow {
 		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx]), kind: builderRowDaysPreset, active: !m.build.useCustomDays},
 		{label: "Days Custom", value: m.build.customDays, kind: builderRowDaysCustom, active: m.build.useCustomDays},
 		{label: "Season Profile ID", value: m.build.seasonSetID, kind: builderRowSeasonProfileID, active: true},
+		{label: "Phase Builder", value: fmt.Sprintf("%d phase(s)", len(m.build.phases)), kind: builderRowEditPhases, active: true},
+		{label: "Player Editor", value: "Open player configuration", kind: builderRowPlayerEditor, active: true},
+		{label: "Save Scenario", value: "", kind: builderRowSave, active: true},
+		{label: "Delete Scenario", value: "", kind: builderRowDelete, active: m.build.selectedIdx > 0},
+		{label: "Cancel", value: "", kind: builderRowCancel, active: true},
 	}
-
-	seasonOptions := builderSeasonOptions()
-	for i := range m.build.phases {
-		rows = append(rows,
-			scenarioBuilderRow{
-				label:    fmt.Sprintf("Phase %d Season", i+1),
-				value:    builderSeasonLabel(seasonOptions[m.build.phases[i].seasonIdx]),
-				kind:     builderRowPhaseSeason,
-				phaseIdx: i,
-				active:   true,
-			},
-			scenarioBuilderRow{
-				label:    fmt.Sprintf("Phase %d Days", i+1),
-				value:    m.build.phases[i].days,
-				kind:     builderRowPhaseDays,
-				phaseIdx: i,
-				active:   true,
-			},
-		)
-	}
-
-	rows = append(rows,
-		scenarioBuilderRow{label: "Add Phase", value: fmt.Sprintf("%d/%d", len(m.build.phases), maxBuilderPhases), kind: builderRowAddPhase, active: len(m.build.phases) < maxBuilderPhases},
-		scenarioBuilderRow{label: "Remove Last Phase", value: "", kind: builderRowRemovePhase, active: len(m.build.phases) > 1},
-		scenarioBuilderRow{label: "Save Scenario", value: "", kind: builderRowSave, active: true},
-		scenarioBuilderRow{label: "Delete Scenario", value: "", kind: builderRowDelete, active: m.build.selectedIdx > 0},
-		scenarioBuilderRow{label: "Cancel", value: "", kind: builderRowCancel, active: true},
-	)
 
 	return rows
 }
@@ -2483,14 +2826,6 @@ func (m menuModel) appendScenarioBuilderText(runes []rune) menuModel {
 				m.build.seasonSetID += string(r)
 			}
 		}
-	case builderRowPhaseDays:
-		if row.phaseIdx >= 0 && row.phaseIdx < len(m.build.phases) {
-			for _, r := range runes {
-				if r >= '0' && r <= '9' {
-					m.build.phases[row.phaseIdx].days += string(r)
-				}
-			}
-		}
 	}
 
 	return m
@@ -2517,10 +2852,6 @@ func (m menuModel) backspaceScenarioBuilderText() menuModel {
 		m.build.customDays = backspace(m.build.customDays)
 	case builderRowSeasonProfileID:
 		m.build.seasonSetID = backspace(m.build.seasonSetID)
-	case builderRowPhaseDays:
-		if row.phaseIdx >= 0 && row.phaseIdx < len(m.build.phases) {
-			m.build.phases[row.phaseIdx].days = backspace(m.build.phases[row.phaseIdx].days)
-		}
 	}
 
 	return m
@@ -2594,16 +2925,31 @@ func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
 
 func (m menuModel) viewScenarioBuilder() string {
 	rows := m.scenarioBuilderRows()
-
-	var b strings.Builder
-	b.WriteString(dosTitle("Scenario Builder / Editor") + "\n")
-	b.WriteString(dimGreen.Render("Create or edit scenarios with dynamic season phases") + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
-
+	if len(rows) == 0 {
+		return brightGreen.Render("No scenario builder rows available.")
+	}
 	if m.build.cursor < 0 || m.build.cursor >= len(rows) {
 		m.build.cursor = 0
 	}
 
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 34 {
+		listWidth = 34
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
+
+	var list strings.Builder
 	for i, row := range rows {
 		cursor := "  "
 		lineStyle := green
@@ -2614,9 +2960,8 @@ func (m menuModel) viewScenarioBuilder() string {
 		if !row.active {
 			lineStyle = dimGreen
 		}
-
 		if row.value == "" {
-			b.WriteString(cursor + lineStyle.Render(row.label) + "\n")
+			list.WriteString(cursor + lineStyle.Render(row.label) + "\n")
 			continue
 		}
 
@@ -2630,19 +2975,279 @@ func (m menuModel) viewScenarioBuilder() string {
 		if row.kind == builderRowSeasonProfileID && strings.TrimSpace(value) == "" {
 			value = "<profile_id>"
 		}
-		if row.kind == builderRowPhaseDays && strings.TrimSpace(value) == "" {
-			value = "0"
-		}
-		b.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-18s %s", row.label+":", value)) + "\n")
+		list.WriteString(cursor + lineStyle.Render(fmt.Sprintf("%-18s %s", row.label+":", value)) + "\n")
 	}
 
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  ←/→ change  Enter select  type in text fields  Shift+Q back") + "\n")
-	b.WriteString(dimGreen.Render("Phase days: 0 means until end (only valid on the last phase)") + "\n")
+	detail := m.scenarioBuilderDetailText(rows[m.build.cursor])
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Scenario Builder / Editor") + "\n")
+	b.WriteString(dimGreen.Render("Left: editable fields. Right: context and preview.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change  Enter open/select  type in text fields  Shift+Q back") + "\n")
 	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+		b.WriteString(green.Render(m.status) + "\n")
 	}
 
+	return b.String()
+}
+
+func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
+	phasePreview := make([]string, 0, len(m.build.phases))
+	seasonOptions := builderSeasonOptions()
+	for i, phase := range m.build.phases {
+		season := seasonOptions[clampInt(phase.seasonIdx, 0, len(seasonOptions)-1)]
+		phasePreview = append(phasePreview, fmt.Sprintf("%d. %s (%s day(s))", i+1, builderSeasonLabel(season), phase.days))
+	}
+	if len(phasePreview) == 0 {
+		phasePreview = append(phasePreview, "No phases configured.")
+	}
+
+	notes := []string{
+		brightGreen.Render("Field Notes"),
+		dimGreen.Render("Use this screen for core scenario properties."),
+		dimGreen.Render("Use Phase Builder for seasonal phase timeline."),
+		dimGreen.Render("Use Player Editor to configure participants."),
+	}
+
+	switch row.kind {
+	case builderRowEditPhases:
+		notes = append(notes,
+			"",
+			brightGreen.Render("Phase Builder"),
+			green.Render("Open a dedicated two-column phase editor."),
+		)
+	case builderRowPlayerEditor:
+		notes = append(notes,
+			"",
+			brightGreen.Render("Player Editor"),
+			green.Render("Configure player names, stats, and kit selections."),
+		)
+	case builderRowSave:
+		notes = append(notes,
+			"",
+			brightGreen.Render("Save"),
+			green.Render("Persists scenario into survive-it-scenarios.json."),
+		)
+	}
+
+	return strings.Join([]string{
+		brightGreen.Render("Current Scenario Draft"),
+		green.Render(fmt.Sprintf("Name: %s", strings.TrimSpace(m.build.name))),
+		green.Render(fmt.Sprintf("Mode: %s", modeLabel(setupModes()[m.build.modeIdx]))),
+		green.Render(fmt.Sprintf("Biome: %s", builderBiomes()[m.build.biomeIdx])),
+		green.Render(fmt.Sprintf("Default Days: %s", map[bool]string{true: m.build.customDays, false: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])}[m.build.useCustomDays])),
+		green.Render(fmt.Sprintf("Season Profile ID: %s", strings.TrimSpace(m.build.seasonSetID))),
+		"",
+		brightGreen.Render("Phase Timeline"),
+		green.Render(strings.Join(phasePreview, "\n")),
+		"",
+		strings.Join(notes, "\n"),
+	}, "\n")
+}
+
+func (m menuModel) updatePhaseEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	rows := len(m.build.phases) + 3 // phases + add + remove + back
+	if rows < 3 {
+		rows = 3
+	}
+	if m.phase.cursor < 0 || m.phase.cursor >= rows {
+		m.phase.cursor = 0
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "Q", "q", "esc":
+		m.screen = screenScenarioBuilder
+		return m, nil
+	case "up", "k":
+		m.phase.cursor = wrapIndex(m.phase.cursor, -1, rows)
+		return m, nil
+	case "down", "j":
+		m.phase.cursor = wrapIndex(m.phase.cursor, 1, rows)
+		return m, nil
+	case "left":
+		m = m.adjustPhaseEditorChoice(-1)
+		return m, nil
+	case "right":
+		m = m.adjustPhaseEditorChoice(1)
+		return m, nil
+	case "backspace", "ctrl+h":
+		m = m.backspacePhaseEditorDays()
+		return m, nil
+	case "enter":
+		switch {
+		case m.phase.cursor < len(m.build.phases):
+			m = m.adjustPhaseEditorChoice(1)
+			return m, nil
+		case m.phase.cursor == len(m.build.phases):
+			if len(m.build.phases) >= maxBuilderPhases {
+				m.status = fmt.Sprintf("Maximum phases reached (%d).", maxBuilderPhases)
+				return m, nil
+			}
+			seedSeason := 0
+			if len(m.build.phases) > 0 {
+				seedSeason = m.build.phases[len(m.build.phases)-1].seasonIdx
+			}
+			m.build.phases = append(m.build.phases, phaseBuilderPhase{seasonIdx: seedSeason, days: "0"})
+			m.status = "Added phase."
+			return m, nil
+		case m.phase.cursor == len(m.build.phases)+1:
+			if len(m.build.phases) <= 1 {
+				m.status = "At least one phase is required."
+				return m, nil
+			}
+			m.build.phases = m.build.phases[:len(m.build.phases)-1]
+			if m.phase.cursor >= len(m.build.phases)+2 {
+				m.phase.cursor = len(m.build.phases) + 1
+			}
+			m.status = "Removed last phase."
+			return m, nil
+		default:
+			m.screen = screenScenarioBuilder
+			return m, nil
+		}
+	}
+
+	if len(msg.Runes) > 0 {
+		m = m.appendPhaseEditorDays(msg.Runes)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m menuModel) adjustPhaseEditorChoice(delta int) menuModel {
+	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
+		return m
+	}
+	phase := &m.build.phases[m.phase.cursor]
+	phase.seasonIdx = wrapIndex(phase.seasonIdx, delta, len(builderSeasonOptions()))
+	return m
+}
+
+func (m menuModel) appendPhaseEditorDays(runes []rune) menuModel {
+	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
+		return m
+	}
+	for _, r := range runes {
+		if r >= '0' && r <= '9' {
+			m.build.phases[m.phase.cursor].days += string(r)
+		}
+	}
+	return m
+}
+
+func (m menuModel) backspacePhaseEditorDays() menuModel {
+	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
+		return m
+	}
+	value := m.build.phases[m.phase.cursor].days
+	if len(value) > 0 {
+		m.build.phases[m.phase.cursor].days = value[:len(value)-1]
+	}
+	return m
+}
+
+func (m menuModel) viewPhaseEditor() string {
+	if m.phase.cursor < 0 {
+		m.phase.cursor = 0
+	}
+	totalWidth := m.w
+	if totalWidth < 100 {
+		totalWidth = 100
+	}
+	contentHeight := m.h - 8
+	if contentHeight < 16 {
+		contentHeight = 16
+	}
+	listWidth := totalWidth / 3
+	if listWidth < 34 {
+		listWidth = 34
+	}
+	detailWidth := totalWidth - listWidth - 4
+	if detailWidth < 52 {
+		detailWidth = 52
+	}
+
+	rows := make([]string, 0, len(m.build.phases)+3)
+	for i, phase := range m.build.phases {
+		season := builderSeasonLabel(builderSeasonOptions()[clampInt(phase.seasonIdx, 0, len(builderSeasonOptions())-1)])
+		rows = append(rows, fmt.Sprintf("Phase %d: %-8s | %s day(s)", i+1, season, phase.days))
+	}
+	rows = append(rows, "Add Phase")
+	rows = append(rows, "Remove Last Phase")
+	rows = append(rows, "Back")
+
+	maxCursor := len(rows) - 1
+	if m.phase.cursor > maxCursor {
+		m.phase.cursor = maxCursor
+	}
+
+	var list strings.Builder
+	for i, row := range rows {
+		cursor := "  "
+		style := green
+		if i == m.phase.cursor {
+			cursor = "> "
+			style = brightGreen
+		}
+		list.WriteString(cursor + style.Render(row) + "\n")
+	}
+
+	detail := dimGreen.Render("Select a phase to edit season and days.")
+	if m.phase.cursor < len(m.build.phases) {
+		phase := m.build.phases[m.phase.cursor]
+		season := builderSeasonLabel(builderSeasonOptions()[clampInt(phase.seasonIdx, 0, len(builderSeasonOptions())-1)])
+		detail = strings.Join([]string{
+			brightGreen.Render(fmt.Sprintf("Phase %d", m.phase.cursor+1)),
+			green.Render(fmt.Sprintf("Season: %s", season)),
+			green.Render(fmt.Sprintf("Days: %s", phase.days)),
+			"",
+			dimGreen.Render("Left/Right changes season."),
+			dimGreen.Render("Type digits to change days."),
+			dimGreen.Render("0 means until end and is valid only for last phase."),
+		}, "\n")
+	}
+
+	listPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(listWidth).
+		Height(contentHeight).
+		Render(list.String())
+	detailPane := lipgloss.NewStyle().
+		Border(dosBox).
+		BorderForeground(lipgloss.Color("2")).
+		Padding(0, 1).
+		Width(detailWidth).
+		Height(contentHeight).
+		Render(detail)
+
+	var b strings.Builder
+	b.WriteString(dosTitle("Phase Builder") + "\n")
+	b.WriteString(dimGreen.Render("Dedicated two-column editor for scenario phases.") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
+	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ season  type days  Enter select  Shift+Q back") + "\n")
+	if m.status != "" {
+		b.WriteString(green.Render(m.status) + "\n")
+	}
 	return b.String()
 }
 
@@ -2698,42 +3303,66 @@ func (m menuModel) viewRun() string {
 }
 
 func (m menuModel) viewMenu() string {
-	title := lipgloss.JoinVertical(
-		lipgloss.Left,
-		dosTitle("Survive It"),
-		dimGreen.Render("DOS Survival Terminal"),
-	)
-	ver := dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate))
-
 	items := menuItems()
-
-	var b strings.Builder
-	b.WriteString(title + "\n")
-	b.WriteString(ver + "\n")
-	b.WriteString(border.Render(dosRule(m.w-4)) + "\n\n")
-
-	for i, it := range items {
-		cursor := "  "
-		line := it
-		if i == m.idx {
-			cursor = "> "
-			line = brightGreen.Render(it)
-		} else {
-			line = green.Render(it)
+	contentWidth := 42
+	if m.w > 0 {
+		maxAllowed := m.w - 8
+		if maxAllowed < contentWidth {
+			contentWidth = maxAllowed
 		}
-		b.WriteString(cursor + line + "\n")
+		if contentWidth < 30 {
+			contentWidth = 30
+		}
 	}
 
-	b.WriteString("\n" + border.Render(dosRule(m.w-4)) + "\n")
-	b.WriteString(dimGreen.Render("↑/↓ move  Enter select  Shift+Q quit") + "\n")
-	if m.status != "" {
-		b.WriteString("\n" + green.Render(m.status) + "\n")
+	buttonStyle := lipgloss.NewStyle().
+		Width(contentWidth).
+		Padding(0, 1).
+		Border(dosBox).
+		Align(lipgloss.Center)
+
+	var buttons strings.Builder
+	for i, it := range items {
+		label := strings.ToUpper(it)
+		style := buttonStyle.Copy().BorderForeground(lipgloss.Color("2")).Foreground(lipgloss.Color("2"))
+		if i == m.idx {
+			style = style.BorderForeground(lipgloss.Color("10")).Foreground(lipgloss.Color("10")).Bold(true)
+		}
+		buttons.WriteString(style.Render(label) + "\n")
 	}
 
-	return b.String()
+	var header strings.Builder
+	header.WriteString(dosTitle("Survive It") + "\n")
+	header.WriteString(dimGreen.Render("DOS Survival Terminal") + "\n")
+	header.WriteString(dimGreen.Render(fmt.Sprintf("v%s  (%s)  %s", m.cfg.Version, m.cfg.Commit, m.cfg.BuildDate)) + "\n")
+	if m.busy {
+		header.WriteString(green.Render("Checking for updates...") + "\n")
+	} else if m.updateAvailable {
+		header.WriteString(brightGreen.Render(m.updateStatus) + "\n")
+		header.WriteString(dimGreen.Render("Press Shift+U to install now, Shift+R to re-check.") + "\n")
+	} else if strings.TrimSpace(m.updateStatus) != "" {
+		header.WriteString(dimGreen.Render(m.updateStatus) + "\n")
+		header.WriteString(dimGreen.Render("Press Shift+R to re-check.") + "\n")
+	}
+
+	main := lipgloss.JoinVertical(
+		lipgloss.Center,
+		header.String(),
+		border.Render(dosRule(contentWidth)),
+		"",
+		buttons.String(),
+		border.Render(dosRule(contentWidth)),
+		dimGreen.Render("↑/↓ move  Enter select  Shift+Q quit"),
+	)
+
+	view := lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, main)
+	if strings.TrimSpace(m.status) != "" {
+		view += "\n" + green.Render(m.status)
+	}
+	return view
 }
 
-func checkUpdateCmd(currentVersion string) tea.Cmd {
+func checkUpdateCmd(currentVersion string, auto bool) tea.Cmd {
 	return func() tea.Msg {
 		// Tiny delay so the UI visibly switches to a busy state.
 		time.Sleep(150 * time.Millisecond)
@@ -2742,9 +3371,13 @@ func checkUpdateCmd(currentVersion string) tea.Cmd {
 			CurrentVersion: currentVersion,
 		})
 		if err != nil {
-			return updateResultMsg{err: err}
+			return updateResultMsg{err: err, auto: auto}
 		}
-		return updateResultMsg{status: res}
+		return updateResultMsg{
+			status:    res,
+			available: strings.HasPrefix(res, "Update available:"),
+			auto:      auto,
+		}
 	}
 }
 
@@ -2896,10 +3529,8 @@ func validateDataFilePath(path string) error {
 		return nil
 	}
 
-	for slot := 1; slot <= saveSlotCount; slot++ {
-		if clean == savePathForSlot(slot) {
-			return nil
-		}
+	if saveFilePattern.MatchString(clean) {
+		return nil
 	}
 
 	return fmt.Errorf("unsupported data file path: %s", path)
