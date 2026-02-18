@@ -450,7 +450,6 @@ type scenarioPickerState struct {
 type playerConfigState struct {
 	cursor    int
 	playerIdx int
-	addKitIdx int
 	returnTo  screen
 }
 
@@ -581,8 +580,7 @@ const (
 	playerRowKitLimit
 	playerRowPersonalKit
 	playerRowEditPersonalKit
-	playerRowAddPersonalKit
-	playerRowRemovePersonalKit
+	playerRowResetPersonalKit
 	playerRowEditIssuedKit
 	playerRowResetIssuedKit
 	playerRowBack
@@ -635,7 +633,6 @@ func newPlayerConfigState() playerConfigState {
 	return playerConfigState{
 		cursor:    0,
 		playerIdx: 0,
-		addKitIdx: 0,
 		returnTo:  screenSetup,
 	}
 }
@@ -1824,7 +1821,7 @@ func (m menuModel) toggleKitPickerSelection(item game.KitItem) menuModel {
 		p := &m.setup.players[m.pcfg.playerIdx]
 		if idx := indexOfKitItem(p.Kit, item); idx >= 0 {
 			p.Kit = removeKitItemAt(p.Kit, idx)
-			m.status = fmt.Sprintf("Removed %s from %s", item, playerDisplayName(*p))
+			m.status = ""
 			return m
 		}
 		if len(p.Kit) >= p.KitLimit {
@@ -1832,17 +1829,17 @@ func (m menuModel) toggleKitPickerSelection(item game.KitItem) menuModel {
 			return m
 		}
 		p.Kit = append(p.Kit, item)
-		m.status = fmt.Sprintf("Added %s to %s", item, playerDisplayName(*p))
+		m.status = ""
 	case kitTargetIssued:
 		if idx := indexOfKitItem(m.setup.issuedKit, item); idx >= 0 {
 			m.setup.issuedKit = removeKitItemAt(m.setup.issuedKit, idx)
 			m.setup.issuedCustom = true
-			m.status = fmt.Sprintf("Removed %s from issued kit", item)
+			m.status = ""
 			return m
 		}
 		m.setup.issuedKit = append(m.setup.issuedKit, item)
 		m.setup.issuedCustom = true
-		m.status = fmt.Sprintf("Added %s to issued kit", item)
+		m.status = ""
 	}
 	return m
 }
@@ -2180,10 +2177,8 @@ func (m menuModel) updatePlayerConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case playerRowEditPersonalKit:
 			m = m.openPersonalKitPicker(screenPlayerConfig)
 			return m, nil
-		case playerRowAddPersonalKit:
-			m = m.addPersonalKitItem()
-		case playerRowRemovePersonalKit:
-			m = m.removePersonalKitItem()
+		case playerRowResetPersonalKit:
+			m = m.resetPersonalKitSelection()
 		case playerRowEditIssuedKit:
 			m = m.openIssuedKitPicker(screenPlayerConfig)
 			return m, nil
@@ -2304,7 +2299,7 @@ func (m menuModel) viewPlayerConfig() string {
 	var b strings.Builder
 	b.WriteString(dosTitle("Player Editor") + "\n")
 	b.WriteString(dimGreen.Render(fmt.Sprintf("Mode: %s  |  Scenario: %s  |  Player %d/%d", modeLabel(m.setupMode()), scenarioLabel, activePlayer, playerCount)) + "\n")
-	b.WriteString(dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player", maxKitLimitForMode(m.setupMode()))) + "\n\n")
+	b.WriteString("\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, statsPane, asciiPane))
 	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ change values  Enter open/select  type for Name  Shift+Q back") + "\n")
 	b.WriteString(dimGreen.Render("Use Open Kit Picker rows for full kit selection screens.") + "\n")
@@ -2340,6 +2335,7 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 		brightGreen.Render(name),
 		green.Render(fmt.Sprintf("Player Slot: %d/%d", activePlayer, playerCount)),
 		brightGreen.Render(editing),
+		green.Render(fmt.Sprintf("Game Mode: %s", modeLabel(m.setupMode()))),
 		green.Render(fmt.Sprintf("Scenario: %s", scenarioLabel)),
 		green.Render(fmt.Sprintf("Sex: %s  |  Body: %s", p.Sex, p.BodyType)),
 		green.Render(fmt.Sprintf("Height: %d ft %d in  |  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg)),
@@ -2354,18 +2350,13 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 		issuedModeLine,
 		"",
 		brightGreen.Render("Player Notes"),
-		dimGreen.Render("Adjust height/weight/body and preview updates live."),
-		dimGreen.Render("Type directly in Name to customize your player."),
+		dimGreen.Render(fmt.Sprintf("Series limit: up to %d personal kit item(s) per player.", maxKitLimitForMode(m.setupMode()))),
 		dimGreen.Render("Kit limit is constrained by selected game mode."),
 	}, "\n")
 }
 
 func (m menuModel) playerEditorAsciiText(p game.PlayerConfig, widthChars, heightRows int) string {
-	return strings.Join([]string{
-		brightGreen.Render("Body Preview"),
-		renderPlayerBodyANSI(p, widthChars, heightRows),
-		dimGreen.Render("Figure scale reacts to height and build."),
-	}, "\n\n")
+	return renderPlayerBodyANSI(p, widthChars, heightRows)
 }
 
 func playerASCIIArt(p game.PlayerConfig) string {
@@ -2474,18 +2465,8 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 	if playerIdx < 0 || playerIdx >= len(m.setup.players) {
 		playerIdx = 0
 	}
-	addKitIdx := m.pcfg.addKitIdx
-	if len(allKit) > 0 {
-		if addKitIdx < 0 || addKitIdx >= len(allKit) {
-			addKitIdx = 0
-		}
-	}
 
 	p := m.setup.players[playerIdx]
-	addKitLabel := ""
-	if len(allKit) > 0 {
-		addKitLabel = string(allKit[addKitIdx])
-	}
 
 	return []playerConfigRow{
 		{label: "Player", value: playerEditorSlotLabel(playerIdx, len(m.setup.players)), kind: playerRowPlayer, active: true},
@@ -2500,10 +2481,9 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 		{label: "Mental Modifier", value: fmt.Sprintf("%+d", p.Mental), kind: playerRowMental, active: true},
 		{label: "Kit Limit", value: fmt.Sprintf("%d", p.KitLimit), kind: playerRowKitLimit, active: true},
 		{label: "Open Personal Kit Picker", value: "", kind: playerRowEditPersonalKit, active: len(allKit) > 0},
-		{label: "Quick Add Personal Item", value: addKitLabel, kind: playerRowAddPersonalKit, active: len(allKit) > 0 && len(p.Kit) < p.KitLimit},
-		{label: "Quick Remove Personal Item", value: "", kind: playerRowRemovePersonalKit, active: len(p.Kit) > 0},
+		{label: "Reset Personal Kit", value: "", kind: playerRowResetPersonalKit, active: len(p.Kit) > 0},
 		{label: "Open Issued Kit Picker", value: "", kind: playerRowEditIssuedKit, active: len(issuedKitOptionsForMode(m.setupMode())) > 0},
-		{label: "Reset Issued (Recommended)", value: "", kind: playerRowResetIssuedKit, active: true},
+		{label: "Reset Issued", value: "", kind: playerRowResetIssuedKit, active: true},
 		{label: "Back To Wizard", value: "", kind: playerRowBack, active: true},
 	}
 }
@@ -2512,7 +2492,7 @@ func (m menuModel) playerConfigRowSupportsCycle(kind playerConfigRowKind) bool {
 	switch kind {
 	case playerRowPlayer, playerRowSex, playerRowBodyType, playerRowWeightKg,
 		playerRowHeightFt, playerRowHeightIn, playerRowEndurance, playerRowBushcraft,
-		playerRowMental, playerRowKitLimit, playerRowAddPersonalKit:
+		playerRowMental, playerRowKitLimit:
 		return true
 	default:
 		return false
@@ -2563,8 +2543,6 @@ func (m menuModel) adjustPlayerConfigChoice(delta int) menuModel {
 		if len(p.Kit) > p.KitLimit {
 			p.Kit = append([]game.KitItem(nil), p.Kit[:p.KitLimit]...)
 		}
-	case playerRowAddPersonalKit:
-		m.pcfg.addKitIdx = wrapIndex(m.pcfg.addKitIdx, delta, len(game.AllKitItems()))
 	}
 
 	return m
@@ -2617,31 +2595,7 @@ func (m menuModel) backspacePlayerConfigText() menuModel {
 	return m
 }
 
-func (m menuModel) addPersonalKitItem() menuModel {
-	if len(m.setup.players) == 0 {
-		return m
-	}
-	m = m.normalizePlayerConfigState()
-	items := game.AllKitItems()
-	if len(items) == 0 {
-		return m
-	}
-	p := &m.setup.players[m.pcfg.playerIdx]
-	if len(p.Kit) >= p.KitLimit {
-		m.status = fmt.Sprintf("Player kit limit reached (%d).", p.KitLimit)
-		return m
-	}
-	item := items[m.pcfg.addKitIdx]
-	if hasKitItem(p.Kit, item) {
-		m.status = fmt.Sprintf("%s already selected for this player.", item)
-		return m
-	}
-	p.Kit = append(p.Kit, item)
-	m.status = fmt.Sprintf("Added %s to player kit.", item)
-	return m
-}
-
-func (m menuModel) removePersonalKitItem() menuModel {
+func (m menuModel) resetPersonalKitSelection() menuModel {
 	if len(m.setup.players) == 0 {
 		return m
 	}
@@ -2650,20 +2604,8 @@ func (m menuModel) removePersonalKitItem() menuModel {
 	if len(p.Kit) == 0 {
 		return m
 	}
-
-	items := game.AllKitItems()
-	if len(items) > 0 {
-		selected := items[m.pcfg.addKitIdx]
-		if idx := indexOfKitItem(p.Kit, selected); idx >= 0 {
-			p.Kit = removeKitItemAt(p.Kit, idx)
-			m.status = fmt.Sprintf("Removed %s from player kit.", selected)
-			return m
-		}
-	}
-
-	removed := p.Kit[len(p.Kit)-1]
-	p.Kit = p.Kit[:len(p.Kit)-1]
-	m.status = fmt.Sprintf("Removed %s from player kit.", removed)
+	p.Kit = nil
+	m.status = "Personal kit reset."
 	return m
 }
 
@@ -2686,15 +2628,6 @@ func (m menuModel) normalizePlayerConfigState() menuModel {
 		}
 	} else {
 		m.pcfg.playerIdx = 0
-	}
-
-	items := game.AllKitItems()
-	if len(items) > 0 {
-		if m.pcfg.addKitIdx < 0 || m.pcfg.addKitIdx >= len(items) {
-			m.pcfg.addKitIdx = 0
-		}
-	} else {
-		m.pcfg.addKitIdx = 0
 	}
 
 	return m
