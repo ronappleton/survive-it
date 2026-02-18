@@ -502,7 +502,27 @@ type phaseBuilderPhase struct {
 }
 
 type phaseEditorState struct {
-	cursor int
+	cursor       int
+	adding       bool
+	newSeasonIdx int
+	newDays      string
+}
+
+type phaseEditorRowKind int
+
+const (
+	phaseRowNewSeason phaseEditorRowKind = iota
+	phaseRowNewDays
+	phaseRowAddPhase
+	phaseRowRemoveLast
+	phaseRowBack
+)
+
+type phaseEditorRow struct {
+	label  string
+	value  string
+	kind   phaseEditorRowKind
+	active bool
 }
 
 type scenarioBuilderRowKind int
@@ -648,7 +668,12 @@ func newScenarioBuilderState() scenarioBuilderState {
 }
 
 func newPhaseEditorState() phaseEditorState {
-	return phaseEditorState{cursor: 0}
+	return phaseEditorState{
+		cursor:       0,
+		adding:       false,
+		newSeasonIdx: 0,
+		newDays:      "7",
+	}
 }
 
 func setupModes() []game.GameMode {
@@ -3189,11 +3214,12 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 }
 
 func (m menuModel) updatePhaseEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	rows := len(m.build.phases) + 3 // phases + add + remove + back
-	if rows < 3 {
-		rows = 3
+	rows := m.phaseEditorRows()
+	if len(rows) == 0 {
+		m.screen = screenScenarioBuilder
+		return m, nil
 	}
-	if m.phase.cursor < 0 || m.phase.cursor >= rows {
+	if m.phase.cursor < 0 || m.phase.cursor >= len(rows) {
 		m.phase.cursor = 0
 	}
 
@@ -3204,96 +3230,101 @@ func (m menuModel) updatePhaseEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenScenarioBuilder
 		return m, nil
 	case "up", "k":
-		m.phase.cursor = wrapIndex(m.phase.cursor, -1, rows)
+		m.phase.cursor = wrapIndex(m.phase.cursor, -1, len(rows))
 		return m, nil
 	case "down", "j":
-		m.phase.cursor = wrapIndex(m.phase.cursor, 1, rows)
+		m.phase.cursor = wrapIndex(m.phase.cursor, 1, len(rows))
 		return m, nil
 	case "left":
-		m = m.adjustPhaseEditorChoice(-1)
+		row := rows[m.phase.cursor]
+		if row.kind == phaseRowNewSeason {
+			m.phase.newSeasonIdx = wrapIndex(m.phase.newSeasonIdx, -1, len(builderSeasonOptions()))
+		}
 		return m, nil
 	case "right":
-		m = m.adjustPhaseEditorChoice(1)
+		row := rows[m.phase.cursor]
+		if row.kind == phaseRowNewSeason {
+			m.phase.newSeasonIdx = wrapIndex(m.phase.newSeasonIdx, 1, len(builderSeasonOptions()))
+		}
 		return m, nil
 	case "backspace", "ctrl+h":
-		m = m.backspacePhaseEditorDays()
+		row := rows[m.phase.cursor]
+		if row.kind == phaseRowNewDays && len(m.phase.newDays) > 0 {
+			m.phase.newDays = m.phase.newDays[:len(m.phase.newDays)-1]
+		}
 		return m, nil
 	case "enter":
-		switch {
-		case m.phase.cursor < len(m.build.phases):
-			m = m.adjustPhaseEditorChoice(1)
+		row := rows[m.phase.cursor]
+		switch row.kind {
+		case phaseRowNewSeason:
+			m.phase.newSeasonIdx = wrapIndex(m.phase.newSeasonIdx, 1, len(builderSeasonOptions()))
 			return m, nil
-		case m.phase.cursor == len(m.build.phases):
+		case phaseRowAddPhase:
+			if !m.phase.adding {
+				m.phase.adding = true
+				if strings.TrimSpace(m.phase.newDays) == "" {
+					m.phase.newDays = "7"
+				}
+				m.phase.cursor = 0
+				return m, nil
+			}
 			if len(m.build.phases) >= maxBuilderPhases {
 				m.status = fmt.Sprintf("Maximum phases reached (%d).", maxBuilderPhases)
 				return m, nil
 			}
-			seedSeason := 0
-			if len(m.build.phases) > 0 {
-				seedSeason = m.build.phases[len(m.build.phases)-1].seasonIdx
+			days, err := parseNonNegativeInt(strings.TrimSpace(m.phase.newDays))
+			if err != nil {
+				m.status = "Days must be a number >= 0."
+				return m, nil
 			}
-			m.build.phases = append(m.build.phases, phaseBuilderPhase{seasonIdx: seedSeason, days: "0"})
+			if len(m.build.phases) > 0 && days == 0 {
+				m.status = "0 days is only valid for the last phase."
+				return m, nil
+			}
+			m.build.phases = append(m.build.phases, phaseBuilderPhase{
+				seasonIdx: m.phase.newSeasonIdx,
+				days:      fmt.Sprintf("%d", days),
+			})
+			m.phase.adding = false
+			m.phase.newDays = "7"
+			m.phase.cursor = 0
 			m.status = "Added phase."
 			return m, nil
-		case m.phase.cursor == len(m.build.phases)+1:
+		case phaseRowRemoveLast:
 			if len(m.build.phases) <= 1 {
 				m.status = "At least one phase is required."
 				return m, nil
 			}
 			m.build.phases = m.build.phases[:len(m.build.phases)-1]
-			if m.phase.cursor >= len(m.build.phases)+2 {
-				m.phase.cursor = len(m.build.phases) + 1
-			}
 			m.status = "Removed last phase."
 			return m, nil
-		default:
+		case phaseRowBack:
 			m.screen = screenScenarioBuilder
 			return m, nil
 		}
 	}
 
 	if len(msg.Runes) > 0 {
-		m = m.appendPhaseEditorDays(msg.Runes)
+		row := rows[m.phase.cursor]
+		if row.kind == phaseRowNewDays {
+			for _, r := range msg.Runes {
+				if r >= '0' && r <= '9' {
+					m.phase.newDays += string(r)
+				}
+			}
+		}
 		return m, nil
 	}
 
 	return m, nil
 }
 
-func (m menuModel) adjustPhaseEditorChoice(delta int) menuModel {
-	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
-		return m
-	}
-	phase := &m.build.phases[m.phase.cursor]
-	phase.seasonIdx = wrapIndex(phase.seasonIdx, delta, len(builderSeasonOptions()))
-	return m
-}
-
-func (m menuModel) appendPhaseEditorDays(runes []rune) menuModel {
-	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
-		return m
-	}
-	for _, r := range runes {
-		if r >= '0' && r <= '9' {
-			m.build.phases[m.phase.cursor].days += string(r)
-		}
-	}
-	return m
-}
-
-func (m menuModel) backspacePhaseEditorDays() menuModel {
-	if m.phase.cursor < 0 || m.phase.cursor >= len(m.build.phases) {
-		return m
-	}
-	value := m.build.phases[m.phase.cursor].days
-	if len(value) > 0 {
-		m.build.phases[m.phase.cursor].days = value[:len(value)-1]
-	}
-	return m
-}
-
 func (m menuModel) viewPhaseEditor() string {
-	if m.phase.cursor < 0 {
+	rows := m.phaseEditorRows()
+	if len(rows) == 0 {
+		return brightGreen.Render("No phase editor options available.")
+	}
+	if m.phase.cursor < 0 || m.phase.cursor >= len(rows) {
 		m.phase.cursor = 0
 	}
 	totalWidth := m.w
@@ -3313,20 +3344,6 @@ func (m menuModel) viewPhaseEditor() string {
 		detailWidth = 52
 	}
 
-	rows := make([]string, 0, len(m.build.phases)+3)
-	for i, phase := range m.build.phases {
-		season := builderSeasonLabel(builderSeasonOptions()[clampInt(phase.seasonIdx, 0, len(builderSeasonOptions())-1)])
-		rows = append(rows, fmt.Sprintf("Phase %d: %-8s | %s day(s)", i+1, season, phase.days))
-	}
-	rows = append(rows, "Add Phase")
-	rows = append(rows, "Remove Last Phase")
-	rows = append(rows, "Back")
-
-	maxCursor := len(rows) - 1
-	if m.phase.cursor > maxCursor {
-		m.phase.cursor = maxCursor
-	}
-
 	var list strings.Builder
 	for i, row := range rows {
 		cursor := "  "
@@ -3335,24 +3352,21 @@ func (m menuModel) viewPhaseEditor() string {
 			cursor = "> "
 			style = brightGreen
 		}
-		list.WriteString(cursor + style.Render(row) + "\n")
+		if !row.active {
+			style = dimGreen
+		}
+		if row.value == "" {
+			list.WriteString(cursor + style.Render(row.label) + "\n")
+			continue
+		}
+		value := row.value
+		if row.kind == phaseRowNewDays && strings.TrimSpace(value) == "" {
+			value = "<type days>"
+		}
+		list.WriteString(cursor + style.Render(fmt.Sprintf("%-18s %s", row.label+":", value)) + "\n")
 	}
 
-	detail := dimGreen.Render("Select a phase to edit season and days.")
-	if m.phase.cursor < len(m.build.phases) {
-		phase := m.build.phases[m.phase.cursor]
-		season := builderSeasonLabel(builderSeasonOptions()[clampInt(phase.seasonIdx, 0, len(builderSeasonOptions())-1)])
-		detail = strings.Join([]string{
-			brightGreen.Render(fmt.Sprintf("Phase %d", m.phase.cursor+1)),
-			green.Render(fmt.Sprintf("Season: %s", season)),
-			green.Render(fmt.Sprintf("Days: %s", phase.days)),
-			"",
-			dimGreen.Render("Left/Right changes season."),
-			dimGreen.Render("Type digits to change days."),
-			dimGreen.Render("0 means until end and is valid only for last phase."),
-		}, "\n")
-	}
-
+	detail := m.phaseEditorTimelineText()
 	listPane := lipgloss.NewStyle().
 		Border(dosBox).
 		BorderForeground(lipgloss.Color("2")).
@@ -3370,13 +3384,79 @@ func (m menuModel) viewPhaseEditor() string {
 
 	var b strings.Builder
 	b.WriteString(dosTitle("Phase Builder") + "\n")
-	b.WriteString(dimGreen.Render("Dedicated two-column editor for scenario phases.") + "\n\n")
+	b.WriteString(dimGreen.Render("Left: phase actions and add-phase fields. Right: phase timeline.") + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane))
 	b.WriteString("\n" + dimGreen.Render("↑/↓ move  ←/→ season  type days  Enter select  Shift+Q back") + "\n")
 	if m.status != "" {
 		b.WriteString(green.Render(m.status) + "\n")
 	}
 	return b.String()
+}
+
+func (m menuModel) phaseEditorRows() []phaseEditorRow {
+	seasonOptions := builderSeasonOptions()
+	if len(seasonOptions) == 0 {
+		return nil
+	}
+	if m.phase.newSeasonIdx < 0 || m.phase.newSeasonIdx >= len(seasonOptions) {
+		m.phase.newSeasonIdx = 0
+	}
+
+	rows := make([]phaseEditorRow, 0, 5)
+	if m.phase.adding {
+		rows = append(rows,
+			phaseEditorRow{
+				label:  "New Phase Season",
+				value:  builderSeasonLabel(seasonOptions[m.phase.newSeasonIdx]),
+				kind:   phaseRowNewSeason,
+				active: true,
+			},
+			phaseEditorRow{
+				label:  "New Phase Days",
+				value:  m.phase.newDays,
+				kind:   phaseRowNewDays,
+				active: true,
+			},
+		)
+	}
+
+	addLabel := "Add Phase"
+	if m.phase.adding {
+		addLabel = "Confirm Add Phase"
+	}
+	rows = append(rows,
+		phaseEditorRow{label: addLabel, value: "", kind: phaseRowAddPhase, active: true},
+		phaseEditorRow{label: "Remove Last Phase", value: "", kind: phaseRowRemoveLast, active: len(m.build.phases) > 1},
+		phaseEditorRow{label: "Back", value: "", kind: phaseRowBack, active: true},
+	)
+
+	return rows
+}
+
+func (m menuModel) phaseEditorTimelineText() string {
+	seasonOptions := builderSeasonOptions()
+	lines := []string{
+		brightGreen.Render("Phase Timeline"),
+	}
+
+	if len(m.build.phases) == 0 {
+		lines = append(lines, dimGreen.Render("No phases configured."))
+	} else {
+		for i, phase := range m.build.phases {
+			season := seasonOptions[clampInt(phase.seasonIdx, 0, len(seasonOptions)-1)]
+			line := fmt.Sprintf("%d. %-8s  %s day(s)", i+1, builderSeasonLabel(season), phase.days)
+			lines = append(lines, green.Render(line))
+		}
+	}
+
+	lines = append(lines,
+		"",
+		brightGreen.Render("Notes"),
+		dimGreen.Render("When adding a phase, season and days appear at top-left."),
+		dimGreen.Render("Set days to 0 only for the final phase."),
+	)
+
+	return strings.Join(lines, "\n")
 }
 
 func (m menuModel) viewRun() string {
