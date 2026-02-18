@@ -165,3 +165,36 @@ func TestRunCatchAndConsumeFlow(t *testing.T) {
 		t.Fatalf("expected positive catch and nutrition values")
 	}
 }
+
+func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T) {
+	catalog := AnimalCatalog()
+	ids := map[string]bool{}
+	fishCount := 0
+	for _, animal := range catalog {
+		ids[animal.ID] = true
+		if animal.Domain == AnimalDomainWater {
+			fishCount++
+		}
+	}
+
+	required := []string{
+		"alligator",
+		"caiman",
+		"crocodile",
+		"muskrat",
+		"hyena",
+		"lion",
+		"tiger",
+		"scorpion",
+		"tarantula",
+	}
+	for _, id := range required {
+		if !ids[id] {
+			t.Fatalf("expected catalog to include %s", id)
+		}
+	}
+
+	if fishCount < 15 {
+		t.Fatalf("expected expanded fish catalog, got only %d water species", fishCount)
+	}
+}
