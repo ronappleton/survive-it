@@ -420,6 +420,7 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case itemScenarioBuilder:
 			m.build = newScenarioBuilderState()
+			m.build.playerCountIdx = m.setup.playerCountIdx
 			m.screen = screenScenarioBuilder
 			return m, nil
 		case itemInstallUpdate:
@@ -488,6 +489,7 @@ type scenarioBuilderState struct {
 	selectedIdx    int // 0 = new, 1..N = existing custom scenario index+1
 	name           string
 	modeIdx        int
+	playerCountIdx int
 	biomeIdx       int
 	useCustomDays  bool
 	defaultDaysIdx int
@@ -531,6 +533,7 @@ const (
 	builderRowScenario scenarioBuilderRowKind = iota
 	builderRowName
 	builderRowMode
+	builderRowPlayerCount
 	builderRowBiome
 	builderRowDaysMode
 	builderRowDaysPreset
@@ -655,6 +658,7 @@ func newScenarioBuilderState() scenarioBuilderState {
 		selectedIdx:    0,
 		name:           "",
 		modeIdx:        0,
+		playerCountIdx: 1,
 		biomeIdx:       0,
 		useCustomDays:  false,
 		defaultDaysIdx: 1,
@@ -1014,6 +1018,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.setup.cursor == 4 {
 			m.pcfg.returnTo = screenSetup
+			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
@@ -1030,6 +1035,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.setup.cursor == 4 {
 			m.pcfg.returnTo = screenSetup
+			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
 		}
@@ -1046,6 +1052,7 @@ func (m menuModel) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case 4:
 			m.pcfg.returnTo = screenSetup
+			m.pcfg.playerIdx = 0
 			m.screen = screenPlayerConfig
 			return m, nil
 		case 5:
@@ -1171,7 +1178,7 @@ func (m menuModel) viewSetup() string {
 		{label: "Scenario", value: scenarioLabel},
 		{label: "Players", value: fmt.Sprintf("%d", playerCounts[m.setup.playerCountIdx])},
 		{label: "Run Length", value: runLengths[m.setup.runLengthIdx].label},
-		{label: "Configure Players", value: ""},
+		{label: "Configure Players & Kit", value: ""},
 		{label: "Configure Issued Kit", value: kitSummary(m.setup.issuedKit, 0)},
 		{label: "Start Run", value: ""},
 		{label: "Cancel", value: ""},
@@ -1253,7 +1260,7 @@ func (m menuModel) setupDetailText(activeLabel, scenarioLabel string, readyPlaye
 		green.Render(activeLabel),
 		"",
 		dimGreen.Render("Enter on Scenario opens detailed selector."),
-		dimGreen.Render("Configure Players opens Player Editor."),
+		dimGreen.Render("Configure Players & Kit opens Player Editor."),
 		dimGreen.Render("Configure Issued Kit opens Kit Picker."),
 	}
 	return strings.Join(lines, "\n")
@@ -1549,6 +1556,13 @@ func playerDisplayName(p game.PlayerConfig) string {
 		return "player"
 	}
 	return name
+}
+
+func playerEditorSlotLabel(idx, total int) string {
+	if idx == 0 {
+		return fmt.Sprintf("%d / %d (YOU)", idx+1, total)
+	}
+	return fmt.Sprintf("%d / %d", idx+1, total)
 }
 
 func (m menuModel) viewKitPicker() string {
@@ -1905,10 +1919,15 @@ func (m menuModel) playerEditorStatsText(p game.PlayerConfig, scenarioLabel stri
 	if name == "" {
 		name = fmt.Sprintf("Player %d", activePlayer)
 	}
+	editing := fmt.Sprintf("Editing: TEAMMATE %d", activePlayer-1)
+	if activePlayer == 1 {
+		editing = "Editing: YOU"
+	}
 
 	return strings.Join([]string{
 		brightGreen.Render(name),
 		green.Render(fmt.Sprintf("Player Slot: %d/%d", activePlayer, playerCount)),
+		brightGreen.Render(editing),
 		green.Render(fmt.Sprintf("Scenario: %s", scenarioLabel)),
 		green.Render(fmt.Sprintf("Sex: %s  |  Body: %s", p.Sex, p.BodyType)),
 		green.Render(fmt.Sprintf("Height: %d ft %d in  |  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg)),
@@ -2064,7 +2083,7 @@ func (m menuModel) playerConfigRows() []playerConfigRow {
 	}
 
 	return []playerConfigRow{
-		{label: "Player", value: fmt.Sprintf("%d / %d", playerIdx+1, len(m.setup.players)), kind: playerRowPlayer, active: true},
+		{label: "Player", value: playerEditorSlotLabel(playerIdx, len(m.setup.players)), kind: playerRowPlayer, active: true},
 		{label: "Name", value: p.Name, kind: playerRowName, active: true},
 		{label: "Quick Name", value: names[nameIdx], kind: playerRowQuickName, active: true},
 		{label: "Sex", value: string(p.Sex), kind: playerRowSex, active: true},
@@ -2753,8 +2772,11 @@ func (m menuModel) updateScenarioBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenPhaseEditor
 			return m, nil
 		case builderRowPlayerEditor:
+			m.setup.playerCountIdx = m.build.playerCountIdx
 			m = m.ensureSetupPlayers()
 			m.pcfg.returnTo = screenScenarioBuilder
+			m.pcfg.playerIdx = 0
+			m.status = "Player editor: you can set your own kit and every player kit."
 			m.screen = screenPlayerConfig
 			return m, nil
 		case builderRowCancel:
@@ -2797,6 +2819,10 @@ func (m menuModel) adjustScenarioBuilderChoice(delta int) menuModel {
 		m = m.loadScenarioBuilderSelection(next)
 	case builderRowMode:
 		m.build.modeIdx = wrapIndex(m.build.modeIdx, delta, len(setupModes()))
+	case builderRowPlayerCount:
+		m.build.playerCountIdx = wrapIndex(m.build.playerCountIdx, delta, len(setupPlayerCounts()))
+		m.setup.playerCountIdx = m.build.playerCountIdx
+		m = m.ensureSetupPlayers()
 	case builderRowBiome:
 		m.build.biomeIdx = wrapIndex(m.build.biomeIdx, delta, len(builderBiomes()))
 	case builderRowDaysMode:
@@ -2928,7 +2954,7 @@ func (m menuModel) deleteScenarioFromBuilder() (tea.Model, tea.Cmd) {
 
 func (m menuModel) scenarioBuilderRowSupportsCycle(row scenarioBuilderRow) bool {
 	switch row.kind {
-	case builderRowScenario, builderRowMode, builderRowBiome, builderRowDaysMode, builderRowDaysPreset:
+	case builderRowScenario, builderRowMode, builderRowPlayerCount, builderRowBiome, builderRowDaysMode, builderRowDaysPreset:
 		return true
 	default:
 		return false
@@ -2941,11 +2967,15 @@ func (m menuModel) scenarioBuilderRows() []scenarioBuilderRow {
 	if selectedScenarioIdx < 0 || selectedScenarioIdx >= len(scenarioChoices) {
 		selectedScenarioIdx = 0
 	}
+	if m.build.playerCountIdx < 0 || m.build.playerCountIdx >= len(setupPlayerCounts()) {
+		m.build.playerCountIdx = 1
+	}
 
 	rows := []scenarioBuilderRow{
 		{label: "Scenario", value: scenarioChoices[selectedScenarioIdx], kind: builderRowScenario, active: true},
 		{label: "Name", value: m.build.name, kind: builderRowName, active: true},
 		{label: "Game Mode", value: modeLabel(setupModes()[m.build.modeIdx]), kind: builderRowMode, active: true},
+		{label: "Player Count", value: fmt.Sprintf("%d", setupPlayerCounts()[m.build.playerCountIdx]), kind: builderRowPlayerCount, active: true},
 		{label: "Biome", value: builderBiomes()[m.build.biomeIdx], kind: builderRowBiome, active: true},
 		{label: "Days Mode", value: map[bool]string{true: "Custom", false: "Preset"}[m.build.useCustomDays], kind: builderRowDaysMode, active: true},
 		{label: "Days Preset", value: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx]), kind: builderRowDaysPreset, active: !m.build.useCustomDays},
@@ -3021,9 +3051,17 @@ func (m menuModel) backspaceScenarioBuilderText() menuModel {
 
 func (m menuModel) loadScenarioBuilderSelection(selected int) menuModel {
 	cursor := m.build.cursor
+	playerCountIdx := m.build.playerCountIdx
+	if playerCountIdx < 0 || playerCountIdx >= len(setupPlayerCounts()) {
+		playerCountIdx = m.setup.playerCountIdx
+		if playerCountIdx < 0 || playerCountIdx >= len(setupPlayerCounts()) {
+			playerCountIdx = 1
+		}
+	}
 	loaded := newScenarioBuilderState()
 	loaded.cursor = cursor
 	loaded.selectedIdx = selected
+	loaded.playerCountIdx = playerCountIdx
 
 	if selected == 0 {
 		m.build = loaded
@@ -3211,6 +3249,7 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 		brightGreen.Render("Current Scenario Draft"),
 		green.Render(fmt.Sprintf("Name: %s", strings.TrimSpace(m.build.name))),
 		green.Render(fmt.Sprintf("Mode: %s", modeLabel(setupModes()[m.build.modeIdx]))),
+		green.Render(fmt.Sprintf("Player Count: %d", setupPlayerCounts()[m.build.playerCountIdx])),
 		green.Render(fmt.Sprintf("Biome: %s", builderBiomes()[m.build.biomeIdx])),
 		green.Render(fmt.Sprintf("Default Days: %s", map[bool]string{true: m.build.customDays, false: fmt.Sprintf("%d", builderDefaultDays()[m.build.defaultDaysIdx])}[m.build.useCustomDays])),
 		green.Render(fmt.Sprintf("Season Profile ID: %s", strings.TrimSpace(m.build.seasonSetID))),
@@ -3219,6 +3258,9 @@ func (m menuModel) scenarioBuilderDetailText(row scenarioBuilderRow) string {
 		green.Render(strings.Join(phasePreview, "\n")),
 		"",
 		strings.Join(notes, "\n"),
+		"",
+		brightGreen.Render("Run Setup"),
+		dimGreen.Render("Preset or custom scenarios both support full player/kit editing."),
 	}, "\n")
 }
 
