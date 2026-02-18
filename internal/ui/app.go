@@ -89,8 +89,14 @@ const (
 	itemStart menuItem = iota
 	itemLoadRun
 	itemScenarioBuilder
+	itemInstallUpdate
 	itemQuit
 )
+
+type menuEntry struct {
+	label  string
+	action menuItem
+}
 
 const (
 	defaultCustomScenariosFile = "survive-it-scenarios.json"
@@ -218,8 +224,10 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.updateAvailable = msg.available
 		m.updateStatus = msg.status
-		if !msg.auto || msg.available {
+		if !msg.auto {
 			m.status = msg.status
+		} else if msg.available {
+			m.status = ""
 		}
 
 		return m, nil
@@ -361,38 +369,35 @@ func (m menuModel) submitRunInput() (tea.Model, tea.Cmd) {
 	}
 }
 
-func menuItems() []string {
-	return []string{
-		"Start",
-		"Load Run",
-		"Scenario Builder",
-		"Quit",
+func menuItems(m menuModel) []menuEntry {
+	items := []menuEntry{
+		{label: "Start", action: itemStart},
+		{label: "Load Run", action: itemLoadRun},
+		{label: "Scenario Builder", action: itemScenarioBuilder},
 	}
+	if m.updateAvailable && !m.cfg.NoUpdate {
+		items = append(items, menuEntry{label: "Install Update", action: itemInstallUpdate})
+	}
+	items = append(items, menuEntry{label: "Quit", action: itemQuit})
+	return items
 }
 
 func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.busy {
-		// Ignore input while update check runs.
+	items := menuItems(m)
+	itemCount := len(items)
+	if itemCount == 0 {
 		return m, nil
 	}
-	itemCount := len(menuItems())
+	if m.idx < 0 {
+		m.idx = 0
+	}
+	if m.idx >= itemCount {
+		m.idx = itemCount - 1
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "Q", "q":
 		return m, tea.Quit
-	case "U", "u":
-		if !m.updateAvailable || m.cfg.NoUpdate {
-			return m, nil
-		}
-		m.busy = true
-		m.status = "Installing update…"
-		return m, applyUpdateCmd(m.cfg.Version)
-	case "R", "r":
-		if m.cfg.NoUpdate {
-			return m, nil
-		}
-		m.busy = true
-		m.status = "Checking for updates…"
-		return m, checkUpdateCmd(m.cfg.Version, false)
 	case "up", "k":
 		m.idx = wrapIndex(m.idx, -1, itemCount)
 		return m, nil
@@ -400,7 +405,7 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.idx = wrapIndex(m.idx, 1, itemCount)
 		return m, nil
 	case "enter":
-		switch menuItem(m.idx) {
+		switch items[m.idx].action {
 		case itemStart:
 			m.setup = newSetupState()
 			m.pcfg = newPlayerConfigState()
@@ -417,6 +422,13 @@ func (m menuModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.build = newScenarioBuilderState()
 			m.screen = screenScenarioBuilder
 			return m, nil
+		case itemInstallUpdate:
+			if m.busy {
+				return m, nil
+			}
+			m.busy = true
+			m.status = "Installing update…"
+			return m, applyUpdateCmd(m.cfg.Version)
 		case itemQuit:
 			return m, tea.Quit
 		}
@@ -3419,7 +3431,17 @@ func (m menuModel) viewRun() string {
 }
 
 func (m menuModel) viewMenu() string {
-	items := menuItems()
+	items := menuItems(m)
+	if len(items) == 0 {
+		return brightGreen.Render("No menu items available.")
+	}
+	if m.idx < 0 {
+		m.idx = 0
+	}
+	if m.idx >= len(items) {
+		m.idx = len(items) - 1
+	}
+
 	contentWidth := 42
 	if m.w > 0 {
 		maxAllowed := m.w - 8
@@ -3439,7 +3461,7 @@ func (m menuModel) viewMenu() string {
 
 	var buttons strings.Builder
 	for i, it := range items {
-		label := strings.ToUpper(it)
+		label := strings.ToUpper(it.label)
 		style := buttonStyle.Copy().BorderForeground(lipgloss.Color("2")).Foreground(lipgloss.Color("2"))
 		if i == m.idx {
 			style = style.BorderForeground(lipgloss.Color("10")).Foreground(lipgloss.Color("10")).Bold(true)
@@ -3455,10 +3477,7 @@ func (m menuModel) viewMenu() string {
 		header.WriteString(green.Render("Checking for updates...") + "\n")
 	} else if m.updateAvailable {
 		header.WriteString(brightGreen.Render(m.updateStatus) + "\n")
-		header.WriteString(dimGreen.Render("Press Shift+U to install now, Shift+R to re-check.") + "\n")
-	} else if strings.TrimSpace(m.updateStatus) != "" {
-		header.WriteString(dimGreen.Render(m.updateStatus) + "\n")
-		header.WriteString(dimGreen.Render("Press Shift+R to re-check.") + "\n")
+		header.WriteString(dimGreen.Render("Select INSTALL UPDATE from the menu.") + "\n")
 	}
 
 	main := lipgloss.JoinVertical(
@@ -3471,11 +3490,7 @@ func (m menuModel) viewMenu() string {
 		dimGreen.Render("↑/↓ move  Enter select  Shift+Q quit"),
 	)
 
-	view := lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, main)
-	if strings.TrimSpace(m.status) != "" {
-		view += "\n" + green.Render(m.status)
-	}
-	return view
+	return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, main)
 }
 
 func checkUpdateCmd(currentVersion string, auto bool) tea.Cmd {
