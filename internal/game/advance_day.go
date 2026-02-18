@@ -3,6 +3,7 @@ package game
 func (s *RunState) AdvanceDay() {
 	s.Day++
 	s.EnsureWeather()
+	s.EnsurePlayerRuntimeStats()
 	season, ok := s.CurrentSeason()
 	if !ok {
 		season = SeasonAutumn
@@ -22,8 +23,10 @@ func (s *RunState) AdvanceDay() {
 		p.Hydration += playerWeatherImpact.Hydration
 		p.Morale += playerWeatherImpact.Morale
 		applyDailyAilmentPenalties(p)
+		applyDailyMetabolism(p)
 
 		clampPlayer(p)
+		refreshEffectBars(p)
 	}
 }
 
@@ -65,6 +68,12 @@ func clampPlayer(playerState *PlayerState) {
 	playerState.Energy = clamp(playerState.Energy, 0, 100)
 	playerState.Hydration = clamp(playerState.Hydration, 0, 100)
 	playerState.Morale = clamp(playerState.Morale, 0, 100)
+	playerState.Hunger = clamp(playerState.Hunger, 0, 100)
+	playerState.Thirst = clamp(playerState.Thirst, 0, 100)
+	playerState.Fatigue = clamp(playerState.Fatigue, 0, 100)
+	playerState.CaloriesReserveKcal = clamp(playerState.CaloriesReserveKcal, -5000, 12000)
+	playerState.ProteinReserveG = clamp(playerState.ProteinReserveG, -250, 800)
+	playerState.FatReserveG = clamp(playerState.FatReserveG, -250, 600)
 }
 
 type RunOutcomeStatus string
@@ -96,7 +105,7 @@ func (s *RunState) EvaluateRun() RunOutcome {
 	// Collect all critical players
 	criticalIDs := make([]int, 0)
 	for _, p := range s.Players {
-		if p.Energy == 0 || p.Hydration == 0 {
+		if p.Energy == 0 || p.Hydration == 0 || p.Hunger >= 100 || p.Thirst >= 100 || p.Fatigue >= 100 {
 			criticalIDs = append(criticalIDs, p.ID)
 		}
 	}

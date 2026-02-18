@@ -46,6 +46,7 @@ func NewRunState(config RunConfig) (RunState, error) {
 		Players:     CreatePlayers(resolvedConfig),
 	}
 	state.EnsureWeather()
+	state.EnsurePlayerRuntimeStats()
 
 	return state, nil
 }

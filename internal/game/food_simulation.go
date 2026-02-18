@@ -48,6 +48,7 @@ func ConsumeCatch(seed int64, day int, player *PlayerState, catch CatchResult, c
 	}
 
 	nutrition := catch.NutritionForGrams(portion)
+	applyMealNutritionReserves(player, nutrition)
 	energyGain, hydrationGain, moraleGain := nutritionToPlayerEffects(nutrition)
 
 	player.Energy = clamp(player.Energy+energyGain, 0, 100)
@@ -122,6 +123,9 @@ func ConsumeCatch(seed int64, day int, player *PlayerState, catch CatchResult, c
 			}
 		}
 	}
+
+	clampPlayer(player)
+	refreshEffectBars(player)
 
 	return outcome
 }

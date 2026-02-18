@@ -53,23 +53,32 @@ var romanNumerals = []string{
 }
 
 type PlayerState struct {
-	ID        int
-	Name      string
-	Sex       Sex
-	BodyType  BodyType
-	WeightKg  int
-	HeightFt  int
-	HeightIn  int
-	Endurance int
-	Bushcraft int
-	Mental    int
-	KitLimit  int
-	Kit       []KitItem
-	Energy    int
-	Hydration int
-	Morale    int
-	Nutrition NutritionTotals
-	Ailments  []Ailment
+	ID        int       `json:"id"`
+	Name      string    `json:"name"`
+	Sex       Sex       `json:"sex"`
+	BodyType  BodyType  `json:"body_type"`
+	WeightKg  int       `json:"weight_kg"`
+	HeightFt  int       `json:"height_ft"`
+	HeightIn  int       `json:"height_in"`
+	Endurance int       `json:"endurance"`
+	Bushcraft int       `json:"bushcraft"`
+	Mental    int       `json:"mental"`
+	KitLimit  int       `json:"kit_limit"`
+	Kit       []KitItem `json:"kit"`
+	Energy    int       `json:"energy"`
+	Hydration int       `json:"hydration"`
+	Morale    int       `json:"morale"`
+
+	// Runtime-only survival reserves and bars. These are not editable in setup.
+	CaloriesReserveKcal int `json:"calories_reserve_kcal"`
+	ProteinReserveG     int `json:"protein_reserve_g"`
+	FatReserveG         int `json:"fat_reserve_g"`
+	Hunger              int `json:"hunger"`  // 0 = satiated, 100 = starving
+	Thirst              int `json:"thirst"`  // 0 = hydrated, 100 = severely thirsty
+	Fatigue             int `json:"fatigue"` // 0 = rested, 100 = exhausted
+
+	Nutrition NutritionTotals `json:"nutrition"`
+	Ailments  []Ailment       `json:"ailments"`
 }
 
 type PlayerConfig struct {
@@ -156,6 +165,7 @@ func CreatePlayers(cfg RunConfig) []PlayerState {
 			Hydration: 100,
 			Morale:    100,
 		}
+		initializeRuntimeBars(&players[i])
 	}
 
 	return players

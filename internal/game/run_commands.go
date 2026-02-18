@@ -32,6 +32,7 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	if command == "" {
 		return RunCommandResult{Handled: false}
 	}
+	s.EnsurePlayerRuntimeStats()
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
 		return RunCommandResult{Handled: false}
@@ -132,6 +133,7 @@ func (s *RunState) executeUseCommand(fields []string) RunCommandResult {
 
 	if action.Nutrition.CaloriesKcal > 0 || action.Nutrition.ProteinG > 0 || action.Nutrition.FatG > 0 {
 		player.Nutrition = player.Nutrition.add(action.Nutrition)
+		applyMealNutritionReserves(player, action.Nutrition)
 		energyBonus, hydrationBonus, moraleBonus := nutritionToPlayerEffects(action.Nutrition)
 		player.Energy = clamp(player.Energy+energyBonus, 0, 100)
 		player.Hydration = clamp(player.Hydration+hydrationBonus, 0, 100)

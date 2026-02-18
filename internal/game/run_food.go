@@ -6,6 +6,7 @@ func (s *RunState) CatchAndConsume(playerID int, domain AnimalDomain, choice Mea
 	if s == nil {
 		return CatchResult{}, MealOutcome{}, fmt.Errorf("run state is nil")
 	}
+	s.EnsurePlayerRuntimeStats()
 	playerIndex := -1
 	for i := range s.Players {
 		if s.Players[i].ID == playerID {

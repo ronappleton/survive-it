@@ -4979,6 +4979,7 @@ func (m menuModel) currentRunWeather() game.WeatherState {
 		return game.WeatherState{}
 	}
 	m.run.EnsureWeather()
+	m.run.EnsurePlayerRuntimeStats()
 	return m.run.Weather
 }
 
@@ -5176,6 +5177,7 @@ func (m menuModel) viewRunPlayers() string {
 	if m.run == nil || len(m.run.Players) == 0 {
 		return brightGreen.Render("No active players.") + "\n" + dimGreen.Render("Shift+Q back")
 	}
+	m.run.EnsurePlayerRuntimeStats()
 	if m.rplay.cursor < 0 || m.rplay.cursor >= len(m.run.Players) {
 		m.rplay.cursor = 0
 	}
@@ -5207,7 +5209,7 @@ func (m menuModel) viewRunPlayers() string {
 			cursor = "> "
 			style = brightGreen.Bold(true)
 		}
-		left.WriteString(style.Render(fmt.Sprintf("%s%s  E:%3d H:%3d M:%3d  Ail:%d", cursor, p.Name, p.Energy, p.Hydration, p.Morale, len(p.Ailments))) + "\n")
+		left.WriteString(style.Render(fmt.Sprintf("%s%s  E:%3d H:%3d M:%3d  Hu:%3d Th:%3d Fa:%3d  Ail:%d", cursor, p.Name, p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments))) + "\n")
 	}
 
 	p := m.run.Players[m.rplay.cursor]
@@ -5237,6 +5239,7 @@ func (m menuModel) viewRunPlayers() string {
 	if len(issuedPreview) == 0 {
 		issuedPreview = []string{"None"}
 	}
+	needs := game.DailyNutritionNeedsForPlayer(p)
 
 	rightLines := []string{
 		brightGreen.Render(fmt.Sprintf("%s  (Player %d/%d)", p.Name, p.ID, len(m.run.Players))),
@@ -5244,6 +5247,13 @@ func (m menuModel) viewRunPlayers() string {
 		green.Render(fmt.Sprintf("Height: %d ft %d in  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg)),
 		green.Render(fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental)),
 		green.Render(fmt.Sprintf("Status  Energy:%d  Hydration:%d  Morale:%d", p.Energy, p.Hydration, p.Morale)),
+		"",
+		brightGreen.Render("Effect Bars (read-only)"),
+		green.Render(fmt.Sprintf("Hunger  %s", renderEffectBar(p.Hunger))),
+		green.Render(fmt.Sprintf("Thirst  %s", renderEffectBar(p.Thirst))),
+		green.Render(fmt.Sprintf("Fatigue %s", renderEffectBar(p.Fatigue))),
+		green.Render(fmt.Sprintf("Reserves  %dkcal  %dg protein  %dg fat", p.CaloriesReserveKcal, p.ProteinReserveG, p.FatReserveG)),
+		green.Render(fmt.Sprintf("Needs/day %dkcal  %dg protein  %dg fat", needs.CaloriesKcal, needs.ProteinG, needs.FatG)),
 		green.Render(fmt.Sprintf("Nutrition  %dkcal  %dg protein  %dg fat", p.Nutrition.CaloriesKcal, p.Nutrition.ProteinG, p.Nutrition.FatG)),
 		"",
 		brightGreen.Render("Active Ailments"),
@@ -5281,6 +5291,17 @@ func (m menuModel) viewRunPlayers() string {
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane))
 	b.WriteString("\n" + dimGreen.Render("↑/↓ move  Shift+H command library  Shift+Q back") + "\n")
 	return b.String()
+}
+
+func renderEffectBar(value int) string {
+	clamped := clampInt(value, 0, 100)
+	const width = 20
+	fill := (clamped * width) / 100
+	if fill > width {
+		fill = width
+	}
+	empty := width - fill
+	return fmt.Sprintf("[%s%s] %3d", strings.Repeat("#", fill), strings.Repeat(".", empty), clamped)
 }
 
 func (m menuModel) updateRunCommandLibrary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -5438,6 +5459,7 @@ func loadRunFromFile(path string, availableScenarios []game.Scenario) (game.RunS
 		payload.Run.SeasonSetID = payload.Run.Scenario.DefaultSeasonSetID
 	}
 	payload.Run.EnsureWeather()
+	payload.Run.EnsurePlayerRuntimeStats()
 
 	return payload.Run, nil
 }
@@ -5665,6 +5687,7 @@ func newRunStateWithScenarios(config game.RunConfig, scenarios []game.Scenario) 
 		Players:     game.CreatePlayers(resolvedConfig),
 	}
 	state.EnsureWeather()
+	state.EnsurePlayerRuntimeStats()
 	return state, nil
 }
 
