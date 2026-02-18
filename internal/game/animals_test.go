@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAnimalsForBiomeByDomain(t *testing.T) {
 	land := AnimalsForBiome("tropical_jungle", AnimalDomainLand)
@@ -185,6 +188,9 @@ func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T)
 		"hyena",
 		"lion",
 		"tiger",
+		"rattlesnake",
+		"cobra",
+		"python",
 		"scorpion",
 		"tarantula",
 	}
@@ -196,5 +202,15 @@ func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T)
 
 	if fishCount < 15 {
 		t.Fatalf("expected expanded fish catalog, got only %d water species", fishCount)
+	}
+
+	snakeCount := 0
+	for id := range ids {
+		if strings.Contains(id, "snake") || id == "cobra" || id == "python" || id == "boa_constrictor" {
+			snakeCount++
+		}
+	}
+	if snakeCount < 5 {
+		t.Fatalf("expected broad snake coverage, got %d snake entries", snakeCount)
 	}
 }
