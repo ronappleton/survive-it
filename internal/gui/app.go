@@ -199,16 +199,6 @@ type gameUI struct {
 	autoDayHours int
 }
 
-var (
-	colorBG     = rl.NewColor(8, 12, 18, 255)
-	colorPanel  = rl.NewColor(14, 24, 35, 255)
-	colorBorder = rl.NewColor(25, 200, 120, 255)
-	colorText   = rl.NewColor(175, 245, 195, 255)
-	colorDim    = rl.NewColor(108, 165, 124, 255)
-	colorAccent = rl.NewColor(60, 255, 145, 255)
-	colorWarn   = rl.NewColor(255, 198, 96, 255)
-)
-
 func (a *App) Run() error {
 	ui := newGameUI(a.cfg)
 	return ui.Run()
@@ -251,11 +241,10 @@ func newGameUI(cfg AppConfig) *gameUI {
 func (ui *gameUI) Run() error {
 	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
 	rl.InitWindow(ui.width, ui.height, "survive-it")
+	initTypography()
+	defer shutdownTypography()
 	rl.SetExitKey(0)
 	rl.SetTargetFPS(60)
-	// Slightly soften text edges on scaled/default font rendering.
-	defaultFont := rl.GetFontDefault()
-	rl.SetTextureFilter(defaultFont.Texture, rl.FilterBilinear)
 
 	for !ui.quit && !rl.WindowShouldClose() {
 		now := time.Now()
@@ -392,7 +381,7 @@ func (ui *gameUI) updateMenu() {
 			ui.quit = true
 		}
 	}
-	if rl.IsKeyPressed(rl.KeyQ) {
+	if ShiftPressedKey(rl.KeyQ) {
 		ui.quit = true
 	}
 }
@@ -428,16 +417,16 @@ func (ui *gameUI) drawMenu() {
 		if i == ui.menuCursor {
 			rl.DrawRectangleRounded(r, 0.3, 8, rl.Fade(colorAccent, 0.2))
 			rl.DrawRectangleRoundedLinesEx(r, 0.3, 8, 2, colorAccent)
-			rl.DrawText(item.Label, int32(r.X)+18, y+14, 28, colorAccent)
+			drawText(item.Label, int32(r.X)+18, y+14, 28, colorAccent)
 		} else {
 			rl.DrawRectangleRounded(r, 0.3, 8, rl.Fade(colorPanel, 0.7))
 			rl.DrawRectangleRoundedLinesEx(r, 0.3, 8, 1.5, colorBorder)
-			rl.DrawText(item.Label, int32(r.X)+18, y+14, 28, colorText)
+			drawText(item.Label, int32(r.X)+18, y+14, 28, colorText)
 		}
 	}
 
 	hintRect := rl.NewRectangle(20, float32(ui.height-64), float32(ui.width-40), 40)
-	drawTextCentered("Up/Down to move, Enter to select, Q to quit", hintRect, 8, 18, colorDim)
+	drawTextCentered("Up/Down to move, Enter to select, Shift+Q to quit", hintRect, 8, typeScale.Small, colorDim)
 }
 
 func (ui *gameUI) menuItems() []menuItem {
@@ -586,10 +575,10 @@ func (ui *gameUI) drawOptions() {
 		if i == ui.opts.Cursor {
 			rl.DrawRectangle(int32(left.X)+16, y-8, int32(left.Width)-32, 42, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(row.label, int32(left.X)+26, y, 24, colorText)
-		rl.DrawText(row.value, int32(left.X)+286, y, 24, colorAccent)
+		drawText(row.label, int32(left.X)+26, y, 24, colorText)
+		drawText(row.value, int32(left.X)+286, y, 24, colorAccent)
 	}
-	rl.DrawText("Left/Right adjust values, Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+	drawText("Left/Right adjust values, Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
 
 	exampleC := 7
 	exampleF := celsiusToFahrenheit(exampleC)
@@ -704,14 +693,14 @@ func (ui *gameUI) drawSetup() {
 		if i == ui.setup.Cursor {
 			rl.DrawRectangle(int32(left.X)+18, y-8, int32(left.Width)-36, 42, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(row.label, leftColX, y, 24, colorText)
+		drawText(row.label, leftColX, y, 24, colorText)
 		value := row.value
 		if len(value) > rightColMax/9 {
 			value = value[:maxInt(1, rightColMax/9-3)] + "..."
 		}
-		rl.DrawText(value, rightColX, y, 24, colorAccent)
+		drawText(value, rightColX, y, 24, colorAccent)
 	}
-	rl.DrawText("Left/Right change   Enter select/open", int32(left.X)+26, int32(left.Y+left.Height)-38, 18, colorDim)
+	drawText("Left/Right change   Enter select/open", int32(left.X)+26, int32(left.Y+left.Height)-38, 18, colorDim)
 
 	s := ui.selectedScenario()
 	drawWrappedText("Name: "+s.Name, right, 30, 25, colorAccent)
@@ -770,7 +759,7 @@ func (ui *gameUI) drawScenarioPicker() {
 			clr = colorAccent
 			rl.DrawRectangle(int32(left.X)+12, y-6, int32(left.Width)-24, 28, rl.Fade(colorAccent, 0.18))
 		}
-		rl.DrawText(scenario.Name, int32(left.X)+22, y, 22, clr)
+		drawText(scenario.Name, int32(left.X)+22, y, 22, clr)
 	}
 
 	sel := scenarios[clampInt(ui.pick.Cursor, 0, len(scenarios)-1)]
@@ -935,10 +924,10 @@ func (ui *gameUI) drawStatsBuilder() {
 		if i == ui.sbuild.Cursor {
 			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 34, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(row.label, int32(left.X)+20, y, 20, colorText)
-		rl.DrawText(truncateForUI(row.value, 38), int32(left.X)+250, y, 20, colorAccent)
+		drawText(row.label, int32(left.X)+20, y, 20, colorText)
+		drawText(truncateForUI(row.value, 38), int32(left.X)+250, y, 20, colorAccent)
 	}
-	rl.DrawText("Up/Down move  Left/Right adjust  Enter edit/select", int32(left.X)+16, int32(left.Y+left.Height)-38, 18, colorDim)
+	drawText("Up/Down move  Left/Right adjust  Enter edit/select", int32(left.X)+16, int32(left.Y+left.Height)-38, 18, colorDim)
 
 	detail := []string{
 		fmt.Sprintf("Mode: %s", modeLabel(ui.selectedMode())),
@@ -967,8 +956,8 @@ func (ui *gameUI) drawStatsBuilder() {
 		r := rl.NewRectangle(left.X+20, left.Y+left.Height-120, left.Width-40, 88)
 		rl.DrawRectangleRounded(r, 0.2, 8, rl.Fade(colorPanel, 0.95))
 		rl.DrawRectangleRoundedLinesEx(r, 0.2, 8, 2, colorAccent)
-		rl.DrawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
-		rl.DrawText(truncateForUI(ui.sbuild.EditBuffer, 72)+"_", int32(r.X)+12, int32(r.Y)+42, 24, colorText)
+		drawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
+		drawText(truncateForUI(ui.sbuild.EditBuffer, 72)+"_", int32(r.X)+12, int32(r.Y)+42, 24, colorText)
 	}
 }
 
@@ -1086,16 +1075,16 @@ func (ui *gameUI) drawPlayerConfig() {
 		if i == ui.pcfg.Cursor {
 			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 36, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(row.label, int32(left.X)+18, y, 22, colorText)
-		rl.DrawText(truncateForUI(row.value, 40), int32(left.X)+290, y, 22, colorAccent)
+		drawText(row.label, int32(left.X)+18, y, 22, colorText)
+		drawText(truncateForUI(row.value, 40), int32(left.X)+290, y, 22, colorAccent)
 	}
 
 	if ui.pcfg.EditingName {
 		r := rl.NewRectangle(left.X+20, left.Y+left.Height-104, left.Width-40, 72)
 		rl.DrawRectangleRounded(r, 0.2, 8, rl.Fade(colorPanel, 0.95))
 		rl.DrawRectangleRoundedLinesEx(r, 0.2, 8, 2, colorAccent)
-		rl.DrawText("Editing Name", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
-		rl.DrawText(truncateForUI(ui.pcfg.NameBuffer, 52)+"_", int32(r.X)+12, int32(r.Y)+34, 24, colorText)
+		drawText("Editing Name", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
+		drawText(truncateForUI(ui.pcfg.NameBuffer, 52)+"_", int32(r.X)+12, int32(r.Y)+34, 24, colorText)
 	}
 
 	detailLines := []string{
@@ -1116,7 +1105,7 @@ func (ui *gameUI) drawPlayerConfig() {
 		"Enter select",
 		"Esc back",
 		"",
-		"Reset personal kit in Kit Picker with R.",
+		"Reset personal kit in Kit Picker with Shift+R.",
 	}
 	drawLines(right, 44, 21, detailLines, colorText)
 }
@@ -1163,7 +1152,7 @@ func (ui *gameUI) updateLoad() {
 		}
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyR) {
+	if ShiftPressedKey(rl.KeyR) {
 		ui.openLoad(ui.load.ReturnToRun)
 		return
 	}
@@ -1214,7 +1203,7 @@ func (ui *gameUI) drawLoad() {
 		if i == ui.load.Cursor {
 			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(filepath.Base(entry.Path), int32(left.X)+20, y, 20, colorText)
+		drawText(filepath.Base(entry.Path), int32(left.X)+20, y, 20, colorText)
 	}
 
 	sel := ui.load.Entries[ui.load.Cursor]
@@ -1233,7 +1222,7 @@ func (ui *gameUI) drawLoad() {
 		"Temp: " + ui.formatTemperature(weather.TemperatureC),
 		"",
 		"Enter to load",
-		"R to refresh",
+		"Shift+R to refresh",
 		"Esc back",
 	}
 	drawLines(right, 48, 22, lines, colorText)
@@ -1245,22 +1234,21 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		return
 	}
 	ui.run.EnsureTopology()
-	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-	if shiftDown && rl.IsKeyPressed(rl.KeyP) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyP) {
 		ui.rplay.Cursor = ui.runFocus
 		ui.screen = screenRunPlayers
 		return
 	}
-	if shiftDown && rl.IsKeyPressed(rl.KeyH) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyH) {
 		ui.screen = screenRunCommandLibrary
 		return
 	}
-	if shiftDown && rl.IsKeyPressed(rl.KeyI) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyI) {
 		ui.rinv.PlayerIndex = ui.runFocus
 		ui.screen = screenRunInventory
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyM) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyM) {
 		ui.screen = screenRunMap
 		return
 	}
@@ -1269,10 +1257,10 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 	}
 	ui.processIntentQueue()
 	if len(ui.run.Players) > 0 {
-		if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRightBracket) {
+		if HotkeysEnabled(ui) && (ShiftPressedKey(rl.KeyTab) || ShiftPressedKey(rl.KeyRightBracket)) {
 			ui.runFocus = wrapIndex(ui.runFocus+1, len(ui.run.Players))
 		}
-		if rl.IsKeyPressed(rl.KeyLeftBracket) {
+		if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyLeftBracket) {
 			ui.runFocus = wrapIndex(ui.runFocus-1, len(ui.run.Players))
 		}
 	} else {
@@ -1296,7 +1284,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.enterMenu()
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyS) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyS) {
 		path := savePathForSlot(1)
 		if err := saveRunToFile(path, *ui.run); err != nil {
 			ui.status = "Save failed: " + err.Error()
@@ -1305,7 +1293,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 			ui.appendRunMessage(ui.status)
 		}
 	}
-	if rl.IsKeyPressed(rl.KeyL) {
+	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyL) {
 		ui.openLoad(true)
 		return
 	}
@@ -1337,60 +1325,60 @@ func (ui *gameUI) drawRun() {
 	}
 	weather := game.WeatherLabel(ui.run.Weather.Type)
 	header := fmt.Sprintf("Mode: %s | Scenario: %s | Day: %d | Season: %s | Weather: %s | Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
-	rl.DrawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, 20, colorAccent)
+	drawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, typeScale.Body, colorAccent)
 	nextIn := ui.autoDayDuration() - ui.runPlayedFor
 	if nextIn < 0 {
 		nextIn = 0
 	}
 	posX, posY := ui.run.CurrentMapPosition()
-	rl.DrawText(fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock()), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+66, 18, colorText)
+	drawText(fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock()), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+66, typeScale.Small, colorText)
 
 	focus := game.PlayerState{}
 	if len(ui.run.Players) > 0 {
 		ui.runFocus = clampInt(ui.runFocus, 0, len(ui.run.Players)-1)
 		focus = ui.run.Players[ui.runFocus]
-		rl.DrawText(fmt.Sprintf("Focus Player: %s (%d/%d) | TAB / [ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+90, 18, colorDim)
+		drawText(fmt.Sprintf("Focus Player: %s (%d/%d) | Shift+Tab / Shift+[ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+90, typeScale.Small, colorDim)
 	}
 
 	barInset := float32(14)
-	barGap := float32(12)
-	row1Y := layout.TopRect.Y + 124
-	row2Y := row1Y + 34
-	row1W := (layout.TopRect.Width - barInset*2 - barGap*3) / 4
-	row2W := (layout.TopRect.Width - barInset*2 - barGap*2) / 3
+	barGap := float32(10)
+	row1Y := layout.TopRect.Y + 118
+	row2Y := row1Y + 44
+	row1W := clampFloat32(layout.TopRect.Width*0.18, 136, 220)
+	row2W := clampFloat32(layout.TopRect.Width*0.18, 136, 220)
 	condition := runConditionScore(focus)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row1Y, row1W, 18), "Condition", condition, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*1, row1Y, row1W, 18), "Energy", focus.Energy, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*2, row1Y, row1W, 18), "Hydration", focus.Hydration, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*3, row1Y, row1W, 18), "Morale", focus.Morale, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row2Y, row2W, 18), "Hunger", focus.Hunger, true)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*1, row2Y, row2W, 18), "Thirst", focus.Thirst, true)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*2, row2Y, row2W, 18), "Fatigue", focus.Fatigue, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row1Y, row1W, 8), "Condition", condition, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*1, row1Y, row1W, 8), "Energy", focus.Energy, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*2, row1Y, row1W, 8), "Hydration", focus.Hydration, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*3, row1Y, row1W, 8), "Morale", focus.Morale, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row2Y, row2W, 8), "Hunger", focus.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*1, row2Y, row2W, 8), "Thirst", focus.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*2, row2Y, row2W, 8), "Fatigue", focus.Fatigue, true)
 
 	drawRunMessageLog(layout.LogRect, ui.runMessages)
 	ui.drawMiniMap(layout.MiniMapRect, false)
 
-	cmdHint := "Commands: next | save | load | menu | hunt/fish | forage | trap | gut | cook | preserve | eat | go   M map  Shift+P players  Shift+H help  Shift+I inventory  Esc menu"
+	cmdHint := "Commands: next | save | load | menu | hunt/fish | forage | trap | gut | cook | preserve | eat | go   Shift+M map  Shift+P players  Shift+H help  Shift+I inventory  Shift+S save  Shift+L load"
 	textY := int32(layout.InputRect.Y) + 18
 	if ui.pendingClarify != nil {
 		clarify := ui.formatClarifyLine()
 		lines := wrapText(clarify, 16, int32(layout.InputRect.Width)-28)
 		for _, line := range lines {
-			rl.DrawText(line, int32(layout.InputRect.X)+14, textY, 16, colorWarn)
+			drawText(line, int32(layout.InputRect.X)+14, textY, 16, colorWarn)
 			textY += 18
 		}
 	}
-	rl.DrawText(cmdHint, int32(layout.InputRect.X)+14, textY, 17, colorDim)
+	drawText(cmdHint, int32(layout.InputRect.X)+14, textY, 17, colorDim)
 	inputY := textY + 22
 	in := strings.TrimSpace(ui.runInput)
 	if in == "" {
-		rl.DrawText("> ", int32(layout.InputRect.X)+14, inputY, 24, colorText)
+		drawText("> ", int32(layout.InputRect.X)+14, inputY, 24, colorText)
 	} else {
-		rl.DrawText("> "+ui.runInput+"_", int32(layout.InputRect.X)+14, inputY, 24, colorAccent)
+		drawText("> "+ui.runInput+"_", int32(layout.InputRect.X)+14, inputY, 24, colorAccent)
 	}
 	if strings.TrimSpace(ui.status) != "" {
 		statusX := int32(layout.InputRect.X + layout.InputRect.Width*0.5)
-		rl.DrawText(ui.status, statusX, inputY, 20, colorWarn)
+		drawText(ui.status, statusX, inputY, 20, colorWarn)
 	}
 }
 
@@ -1402,12 +1390,11 @@ func (ui *gameUI) updateRunPlayers() {
 	if ui.rplay.Cursor < 0 || ui.rplay.Cursor >= len(ui.run.Players) {
 		ui.rplay.Cursor = 0
 	}
-	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		ui.screen = screenRun
 		return
 	}
-	if shiftDown && rl.IsKeyPressed(rl.KeyH) {
+	if ShiftPressedKey(rl.KeyH) {
 		ui.screen = screenRunCommandLibrary
 		return
 	}
@@ -1440,13 +1427,13 @@ func (ui *gameUI) drawRunPlayers() {
 		if i == ui.rplay.Cursor {
 			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 56, rl.Fade(colorAccent, 0.18))
 		}
-		rl.DrawText(fmt.Sprintf("%d. %s", p.ID, p.Name), int32(left.X)+18, y, 20, colorAccent)
+		drawText(fmt.Sprintf("%d. %s", p.ID, p.Name), int32(left.X)+18, y, 20, colorAccent)
 		y += 22
-		rl.DrawText(fmt.Sprintf("E:%d  H2O:%d  M:%d  Hu:%d  Th:%d  Fa:%d  Ail:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments)),
+		drawText(fmt.Sprintf("E:%d  H2O:%d  M:%d  Hu:%d  Th:%d  Fa:%d  Ail:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments)),
 			int32(left.X)+20, y, 17, colorText)
 		y += 34
 	}
-	rl.DrawText("Up/Down move  Shift+H command library  Shift+I inventory  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+	drawText("Up/Down move  Shift+H command library  Shift+I inventory  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
 
 	sel := ui.run.Players[clampInt(ui.rplay.Cursor, 0, len(ui.run.Players)-1)]
 	needs := game.DailyNutritionNeedsForPlayer(sel)
@@ -1467,10 +1454,10 @@ func (ui *gameUI) drawRunPlayers() {
 
 	barY := right.Y + 250
 	barGap := float32(10)
-	barW := right.Width - 30
-	drawRunStatBar(rl.NewRectangle(right.X+14, barY, barW, 16), "Hunger", sel.Hunger, true)
-	drawRunStatBar(rl.NewRectangle(right.X+14, barY+26+barGap, barW, 16), "Thirst", sel.Thirst, true)
-	drawRunStatBar(rl.NewRectangle(right.X+14, barY+52+barGap*2, barW, 16), "Fatigue", sel.Fatigue, true)
+	barW := clampFloat32(right.Width*0.2, 120, 210)
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY, barW, 8), "Hunger", sel.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY+26+barGap, barW, 8), "Thirst", sel.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY+52+barGap*2, barW, 8), "Fatigue", sel.Fatigue, true)
 
 	ailments := "None"
 	if len(sel.Ailments) > 0 {
@@ -1511,8 +1498,7 @@ func (ui *gameUI) updateRunCommandLibrary() {
 		ui.screen = screenRun
 		return
 	}
-	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-	if shiftDown && rl.IsKeyPressed(rl.KeyI) {
+	if ShiftPressedKey(rl.KeyI) {
 		ui.rinv.PlayerIndex = ui.runFocus
 		ui.screen = screenRunInventory
 		return
@@ -1569,8 +1555,9 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"Shift+P  open player UX",
 		"Shift+H  open command library",
 		"Shift+I  open inventory UX",
-		"S         save",
-		"L         load",
+		"Shift+M  open topology map",
+		"Shift+S  save",
+		"Shift+L  load",
 		"Esc       back/menu",
 		"",
 		"Tip:",
@@ -1590,12 +1577,11 @@ func (ui *gameUI) updateRunInventory() {
 		ui.screen = screenRun
 		return
 	}
-	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-	if shiftDown && rl.IsKeyPressed(rl.KeyH) {
+	if ShiftPressedKey(rl.KeyH) {
 		ui.screen = screenRunCommandLibrary
 		return
 	}
-	if shiftDown && rl.IsKeyPressed(rl.KeyP) {
+	if ShiftPressedKey(rl.KeyP) {
 		ui.rplay.Cursor = clampInt(ui.rinv.PlayerIndex, 0, len(ui.run.Players)-1)
 		ui.screen = screenRunPlayers
 		return
@@ -1605,7 +1591,7 @@ func (ui *gameUI) updateRunInventory() {
 		return
 	}
 	ui.rinv.PlayerIndex = clampInt(ui.rinv.PlayerIndex, 0, len(ui.run.Players)-1)
-	if rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyTab) {
+	if rl.IsKeyPressed(rl.KeyDown) || ShiftPressedKey(rl.KeyTab) {
 		ui.rinv.PlayerIndex = wrapIndex(ui.rinv.PlayerIndex+1, len(ui.run.Players))
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
@@ -1666,7 +1652,7 @@ func (ui *gameUI) drawRunInventory() {
 		fmt.Sprintf("Carry stats  Str:%+d End:%+d Agi:%+d", player.Strength, player.Endurance, player.Agility),
 		fmt.Sprintf("Skills  Craft:%d Gather:%d Hunt:%d Fish:%d Forage:%d", player.Crafting, player.Gathering, player.Hunting, player.Fishing, player.Foraging),
 		"",
-		"Up/Down cycle players",
+		"Up/Down or Shift+Tab cycle players",
 		"Shift+P player detail",
 		"Shift+H command library",
 		"Esc back",
@@ -2018,28 +2004,28 @@ func (ui *gameUI) appendRunMessage(message string) {
 }
 
 func drawPanel(rect rl.Rectangle, title string) {
-	rl.DrawRectangleRounded(rect, 0.04, 8, colorPanel)
-	rl.DrawRectangleRoundedLinesEx(rect, 0.04, 8, 2, colorBorder)
-	rl.DrawText(title, int32(rect.X)+12, int32(rect.Y)+8, 20, colorAccent)
+	DrawPanel(rect, title, false)
 }
 
 func drawTextCentered(text string, rect rl.Rectangle, yOffset int32, fontSize int32, clr rl.Color) {
-	width := rl.MeasureText(text, fontSize)
+	width := measureText(text, fontSize)
 	x := int32(rect.X + (rect.Width-float32(width))/2)
-	rl.DrawText(text, x, int32(rect.Y)+yOffset, fontSize, clr)
+	drawText(text, x, int32(rect.Y)+yOffset, fontSize, clr)
 }
 
 func drawWrappedText(text string, rect rl.Rectangle, y int32, size int32, clr rl.Color) {
-	maxWidth := int32(rect.Width) - 26
+	maxWidth := int32(rect.Width - spaceM*2)
 	lines := wrapText(text, size, maxWidth)
+	lineStep := textLineHeight(size)
 	for i, line := range lines {
-		rl.DrawText(line, int32(rect.X)+14, int32(rect.Y)+y+int32(i)*(size+6), size, clr)
+		drawText(line, int32(rect.X+spaceM), int32(rect.Y)+y+int32(i)*lineStep, size, clr)
 	}
 }
 
 func drawLines(rect rl.Rectangle, y int32, size int32, lines []string, clr rl.Color) {
+	lineStep := textLineHeight(size)
 	for i, line := range lines {
-		rl.DrawText(line, int32(rect.X)+14, int32(rect.Y)+y+int32(i)*(size+6), size, clr)
+		drawText(line, int32(rect.X+spaceM), int32(rect.Y)+y+int32(i)*lineStep, size, clr)
 	}
 }
 
@@ -2052,7 +2038,7 @@ func wrapText(text string, size int32, maxWidth int32) []string {
 	current := words[0]
 	for _, word := range words[1:] {
 		candidate := current + " " + word
-		if int32(rl.MeasureText(candidate, size)) <= maxWidth {
+		if measureText(candidate, size) <= maxWidth {
 			current = candidate
 			continue
 		}
@@ -2061,94 +2047,6 @@ func wrapText(text string, size int32, maxWidth int32) []string {
 	}
 	lines = append(lines, current)
 	return lines
-}
-
-func drawPlayerPreview(rect rl.Rectangle, p game.PlayerConfig) {
-	cx := rect.X + rect.Width/2
-	groundY := rect.Y + rect.Height - 70
-
-	heightInches := p.HeightFt*12 + p.HeightIn
-	if heightInches <= 0 {
-		heightInches = 70
-	}
-	heightScale := float32(heightInches) / 70.0
-	if heightScale < 0.76 {
-		heightScale = 0.76
-	}
-	if heightScale > 1.25 {
-		heightScale = 1.25
-	}
-
-	weightScale := float32(p.WeightKg) / 75.0
-	if weightScale < 0.65 {
-		weightScale = 0.65
-	}
-	if weightScale > 1.45 {
-		weightScale = 1.45
-	}
-
-	bodyHeight := 190.0 * heightScale
-	headRadius := 18.0 * (0.9 + (heightScale-1.0)*0.3)
-	shoulderW := 46.0 * weightScale
-	hipW := 34.0 * weightScale
-	torsoH := 72.0 * heightScale
-	legH := 78.0 * heightScale
-	armH := 60.0 * heightScale
-
-	switch p.BodyType {
-	case game.BodyTypeMale:
-		shoulderW *= 1.12
-		hipW *= 0.95
-	case game.BodyTypeFemale:
-		shoulderW *= 0.95
-		hipW *= 1.12
-	}
-
-	topY := groundY - float32(bodyHeight)
-	headY := topY + float32(headRadius)
-	torsoY := headY + float32(headRadius) + 8
-
-	// Back card
-	card := rl.NewRectangle(rect.X+20, rect.Y+40, rect.Width-40, rect.Height-100)
-	rl.DrawRectangleRounded(card, 0.08, 8, rl.Fade(colorBorder, 0.08))
-	rl.DrawRectangleRoundedLinesEx(card, 0.08, 8, 1.2, rl.Fade(colorBorder, 0.55))
-
-	// Head
-	rl.DrawCircle(int32(cx), int32(headY), float32(headRadius), rl.NewColor(46, 220, 120, 255))
-	// Neck
-	rl.DrawRectangle(int32(cx)-6, int32(headY+float32(headRadius)-1), 12, 10, rl.NewColor(35, 192, 104, 255))
-	// Torso
-	torso := rl.NewRectangle(cx-float32(shoulderW)/2, torsoY, float32(shoulderW), float32(torsoH))
-	rl.DrawRectangleRounded(torso, 0.28, 8, rl.NewColor(28, 174, 95, 255))
-
-	// Arms
-	armW := float32(10 * weightScale)
-	if armW < 8 {
-		armW = 8
-	}
-	leftArm := rl.NewRectangle(torso.X-armW+2, torsoY+8, armW, float32(armH))
-	rightArm := rl.NewRectangle(torso.X+torso.Width-2, torsoY+8, armW, float32(armH))
-	rl.DrawRectangleRounded(leftArm, 0.45, 6, rl.NewColor(23, 155, 84, 255))
-	rl.DrawRectangleRounded(rightArm, 0.45, 6, rl.NewColor(23, 155, 84, 255))
-
-	// Hips
-	hips := rl.NewRectangle(cx-float32(hipW)/2, torsoY+float32(torsoH)-4, float32(hipW), 16)
-	rl.DrawRectangleRounded(hips, 0.3, 6, rl.NewColor(21, 145, 79, 255))
-
-	// Legs
-	legGap := float32(8)
-	legW := float32(10 * weightScale)
-	if legW < 8 {
-		legW = 8
-	}
-	leftLeg := rl.NewRectangle(cx-legGap-legW, hips.Y+12, legW, float32(legH))
-	rightLeg := rl.NewRectangle(cx+legGap, hips.Y+12, legW, float32(legH))
-	rl.DrawRectangleRounded(leftLeg, 0.36, 6, rl.NewColor(19, 132, 72, 255))
-	rl.DrawRectangleRounded(rightLeg, 0.36, 6, rl.NewColor(19, 132, 72, 255))
-
-	// Feet shadow
-	rl.DrawEllipse(int32(cx)-16, int32(groundY)+6, 22, 6, rl.Fade(colorBorder, 0.4))
-	rl.DrawEllipse(int32(cx)+16, int32(groundY)+6, 22, 6, rl.Fade(colorBorder, 0.4))
 }
 
 func captureTextInput(target *string, maxLen int) {
@@ -2507,24 +2405,6 @@ func modeLabel(mode game.GameMode) string {
 	}
 }
 
-func indexOfSex(items []game.Sex, target game.Sex) int {
-	for i := range items {
-		if items[i] == target {
-			return i
-		}
-	}
-	return 0
-}
-
-func indexOfBodyType(items []game.BodyType, target game.BodyType) int {
-	for i := range items {
-		if items[i] == target {
-			return i
-		}
-	}
-	return 0
-}
-
 func wrapIndex(i int, size int) int {
 	if size <= 0 {
 		return 0
@@ -2539,6 +2419,16 @@ func wrapIndex(i int, size int) int {
 }
 
 func clampInt(v int, min int, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func clampFloat32(v float32, min float32, max float32) float32 {
 	if v < min {
 		return min
 	}
@@ -2753,38 +2643,11 @@ func drawUILine(x1 float32, y1 float32, x2 float32, y2 float32, thickness float3
 }
 
 func drawRunStatBar(rect rl.Rectangle, label string, value int, danger bool) {
-	v := clampInt(value, 0, 100)
-	fillWidth := (rect.Width - 2) * float32(v) / 100
-	if fillWidth < 0 {
-		fillWidth = 0
-	}
-	rl.DrawText(fmt.Sprintf("%s %d%%", label, v), int32(rect.X)+2, int32(rect.Y)-16, 15, colorText)
-	rl.DrawRectangleRec(rect, rl.NewColor(8, 16, 12, 255))
-	if fillWidth > 0 {
-		fill := rl.NewRectangle(rect.X+1, rect.Y+1, fillWidth, rect.Height-2)
-		rl.DrawRectangleRec(fill, runBarColor(v, danger))
-	}
-	rl.DrawRectangleLinesEx(rect, 1.4, rl.Fade(colorBorder, 0.75))
-}
-
-func runBarColor(value int, danger bool) rl.Color {
-	v := clampInt(value, 0, 100)
+	thresholds := TelemetryThresholds{Warning: 35, Danger: 20, Inverted: false}
 	if danger {
-		if v >= 70 {
-			return rl.NewColor(242, 84, 84, 230)
-		}
-		if v >= 40 {
-			return rl.NewColor(255, 190, 92, 235)
-		}
-		return rl.NewColor(60, 236, 136, 230)
+		thresholds = TelemetryThresholds{Warning: 40, Danger: 70, Inverted: true}
 	}
-	if v >= 70 {
-		return rl.NewColor(60, 236, 136, 230)
-	}
-	if v >= 40 {
-		return rl.NewColor(255, 190, 92, 235)
-	}
-	return rl.NewColor(242, 84, 84, 230)
+	DrawTelemetryBar(label, value, rect, thresholds)
 }
 
 func runConditionScore(player game.PlayerState) int {

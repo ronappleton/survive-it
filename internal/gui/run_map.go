@@ -10,7 +10,7 @@ import (
 
 const (
 	runLogSplitRatio = 0.66
-	runLayoutPadding = 20
+	runLayoutPadding = 16
 )
 
 type runLayout struct {
@@ -46,15 +46,15 @@ func runScreenLayout(width, height int32) runLayout {
 }
 
 func drawRunMessageLog(rect rl.Rectangle, messages []string) {
-	maxWidth := int32(rect.Width) - 28
-	lineHeight := int32(22)
+	maxWidth := int32(rect.Width - spaceM*2)
+	lineHeight := textLineHeight(typeScale.Log)
 	maxLines := int((rect.Height - 52) / float32(lineHeight))
 	if maxLines < 4 {
 		maxLines = 4
 	}
 	flattened := make([]string, 0, maxLines)
 	for i := len(messages) - 1; i >= 0 && len(flattened) < maxLines; i-- {
-		lines := wrapText(messages[i], 17, maxWidth)
+		lines := wrapText(messages[i], typeScale.Log, maxWidth)
 		for j := len(lines) - 1; j >= 0 && len(flattened) < maxLines; j-- {
 			flattened = append(flattened, lines[j])
 		}
@@ -62,7 +62,7 @@ func drawRunMessageLog(rect rl.Rectangle, messages []string) {
 	y := int32(rect.Y+rect.Height) - 26
 	for i := 0; i < len(flattened); i++ {
 		line := flattened[i]
-		rl.DrawText(line, int32(rect.X)+12, y-lineHeight, 17, colorText)
+		drawLogText(line, int32(rect.X+spaceM), y-lineHeight, typeScale.Log, colorText)
 		y -= lineHeight
 		if y < int32(rect.Y)+26 {
 			break
@@ -73,25 +73,25 @@ func drawRunMessageLog(rect rl.Rectangle, messages []string) {
 func topoBiomeColor(b uint8) rl.Color {
 	switch b {
 	case game.TopoBiomeForest:
-		return rl.NewColor(40, 120, 64, 255)
+		return rl.NewColor(71, 106, 88, 255)
 	case game.TopoBiomeGrassland:
-		return rl.NewColor(104, 144, 72, 255)
+		return rl.NewColor(116, 136, 87, 255)
 	case game.TopoBiomeJungle:
-		return rl.NewColor(24, 110, 58, 255)
+		return rl.NewColor(56, 98, 80, 255)
 	case game.TopoBiomeWetland:
-		return rl.NewColor(70, 118, 102, 255)
+		return rl.NewColor(76, 104, 102, 255)
 	case game.TopoBiomeSwamp:
-		return rl.NewColor(60, 92, 70, 255)
+		return rl.NewColor(69, 92, 82, 255)
 	case game.TopoBiomeDesert:
-		return rl.NewColor(178, 154, 88, 255)
+		return rl.NewColor(154, 136, 92, 255)
 	case game.TopoBiomeMountain:
-		return rl.NewColor(128, 128, 138, 255)
+		return rl.NewColor(130, 133, 145, 255)
 	case game.TopoBiomeTundra:
-		return rl.NewColor(158, 172, 178, 255)
+		return rl.NewColor(151, 163, 174, 255)
 	case game.TopoBiomeBoreal:
-		return rl.NewColor(66, 112, 88, 255)
+		return rl.NewColor(74, 110, 97, 255)
 	default:
-		return rl.NewColor(80, 96, 96, 255)
+		return rl.NewColor(96, 105, 110, 255)
 	}
 }
 
@@ -137,13 +137,13 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 			cell := topology.Cells[idx]
 			clr := shadeByElevation(topoBiomeColor(cell.Biome), cell.Elevation)
 			if cell.Flags&game.TopoFlagWater != 0 {
-				clr = rl.NewColor(48, 104, 184, 255)
+				clr = rl.NewColor(76, 116, 156, 255)
 			}
 			if cell.Flags&game.TopoFlagRiver != 0 {
-				clr = rl.NewColor(66, 140, 210, 255)
+				clr = rl.NewColor(95, 141, 185, 255)
 			}
 			if cell.Flags&game.TopoFlagLake != 0 {
-				clr = rl.NewColor(58, 124, 198, 255)
+				clr = rl.NewColor(88, 133, 176, 255)
 			}
 			if cell.Flags&game.TopoFlagCoast != 0 {
 				clr = rl.NewColor(
@@ -154,7 +154,7 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 				)
 			}
 			if ui.run.Config.Mode == game.ModeAlone && !ui.run.IsRevealed(x, y) {
-				clr = rl.NewColor(14, 18, 24, 255)
+				clr = rl.NewColor(20, 24, 30, 255)
 			}
 			x0 := int32(area.X + float32(x)*cellW)
 			y0 := int32(area.Y + float32(y)*cellH)
@@ -165,7 +165,7 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 			rl.DrawRectangle(x0, y0, int32(w), int32(h), clr)
 		}
 	}
-	rl.DrawRectangleLinesEx(area, 1.2, rl.Fade(colorBorder, 0.8))
+	rl.DrawRectangleLinesEx(area, 1.0, rl.Fade(colorBorder, 0.8))
 
 	px, py := ui.run.CurrentMapPosition()
 	if px >= 0 && py >= 0 && px < topology.Width && py < topology.Height {
@@ -184,7 +184,7 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 	if withLegend {
 		legendX := int32(rect.X + rect.Width - 162)
 		legendY := int32(rect.Y + 40)
-		rl.DrawText("Legend", legendX, legendY, 18, colorAccent)
+		drawText("Legend", legendX, legendY, typeScale.Body, colorAccent)
 		legendY += 24
 		legendRows := []struct {
 			Label string
@@ -195,13 +195,13 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 			{Label: "Mountain", Color: topoBiomeColor(game.TopoBiomeMountain)},
 			{Label: "Desert", Color: topoBiomeColor(game.TopoBiomeDesert)},
 			{Label: "Wetland/Jungle", Color: topoBiomeColor(game.TopoBiomeWetland)},
-			{Label: "Water/River", Color: rl.NewColor(58, 124, 198, 255)},
+			{Label: "Water/River", Color: rl.NewColor(88, 133, 176, 255)},
 			{Label: "Player", Color: rl.NewColor(255, 88, 88, 255)},
 		}
 		for _, row := range legendRows {
 			rl.DrawRectangle(legendX, legendY+2, 14, 14, row.Color)
 			rl.DrawRectangleLines(legendX, legendY+2, 14, 14, rl.Fade(colorBorder, 0.8))
-			rl.DrawText(row.Label, legendX+20, legendY, 15, colorText)
+			drawText(row.Label, legendX+20, legendY, typeScale.Small, colorText)
 			legendY += 20
 		}
 		modeLine := "Fog: off"
@@ -209,9 +209,9 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 			modeLine = "Fog: on (permanent reveal)"
 		}
 		legendY += 8
-		rl.DrawText(modeLine, legendX, legendY, 14, colorDim)
+		drawText(modeLine, legendX, legendY, typeScale.Small-1, colorDim)
 		legendY += 18
-		rl.DrawText(fmt.Sprintf("Grid: %dx%d", topology.Width, topology.Height), legendX, legendY, 14, colorDim)
+		drawText(fmt.Sprintf("Grid: %dx%d", topology.Width, topology.Height), legendX, legendY, typeScale.Small-1, colorDim)
 	}
 }
 
@@ -222,7 +222,7 @@ func (ui *gameUI) drawMiniMap(rect rl.Rectangle, withLegend bool) {
 	}
 	posX, posY := ui.run.CurrentMapPosition()
 	footer := fmt.Sprintf("Cell (%d,%d) | %.1fkm moved", posX, posY, ui.run.Travel.TotalKm)
-	rl.DrawText(footer, int32(rect.X)+12, int32(rect.Y+rect.Height)-20, 15, colorDim)
+	drawText(footer, int32(rect.X+spaceM), int32(rect.Y+rect.Height)-20, typeScale.Small, colorDim)
 }
 
 func (ui *gameUI) updateRunMap() {
@@ -230,7 +230,7 @@ func (ui *gameUI) updateRunMap() {
 		ui.screen = screenRun
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyM) || rl.IsKeyPressed(rl.KeyEscape) {
+	if ShiftPressedKey(rl.KeyM) || rl.IsKeyPressed(rl.KeyEscape) {
 		ui.screen = screenRun
 		return
 	}
@@ -244,5 +244,5 @@ func (ui *gameUI) drawRunMap() {
 	panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 	drawPanel(panel, "Topology Map")
 	ui.drawTopologyMap(panel, true)
-	rl.DrawText("M or Esc to return", int32(panel.X)+14, int32(panel.Y+panel.Height)-24, 17, colorDim)
+	drawText("Shift+M or Esc to return", int32(panel.X+spaceM), int32(panel.Y+panel.Height)-24, typeScale.Small, colorDim)
 }

@@ -231,7 +231,7 @@ func (ui *gameUI) updateKitPicker() {
 			ui.kit.ItemIdx = wrapIndex(ui.kit.ItemIdx+1, len(currentItems))
 		}
 	}
-	if rl.IsKeyPressed(rl.KeyR) {
+	if ShiftPressedKey(rl.KeyR) {
 		switch ui.kit.Target {
 		case kitTargetPersonal:
 			if len(ui.pcfg.Players) > 0 {
@@ -336,7 +336,7 @@ func (ui *gameUI) drawKitPicker() {
 		selectedCount = len(ui.setup.IssuedKit)
 		subtitle = fmt.Sprintf("Issued Kit (%s)", modeLabel(ui.selectedMode()))
 	}
-	rl.DrawText(subtitle, int32(outer.X)+14, int32(outer.Y)-2, 18, colorDim)
+	drawText(subtitle, int32(outer.X)+14, int32(outer.Y)-2, 18, colorDim)
 
 	cy := int32(left.Y) + 48
 	for i, category := range categories {
@@ -351,7 +351,7 @@ func (ui *gameUI) drawKitPicker() {
 		if i == ui.kit.CategoryIdx && ui.kit.Focus == kitFocusCategories {
 			clr = colorAccent
 		}
-		rl.DrawText(label, int32(left.X)+16, cy, 18, clr)
+		drawText(label, int32(left.X)+16, cy, 18, clr)
 		cy += 30
 	}
 
@@ -372,7 +372,7 @@ func (ui *gameUI) drawKitPicker() {
 		if i == ui.kit.ItemIdx && ui.kit.Focus == kitFocusItems {
 			clr = colorAccent
 		}
-		rl.DrawText(prefix+string(item), int32(mid.X)+16, iy, 18, clr)
+		drawText(prefix+string(item), int32(mid.X)+16, iy, 18, clr)
 		iy += 30
 	}
 
@@ -403,16 +403,16 @@ func (ui *gameUI) drawKitPicker() {
 		selectedLines = append(selectedLines, kitItemFlavorText(activeItem))
 	}
 	if ui.kit.Target == kitTargetIssued {
-		selectedLines = append(selectedLines, "", "R resets to recommendation")
+		selectedLines = append(selectedLines, "", "Shift+R resets to recommendation")
 	} else {
-		selectedLines = append(selectedLines, "", "R resets personal kit")
+		selectedLines = append(selectedLines, "", "Shift+R resets personal kit")
 	}
 	drawLines(right, 44, 18, selectedLines, colorText)
 
-	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  R reset  Esc back"
-	rl.DrawText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30, 17, colorDim)
+	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  Shift+R reset  Esc back"
+	drawText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30, 17, colorDim)
 	if strings.TrimSpace(ui.status) != "" {
-		rl.DrawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, 17, colorWarn)
+		drawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, 17, colorWarn)
 	}
 }
 
@@ -706,17 +706,17 @@ func (ui *gameUI) drawScenarioBuilder() {
 		}
 		value := row.value
 		value = truncateForUI(value, maxValueChars)
-		rl.DrawText(row.label, labelX, y, 19, colorText)
-		rl.DrawText(value, valueX, y, 19, colorAccent)
+		drawText(row.label, labelX, y, 19, colorText)
+		drawText(value, valueX, y, 19, colorAccent)
 		y += 34
 	}
-	rl.DrawText("Left/Right change mode/player count/location/biome/days/map size", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
-	rl.DrawText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
+	drawText("Left/Right change mode/player count/location/biome/days/map size", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
+	drawText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
 
 	list := ui.scenarioBuilderEntriesForMode(mode)
 	ly := int32(right.Y) + 52
 	if len(list) == 0 {
-		rl.DrawText("No scenarios for this mode yet.", int32(right.X)+14, ly, 20, colorWarn)
+		drawText("No scenarios for this mode yet.", int32(right.X)+14, ly, 20, colorWarn)
 	} else {
 		for i, entry := range list {
 			if ly > int32(right.Y+right.Height)-48 {
@@ -735,7 +735,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 			if ui.sb.PickingScenario && i == ui.sb.ListCursor {
 				clr = colorAccent
 			}
-			rl.DrawText(truncateForUI(line, int((right.Width-36)/8)), int32(right.X)+16, ly, 19, clr)
+			drawText(truncateForUI(line, int((right.Width-36)/8)), int32(right.X)+16, ly, 19, clr)
 			ly += 34
 		}
 		sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)].Scenario
@@ -751,18 +751,18 @@ func (ui *gameUI) drawScenarioBuilder() {
 		drawWrappedText("Description: "+safeText(sel.Description), right, int32(right.Height)-90, 18, colorDim)
 	}
 	if ui.sb.PickingScenario {
-		rl.DrawText("Right pane browse active: Up/Down scroll, Enter confirm, Esc cancel", int32(right.X)+14, int32(right.Y+right.Height)-20, 17, colorAccent)
+		drawText("Right pane browse active: Up/Down scroll, Enter confirm, Esc cancel", int32(right.X)+14, int32(right.Y+right.Height)-20, 17, colorAccent)
 	}
 
 	if ui.sb.EditingRow >= 0 {
 		r := rl.NewRectangle(left.X+18, left.Y+left.Height-138, left.Width-36, 110)
 		rl.DrawRectangleRounded(r, 0.16, 8, rl.Fade(colorPanel, 0.96))
 		rl.DrawRectangleRoundedLinesEx(r, 0.16, 8, 2, colorAccent)
-		rl.DrawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
+		drawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
 		drawWrappedText(ui.sb.EditBuffer+"_", r, 40, 21, colorText)
 	}
 	if strings.TrimSpace(ui.sb.Status) != "" {
-		rl.DrawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-20, 17, colorWarn)
+		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-20, 17, colorWarn)
 	}
 }
 
@@ -1328,13 +1328,13 @@ func (ui *gameUI) drawPhaseEditor() {
 		if !row.Active {
 			clr = colorDim
 		}
-		rl.DrawText(row.Label, int32(left.X)+18, y, 20, clr)
+		drawText(row.Label, int32(left.X)+18, y, 20, clr)
 		if strings.TrimSpace(row.Value) != "" {
-			rl.DrawText(row.Value, int32(left.X)+220, y, 20, colorAccent)
+			drawText(row.Value, int32(left.X)+220, y, 20, colorAccent)
 		}
 		y += 40
 	}
-	rl.DrawText("Up/Down move  Left/Right season  Enter select  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+	drawText("Up/Down move  Left/Right season  Enter select  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
 
 	setIdx := ui.scenarioDefaultSeasonSetIndex()
 	lines := []string{
@@ -1357,6 +1357,6 @@ func (ui *gameUI) drawPhaseEditor() {
 	drawLines(right, 44, 20, lines, colorText)
 
 	if strings.TrimSpace(ui.sb.Status) != "" {
-		rl.DrawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-52, 17, colorWarn)
+		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-52, 17, colorWarn)
 	}
 }
