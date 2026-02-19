@@ -81,13 +81,18 @@ jobs:
           cache: false
 
       - name: Import Apple Developer certificate (optional)
-        if: ${{ steps.already.outputs.already == 'false' && secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' }}
+        if: steps.already.outputs.already == 'false'
         shell: bash
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           set -euo pipefail
+          if [[ -z "${MACOS_CERT_P12_BASE64:-}" || -z "${MACOS_CERT_PASSWORD:-}" ]]; then
+            echo "Signing certificate secrets not set; skipping certificate import."
+            exit 0
+          fi
+
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 18)"
           CERT_PATH="$RUNNER_TEMP/macos-signing-cert.p12"
