@@ -1338,7 +1338,7 @@ func (ui *gameUI) drawRun() {
 	drawPanel(layout.TopRect, "Run Status")
 	drawPanel(layout.LogRect, "Message Log")
 	drawPanel(layout.MiniMapRect, "Minimap")
-	drawPanel(layout.InputRect, "Command Input")
+	drawPanel(layout.InputRect, "")
 
 	focus := game.PlayerState{}
 	if len(ui.run.Players) > 0 {
@@ -1444,7 +1444,7 @@ func (ui *gameUI) drawRun() {
 	drawRunMessageLog(layout.LogRect, ui.runMessages)
 	ui.drawMiniMap(layout.MiniMapRect, false)
 
-	cmdHint := "Commands: next | save | load | menu | hunt/fish | forage | trap | gut | cook | preserve | eat | go   Shift+M map  Shift+P players  Shift+H help  Shift+I inventory  Shift+S save  Shift+L load"
+	cmdHint := "Shortcuts: Shift+M map  Shift+P players  Shift+H help  Shift+I inventory  Shift+S save  Shift+L load"
 	textY := int32(layout.InputRect.Y) + 18
 	if ui.pendingClarify != nil {
 		clarify := ui.formatClarifyLine()
