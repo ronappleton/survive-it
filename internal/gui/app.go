@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/appengine-ltd/survive-it/internal/game"
+	"github.com/appengine-ltd/survive-it/internal/update"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -39,6 +40,7 @@ const (
 	screenPlayerConfig
 	screenKitPicker
 	screenScenarioBuilder
+	screenOptions
 	screenLoad
 	screenRun
 )
@@ -49,6 +51,8 @@ const (
 	actionStart menuAction = iota
 	actionLoad
 	actionScenarioBuilder
+	actionOptions
+	actionInstallUpdate
 	actionQuit
 )
 
@@ -63,6 +67,18 @@ type setupState struct {
 	ScenarioIndex int
 	PlayerCount   int
 	RunDays       int
+}
+
+type temperatureUnit int
+
+const (
+	tempUnitC temperatureUnit = iota
+	tempUnitF
+)
+
+type optionsState struct {
+	Cursor   int
+	TempUnit temperatureUnit
 }
 
 type playerConfigState struct {
@@ -94,6 +110,13 @@ type savedRun struct {
 	Run           game.RunState `json:"run"`
 }
 
+type updateResult struct {
+	status    string
+	available bool
+	err       error
+	apply     bool
+}
+
 type gameUI struct {
 	cfg AppConfig
 
@@ -106,6 +129,7 @@ type gameUI struct {
 	menuCursor int
 
 	setup           setupState
+	opts            optionsState
 	pick            scenarioPickerState
 	pcfg            playerConfigState
 	kit             kitPickerState
@@ -118,6 +142,12 @@ type gameUI struct {
 	runInput    string
 	status      string
 	runFocus    int
+
+	updateAvailable      bool
+	updateBusy           bool
+	updateStatus         string
+	menuNeedsUpdateCheck bool
+	updateResultCh       chan updateResult
 
 	lastTick     time.Time
 	runPlayedFor time.Duration
@@ -151,6 +181,13 @@ func newGameUI(cfg AppConfig) *gameUI {
 			PlayerCount: 1,
 			RunDays:     30,
 		},
+		opts: optionsState{
+			TempUnit: tempUnitC,
+		},
+		updateResultCh: make(chan updateResult, 4),
+	}
+	if !cfg.NoUpdate {
+		ui.menuNeedsUpdateCheck = true
 	}
 	custom, _ := loadCustomScenarios(defaultCustomScenariosFile)
 	ui.customScenarios = custom
@@ -193,6 +230,8 @@ func (ui *gameUI) Run() error {
 }
 
 func (ui *gameUI) update(delta time.Duration) {
+	ui.pollUpdateResult()
+
 	switch ui.screen {
 	case screenMenu:
 		ui.updateMenu()
@@ -206,6 +245,8 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updateKitPicker()
 	case screenScenarioBuilder:
 		ui.updateScenarioBuilder()
+	case screenOptions:
+		ui.updateOptions()
 	case screenLoad:
 		ui.updateLoad()
 	case screenRun:
@@ -227,6 +268,8 @@ func (ui *gameUI) draw() {
 		ui.drawKitPicker()
 	case screenScenarioBuilder:
 		ui.drawScenarioBuilder()
+	case screenOptions:
+		ui.drawOptions()
 	case screenLoad:
 		ui.drawLoad()
 	case screenRun:
@@ -235,6 +278,11 @@ func (ui *gameUI) draw() {
 }
 
 func (ui *gameUI) updateMenu() {
+	if ui.menuNeedsUpdateCheck {
+		ui.menuNeedsUpdateCheck = false
+		ui.triggerUpdateCheck()
+	}
+
 	items := ui.menuItems()
 	if rl.IsKeyPressed(rl.KeyDown) {
 		ui.menuCursor = wrapIndex(ui.menuCursor+1, len(items))
@@ -253,6 +301,10 @@ func (ui *gameUI) updateMenu() {
 			ui.openLoad(false)
 		case actionScenarioBuilder:
 			ui.openScenarioBuilder()
+		case actionOptions:
+			ui.screen = screenOptions
+		case actionInstallUpdate:
+			ui.triggerApplyUpdate()
 		case actionQuit:
 			ui.quit = true
 		}
@@ -265,12 +317,28 @@ func (ui *gameUI) updateMenu() {
 func (ui *gameUI) drawMenu() {
 	titleRect := rl.NewRectangle(20, 20, float32(ui.width-40), 120)
 	drawPanel(titleRect, "SURVIVE IT")
-	drawTextCentered("raylib-go Edition", titleRect, 34, 40, colorAccent)
-	drawTextCentered(fmt.Sprintf("v%s (%s) %s", ui.cfg.Version, ui.cfg.Commit, ui.cfg.BuildDate), titleRect, 62, 18, colorDim)
+	drawTextCentered(fmt.Sprintf("v%s (%s) %s", ui.cfg.Version, ui.cfg.Commit, ui.cfg.BuildDate), titleRect, 42, 18, colorDim)
+	if ui.updateBusy {
+		status := strings.TrimSpace(ui.updateStatus)
+		if status == "" {
+			status = "Checking for updates..."
+		}
+		drawTextCentered(status, titleRect, 72, 17, colorText)
+	} else if ui.updateAvailable && strings.TrimSpace(ui.updateStatus) != "" {
+		drawTextCentered(ui.updateStatus, titleRect, 72, 17, colorAccent)
+	}
 
-	menuRect := rl.NewRectangle(float32(ui.width/2-230), 185, 460, 380)
-	drawPanel(menuRect, "Main Menu")
 	items := ui.menuItems()
+	menuHeight := float32(150 + len(items)*72)
+	if menuHeight < 420 {
+		menuHeight = 420
+	}
+	maxHeight := float32(ui.height) - 220
+	if menuHeight > maxHeight {
+		menuHeight = maxHeight
+	}
+	menuRect := rl.NewRectangle(float32(ui.width/2-230), 185, 460, menuHeight)
+	drawPanel(menuRect, "Main Menu")
 	for i, item := range items {
 		y := int32(menuRect.Y) + 70 + int32(i*72)
 		r := rl.NewRectangle(menuRect.X+36, float32(y), menuRect.Width-72, 52)
@@ -290,17 +358,171 @@ func (ui *gameUI) drawMenu() {
 }
 
 func (ui *gameUI) menuItems() []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		{Label: "Start Run", Action: actionStart},
 		{Label: "Load Run", Action: actionLoad},
 		{Label: "Scenario Builder", Action: actionScenarioBuilder},
-		{Label: "Quit", Action: actionQuit},
+		{Label: "Options", Action: actionOptions},
 	}
+	if ui.updateAvailable && !ui.cfg.NoUpdate {
+		items = append(items, menuItem{Label: "Install Update", Action: actionInstallUpdate})
+	}
+	items = append(items, menuItem{Label: "Quit", Action: actionQuit})
+	return items
+}
+
+func (ui *gameUI) enterMenu() {
+	ui.screen = screenMenu
+	ui.menuNeedsUpdateCheck = !ui.cfg.NoUpdate
+}
+
+func (ui *gameUI) triggerUpdateCheck() {
+	if ui.cfg.NoUpdate || ui.updateBusy {
+		return
+	}
+	ui.updateBusy = true
+	ui.updateStatus = "Checking for updates..."
+	currentVersion := ui.cfg.Version
+	go func() {
+		res, err := update.Check(update.CheckParams{
+			CurrentVersion: currentVersion,
+		})
+		available := strings.HasPrefix(res, "Update available:")
+		ui.updateResultCh <- updateResult{
+			status:    res,
+			available: available,
+			err:       err,
+		}
+	}()
+}
+
+func (ui *gameUI) triggerApplyUpdate() {
+	if ui.cfg.NoUpdate || ui.updateBusy {
+		return
+	}
+	ui.updateBusy = true
+	ui.updateStatus = "Downloading update..."
+	currentVersion := ui.cfg.Version
+	go func() {
+		res, err := update.Apply(currentVersion)
+		available := strings.HasPrefix(res, "Update available:")
+		ui.updateResultCh <- updateResult{
+			status:    res,
+			available: available,
+			err:       err,
+			apply:     true,
+		}
+	}()
+}
+
+func (ui *gameUI) pollUpdateResult() {
+	for {
+		select {
+		case result := <-ui.updateResultCh:
+			ui.updateBusy = false
+			if result.err != nil {
+				ui.updateStatus = "Update failed: " + result.err.Error()
+				if !result.apply {
+					ui.updateAvailable = false
+				}
+				continue
+			}
+			ui.updateStatus = strings.TrimSpace(result.status)
+			ui.updateAvailable = result.available
+			if ui.updateAvailable {
+				ui.updateStatus = strings.Replace(ui.updateStatus, "Run update to install.", "Select Install Update from menu.", 1)
+			}
+			if result.apply && ui.updateStatus == "" {
+				ui.updateStatus = "Update applied."
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (ui *gameUI) updateOptions() {
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		ui.enterMenu()
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyDown) {
+		ui.opts.Cursor = wrapIndex(ui.opts.Cursor+1, 3)
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		ui.opts.Cursor = wrapIndex(ui.opts.Cursor-1, 3)
+	}
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		ui.adjustOptions(-1)
+	}
+	if rl.IsKeyPressed(rl.KeyRight) {
+		ui.adjustOptions(1)
+	}
+	if rl.IsKeyPressed(rl.KeyEnter) {
+		switch ui.opts.Cursor {
+		case 0, 1:
+			ui.adjustOptions(1)
+		case 2:
+			ui.enterMenu()
+		}
+	}
+}
+
+func (ui *gameUI) adjustOptions(delta int) {
+	switch ui.opts.Cursor {
+	case 0:
+		if ui.opts.TempUnit == tempUnitC {
+			ui.opts.TempUnit = tempUnitF
+		} else {
+			ui.opts.TempUnit = tempUnitC
+		}
+	case 1:
+		ui.autoDayHours = clampInt(ui.autoDayHours+delta, 1, 24)
+	}
+}
+
+func (ui *gameUI) drawOptions() {
+	left := rl.NewRectangle(20, 20, float32(ui.width)*0.45, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	drawPanel(left, "Options")
+	drawPanel(right, "Preview")
+
+	rows := []struct {
+		label string
+		value string
+	}{
+		{"Temperature Unit", temperatureUnitLabel(ui.opts.TempUnit)},
+		{"Game Hours Per Day", fmt.Sprintf("%d", ui.autoDayHours)},
+		{"Back", "Enter"},
+	}
+	for i, row := range rows {
+		y := int32(left.Y) + 62 + int32(i*56)
+		if i == ui.opts.Cursor {
+			rl.DrawRectangle(int32(left.X)+16, y-8, int32(left.Width)-32, 42, rl.Fade(colorAccent, 0.2))
+		}
+		rl.DrawText(row.label, int32(left.X)+26, y, 24, colorText)
+		rl.DrawText(row.value, int32(left.X)+286, y, 24, colorAccent)
+	}
+	rl.DrawText("Left/Right adjust values, Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+
+	exampleC := 7
+	exampleF := celsiusToFahrenheit(exampleC)
+	lines := []string{
+		"Current Settings",
+		"",
+		"Temperature Unit: " + temperatureUnitLabel(ui.opts.TempUnit),
+		"Game Hours Per Day: " + fmt.Sprintf("%d", ui.autoDayHours),
+		"",
+		"Temperature Example:",
+		fmt.Sprintf("%dC = %dF", exampleC, exampleF),
+		"Displayed as: " + ui.formatTemperature(exampleC),
+	}
+	drawLines(right, 46, 22, lines, colorText)
 }
 
 func (ui *gameUI) updateSetup() {
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.screen = screenMenu
+		ui.enterMenu()
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
@@ -328,7 +550,7 @@ func (ui *gameUI) updateSetup() {
 		case 5:
 			ui.openScenarioBuilder()
 		case 6:
-			ui.screen = screenMenu
+			ui.enterMenu()
 		}
 	}
 }
@@ -389,7 +611,7 @@ func (ui *gameUI) drawSetup() {
 	drawWrappedText("Daunting: "+safeText(s.Daunting), right, 232, 20, colorWarn)
 	drawWrappedText("Motivation: "+safeText(s.Motivation), right, 366, 20, colorAccent)
 	tr := game.TemperatureRangeForBiome(s.Biome)
-	drawWrappedText(fmt.Sprintf("Temperature Range: %dC to %dC", tr.MinC, tr.MaxC), right, 496, 20, colorText)
+	drawWrappedText("Temperature Range: "+ui.formatTemperatureRange(tr.MinC, tr.MaxC), right, 496, 20, colorText)
 	wildlife := game.WildlifeForBiome(s.Biome)
 	drawWrappedText("Wildlife: "+strings.Join(wildlife, ", "), right, 540, 20, colorDim)
 }
@@ -651,7 +873,7 @@ func (ui *gameUI) updateLoad() {
 		if ui.load.ReturnToRun && ui.run != nil {
 			ui.screen = screenRun
 		} else {
-			ui.screen = screenMenu
+			ui.enterMenu()
 		}
 		return
 	}
@@ -719,7 +941,7 @@ func (ui *gameUI) drawLoad() {
 		fmt.Sprintf("Day: %d", run.Day),
 		fmt.Sprintf("Players: %d", len(run.Players)),
 		fmt.Sprintf("Weather: %s", weatherLabel),
-		fmt.Sprintf("Temp: %dC", weather.TemperatureC),
+		"Temp: " + ui.formatTemperature(weather.TemperatureC),
 		"",
 		"Enter to load",
 		"R to refresh",
@@ -730,7 +952,7 @@ func (ui *gameUI) drawLoad() {
 
 func (ui *gameUI) updateRun(delta time.Duration) {
 	if ui.run == nil {
-		ui.screen = screenMenu
+		ui.enterMenu()
 		return
 	}
 	if len(ui.run.Players) > 0 {
@@ -753,12 +975,12 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.run.ApplyRealtimeMetabolism(ui.runPlayedFor, dayDuration)
 		if ui.run.Day != prevDay {
 			weather := game.WeatherLabel(ui.run.Weather.Type)
-			ui.appendRunMessage(fmt.Sprintf("Day %d started | Weather: %s | Temp: %dC", ui.run.Day, weather, ui.run.Weather.TemperatureC))
+			ui.appendRunMessage(fmt.Sprintf("Day %d started | Weather: %s | Temp: %s", ui.run.Day, weather, ui.formatTemperature(ui.run.Weather.TemperatureC)))
 		}
 	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.screen = screenMenu
+		ui.enterMenu()
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyS) {
@@ -831,7 +1053,7 @@ func (ui *gameUI) drawRun() {
 		season = string(s)
 	}
 	weather := game.WeatherLabel(ui.run.Weather.Type)
-	header := fmt.Sprintf("SURVIVE IT!   Mode: %s   Scenario: %s   Day: %d   Season: %s   Weather: %s   Temp: %dC", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.run.Weather.TemperatureC)
+	header := fmt.Sprintf("SURVIVE IT!   Mode: %s   Scenario: %s   Day: %d   Season: %s   Weather: %s   Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
 	rl.DrawText(header, int32(top.X)+14, int32(top.Y)+38, 21, colorAccent)
 	nextIn := ui.autoDayDuration() - ui.runPlayedFor
 	if nextIn < 0 {
@@ -946,7 +1168,7 @@ func (ui *gameUI) submitRunInput() {
 		ui.openLoad(true)
 		return
 	case "menu", "back":
-		ui.screen = screenMenu
+		ui.enterMenu()
 		return
 	}
 
@@ -1394,6 +1616,31 @@ func safeText(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func temperatureUnitLabel(unit temperatureUnit) string {
+	if unit == tempUnitF {
+		return "Fahrenheit"
+	}
+	return "Celsius"
+}
+
+func celsiusToFahrenheit(c int) int {
+	return int(math.Round(float64(c)*9.0/5.0 + 32.0))
+}
+
+func (ui *gameUI) formatTemperature(c int) string {
+	if ui.opts.TempUnit == tempUnitF {
+		return fmt.Sprintf("%dF", celsiusToFahrenheit(c))
+	}
+	return fmt.Sprintf("%dC", c)
+}
+
+func (ui *gameUI) formatTemperatureRange(minC int, maxC int) string {
+	if ui.opts.TempUnit == tempUnitF {
+		return fmt.Sprintf("%dF to %dF", celsiusToFahrenheit(minC), celsiusToFahrenheit(maxC))
+	}
+	return fmt.Sprintf("%dC to %dC", minC, maxC)
 }
 
 func (ui *gameUI) autoDayDuration() time.Duration {

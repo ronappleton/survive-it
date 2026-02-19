@@ -201,7 +201,7 @@ func (ui *gameUI) updateScenarioBuilder() {
 	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.screen = screenMenu
+		ui.enterMenu()
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
@@ -227,7 +227,7 @@ func (ui *gameUI) updateScenarioBuilder() {
 		case 9:
 			ui.deleteSelectedCustomScenario()
 		case 10:
-			ui.screen = screenMenu
+			ui.enterMenu()
 		}
 	}
 }
