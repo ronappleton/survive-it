@@ -44,8 +44,10 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
 		}
+	case "hunt", "catch":
+		return s.executeHuntCommand(fields[1:])
 	case "forage":
 		return s.executeForageCommand(fields[1:])
 	case "trees":
@@ -201,6 +203,53 @@ func (s *RunState) executeUseCommand(fields []string) RunCommandResult {
 	}
 	msg += specialMsg
 	return RunCommandResult{Handled: true, Message: msg}
+}
+
+func (s *RunState) executeHuntCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: hunt <land|fish|air> [p#]"}
+	}
+	playerID := 1
+	domain := AnimalDomainLand
+	foundDomain := false
+	for _, token := range fields {
+		if parsed := parsePlayerToken(token); parsed > 0 {
+			playerID = parsed
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(token)) {
+		case "land":
+			domain = AnimalDomainLand
+			foundDomain = true
+		case "fish", "water":
+			domain = AnimalDomainWater
+			foundDomain = true
+		case "air", "bird":
+			domain = AnimalDomainAir
+			foundDomain = true
+		case "raw", "liver":
+			// Legacy tokens from auto-consume flow; intentionally ignored.
+			continue
+		default:
+			if _, err := strconv.ParseFloat(token, 64); err == nil {
+				continue
+			}
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Unknown hunt option: %s", token)}
+		}
+	}
+	if !foundDomain {
+		return RunCommandResult{Handled: true, Message: "Usage: hunt <land|fish|air> [p#]"}
+	}
+	result, err := s.HuntAndCollectCarcass(playerID, domain)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Hunt failed: %v", err)}
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d hunted %s (%.1fkg) -> %.1fkg %s stored in %s. Process with: gut %s [kg] p%d",
+			playerID, result.AnimalName, float64(result.WeightGrams)/1000.0, result.CarcassKg, result.CarcassID, result.StoredAt, result.CarcassID, playerID),
+	}
 }
 
 func (s *RunState) executeForageCommand(fields []string) RunCommandResult {

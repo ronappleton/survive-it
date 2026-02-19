@@ -217,6 +217,83 @@ func TestRunCatchAndConsumeFlow(t *testing.T) {
 	}
 }
 
+func TestRunHuntCommandCollectsCarcassWithoutAutoConsume(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        223,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	beforeCalories := run.Players[0].Nutrition.CaloriesKcal
+
+	res := run.ExecuteRunCommand("hunt land p1")
+	if !res.Handled {
+		t.Fatalf("expected hunt command handled")
+	}
+	if res.HoursAdvanced <= 0 {
+		t.Fatalf("expected hunt command to advance time")
+	}
+	if !strings.Contains(strings.ToLower(res.Message), "carcass") {
+		t.Fatalf("expected carcass in hunt message, got: %s", res.Message)
+	}
+	personalKg := inventoryTotalQtyByID(run.Players[0].PersonalItems, "small_game_carcass")
+	campKg := inventoryTotalQtyByID(run.CampInventory, "small_game_carcass")
+	if personalKg+campKg <= 0 {
+		t.Fatalf("expected land carcass in inventory after hunt")
+	}
+	if run.Players[0].Nutrition.CaloriesKcal != beforeCalories {
+		t.Fatalf("expected no auto-consumption from hunt command")
+	}
+}
+
+func TestRunCatchAliasCollectsBirdCarcass(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        224,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+
+	res := run.ExecuteRunCommand("catch air p1")
+	if !res.Handled {
+		t.Fatalf("expected catch alias command handled")
+	}
+	personalKg := inventoryTotalQtyByID(run.Players[0].PersonalItems, "bird_carcass")
+	campKg := inventoryTotalQtyByID(run.CampInventory, "bird_carcass")
+	if personalKg+campKg <= 0 {
+		t.Fatalf("expected bird carcass in inventory after catch alias, msg=%s", res.Message)
+	}
+}
+
+func TestRunHuntLegacyMealTokensAreIgnored(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        225,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+
+	res := run.ExecuteRunCommand("hunt air raw liver p1 300")
+	if !res.Handled {
+		t.Fatalf("expected legacy hunt tokens to still be handled")
+	}
+	if !strings.Contains(strings.ToLower(res.Message), "carcass") {
+		t.Fatalf("expected carcass result message, got: %s", res.Message)
+	}
+}
+
 func TestExpandedAnimalCatalogIncludesRequestedSpeciesAndFishDepth(t *testing.T) {
 	catalog := AnimalCatalog()
 	ids := map[string]bool{}

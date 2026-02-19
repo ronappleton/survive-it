@@ -1556,7 +1556,7 @@ func (ui *gameUI) drawRunPlayers() {
 	drawWrappedText("Ailments: "+ailments, right, 360, 18, colorWarn)
 	drawWrappedText("Personal Kit: "+personalKit, right, 430, 18, colorText)
 	drawWrappedText("Issued Kit: "+issuedKit, right, 500, 18, colorDim)
-	drawWrappedText(fmt.Sprintf("Try: actions p%d   |   hunt fish p%d 300", sel.ID, sel.ID), right, int32(right.Height)-44, 17, colorDim)
+	drawWrappedText(fmt.Sprintf("Try: actions p%d   |   hunt fish p%d", sel.ID, sel.ID), right, int32(right.Height)-44, 17, colorDim)
 }
 
 func (ui *gameUI) updateRunCommandLibrary() {
@@ -1588,9 +1588,7 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"menu",
 		"",
 		"Hunting:",
-		"hunt land [raw] [liver] [p#] [grams]",
-		"hunt fish [raw] [liver] [p#] [grams]",
-		"hunt air [raw] [liver] [p#] [grams]",
+		"hunt land|fish|air [p#]",
 		"forage [roots|berries|fruits|vegetables|any] [p#] [grams]",
 		"",
 		"Camp Systems:",
@@ -1775,12 +1773,6 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 		return
 	case "menu", "back":
 		ui.enterMenu()
-		ui.updateLastEntityFromIntent(intent, true)
-		return
-	}
-
-	if strings.HasPrefix(command, "hunt") || strings.HasPrefix(command, "catch") {
-		ui.handleHuntCommand(command)
 		ui.updateLastEntityFromIntent(intent, true)
 		return
 	}
@@ -2013,73 +2005,6 @@ func (ui *gameUI) submitRunInput() {
 		return
 	}
 	ui.status = "Command queue unavailable."
-}
-
-func (ui *gameUI) handleHuntCommand(command string) {
-	if ui.run == nil {
-		return
-	}
-	fields := strings.Fields(command)
-	domain := game.AnimalDomainLand
-	choice := game.MealChoice{PortionGrams: 300, Cooked: true, EatLiver: false}
-	playerID := 1
-	for _, field := range fields[1:] {
-		switch field {
-		case "land":
-			domain = game.AnimalDomainLand
-		case "fish":
-			domain = game.AnimalDomainWater
-		case "air", "bird":
-			domain = game.AnimalDomainAir
-		case "raw":
-			choice.Cooked = false
-		case "liver":
-			choice.EatLiver = true
-		default:
-			if strings.HasPrefix(field, "p") {
-				if id, err := strconv.Atoi(strings.TrimPrefix(field, "p")); err == nil && id > 0 {
-					playerID = id
-				}
-				continue
-			}
-			if grams, err := strconv.Atoi(field); err == nil && grams > 0 {
-				choice.PortionGrams = grams
-			}
-		}
-	}
-
-	catch, outcome, err := ui.run.CatchAndConsume(playerID, domain, choice)
-	if err != nil {
-		ui.status = "Hunt failed: " + err.Error()
-		return
-	}
-	prep := "cooked"
-	if !choice.Cooked {
-		prep = "raw"
-	}
-	msg := fmt.Sprintf("P%d ate %dg %s (%s, %dg caught): +%dE +%dH2O +%dM | %dkcal %dgP %dgF %dgS",
-		outcome.PlayerID,
-		outcome.PortionGrams,
-		catch.Animal.Name,
-		prep,
-		catch.WeightGrams,
-		outcome.EnergyDelta,
-		outcome.HydrationDelta,
-		outcome.MoraleDelta,
-		outcome.Nutrition.CaloriesKcal,
-		outcome.Nutrition.ProteinG,
-		outcome.Nutrition.FatG,
-		outcome.Nutrition.SugarG,
-	)
-	if len(outcome.DiseaseEvents) > 0 {
-		parts := make([]string, 0, len(outcome.DiseaseEvents))
-		for _, event := range outcome.DiseaseEvents {
-			parts = append(parts, event.Ailment.Name)
-		}
-		msg += " | illness risk triggered: " + strings.Join(parts, ", ")
-	}
-	ui.status = ""
-	ui.appendRunMessage(msg)
 }
 
 func (ui *gameUI) openLoad(returnToRun bool) {
