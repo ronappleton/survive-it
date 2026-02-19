@@ -1167,6 +1167,7 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.appendRunMessage(fmt.Sprintf("Mode: %s | Scenario: %s | Players: %d", modeLabel(run.Config.Mode), run.Scenario.Name, len(run.Players)))
 	ui.appendRunMessage(fmt.Sprintf("Issued kit assigned: %s", kitSummary(issuedKit, 0)))
 	ui.screen = screenRun
+	ui.syncRunPlayedForToMetabolism()
 }
 
 func (ui *gameUI) updateLoad() {
@@ -1210,6 +1211,7 @@ func (ui *gameUI) updateLoad() {
 		ui.runMessages = nil
 		ui.appendRunMessage("Loaded " + filepath.Base(entry.Path))
 		ui.screen = screenRun
+		ui.syncRunPlayedForToMetabolism()
 	}
 }
 
@@ -1841,7 +1843,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 	switch verb {
 	case "next":
 		ui.run.AdvanceDay()
-		ui.runPlayedFor = 0
+		ui.syncRunPlayedForToMetabolism()
 		ui.status = ""
 	case "save":
 		path := savePathForSlot(1)
@@ -1865,6 +1867,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 
 	res := ui.run.ExecuteRunCommand(command)
 	if res.Handled {
+		ui.syncRunPlayedForToMetabolism()
 		ui.status = ""
 		ui.appendRunMessage(res.Message)
 		if res.HoursAdvanced > 0 {
@@ -2882,6 +2885,24 @@ func (ui *gameUI) autoDayDuration() time.Duration {
 		h = 2
 	}
 	return time.Duration(h) * time.Hour
+}
+
+func (ui *gameUI) syncRunPlayedForToMetabolism() {
+	if ui == nil || ui.run == nil {
+		return
+	}
+	dayDuration := ui.autoDayDuration()
+	if dayDuration <= 0 {
+		return
+	}
+	progress := ui.run.MetabolismProgress
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	ui.runPlayedFor = time.Duration(float64(dayDuration) * progress)
 }
 
 func formatClockDuration(d time.Duration) string {
