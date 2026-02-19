@@ -30,11 +30,22 @@ func BuiltInScenarios() []Scenario {
 	}
 
 	build := func(id ScenarioID, mode GameMode, name, biome, desc, daunting, motivation string, days int, kit IssuedKit, set SeasonSet) Scenario {
+		mapW, mapH := defaultTopologySizeForMode(mode)
+		switch mode {
+		case ModeNakedAndAfraid:
+			mapW, mapH = 100, 100
+		case ModeNakedAndAfraidXL:
+			mapW, mapH = 125, 125
+		case ModeAlone:
+			mapW, mapH = 36, 36
+		}
 		return Scenario{
 			ID:                 id,
 			Name:               name,
 			Location:           inferScenarioLocation(name),
 			Biome:              biome,
+			MapWidthCells:      mapW,
+			MapHeightCells:     mapH,
 			Description:        desc,
 			Daunting:           daunting,
 			Motivation:         motivation,

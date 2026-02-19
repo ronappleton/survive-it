@@ -76,15 +76,45 @@ func (s *RunState) CurrentTimeBlock() TimeBlock {
 	}
 }
 
-func topologySizeForMode(mode GameMode) (int, int) {
+func defaultTopologySizeForMode(mode GameMode) (int, int) {
 	switch mode {
 	case ModeAlone:
 		return 36, 36
-	case ModeNakedAndAfraid, ModeNakedAndAfraidXL:
+	case ModeNakedAndAfraid:
+		return 100, 100
+	case ModeNakedAndAfraidXL:
 		return 125, 125
 	default:
 		return 72, 72
 	}
+}
+
+func clampTopologySize(mode GameMode, width, height int) (int, int) {
+	if width <= 0 || height <= 0 {
+		return defaultTopologySizeForMode(mode)
+	}
+	switch mode {
+	case ModeAlone:
+		width = clamp(width, 28, 46)
+		height = clamp(height, 28, 46)
+	case ModeNakedAndAfraid:
+		width = clamp(width, 88, 125)
+		height = clamp(height, 88, 125)
+	case ModeNakedAndAfraidXL:
+		width = clamp(width, 100, 150)
+		height = clamp(height, 100, 150)
+	default:
+		width = clamp(width, 50, 140)
+		height = clamp(height, 50, 140)
+	}
+	return width, height
+}
+
+func topologySizeForScenario(mode GameMode, scenario Scenario) (int, int) {
+	if scenario.MapWidthCells > 0 && scenario.MapHeightCells > 0 {
+		return clampTopologySize(mode, scenario.MapWidthCells, scenario.MapHeightCells)
+	}
+	return defaultTopologySizeForMode(mode)
 }
 
 func (s *RunState) EnsureTopology() {
@@ -114,7 +144,7 @@ func (s *RunState) initTopology() {
 	if s == nil {
 		return
 	}
-	w, h := topologySizeForMode(s.Config.Mode)
+	w, h := topologySizeForScenario(s.Config.Mode, s.Scenario)
 	topology := GenerateWorldTopology(s.Config.Seed, s.Scenario.Biome, w, h)
 	s.Topology = topology
 	s.CellStates = make([]CellState, len(topology.Cells))

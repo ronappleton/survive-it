@@ -118,6 +118,19 @@ func normalizeScenarioForMode(s *game.Scenario, mode game.GameMode) {
 	if s.DefaultDays <= 0 {
 		s.DefaultDays = defaultRunDaysForMode(mode)
 	}
+	if s.MapWidthCells <= 0 || s.MapHeightCells <= 0 {
+		switch mode {
+		case game.ModeAlone:
+			s.MapWidthCells, s.MapHeightCells = 36, 36
+		case game.ModeNakedAndAfraid:
+			s.MapWidthCells, s.MapHeightCells = 100, 100
+		case game.ModeNakedAndAfraidXL:
+			s.MapWidthCells, s.MapHeightCells = 125, 125
+		default:
+			s.MapWidthCells, s.MapHeightCells = 72, 72
+		}
+	}
+	s.MapWidthCells, s.MapHeightCells = clampScenarioMapSize(mode, s.MapWidthCells, s.MapHeightCells)
 	if len(s.SupportedModes) == 0 {
 		s.SupportedModes = []game.GameMode{mode}
 	} else {

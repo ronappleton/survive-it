@@ -555,10 +555,10 @@ func (ui *gameUI) updateScenarioBuilder() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 17)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 19)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 17)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 19)
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		ui.adjustScenarioBuilder(-1)
@@ -570,26 +570,26 @@ func (ui *gameUI) updateScenarioBuilder() {
 		switch ui.sb.Cursor {
 		case 3, 6, 7, 8:
 			ui.startScenarioEdit(ui.sb.Cursor)
-		case 10:
+		case 12:
 			ui.openPhaseEditor()
-		case 11:
+		case 13:
 			ui.setup.ModeIndex = ui.sb.ModeIndex
 			ui.ensureSetupPlayers()
 			ui.openStatsBuilder(screenScenarioBuilder)
-		case 12:
+		case 14:
 			ui.setup.ModeIndex = ui.sb.ModeIndex
 			ui.ensureSetupPlayers()
 			ui.preparePlayerConfig()
 			ui.pcfg.ReturnTo = screenScenarioBuilder
 			ui.screen = screenPlayerConfig
-		case 13:
+		case 15:
 			ui.sb.PickingScenario = true
 			ui.loadSelectedScenario()
-		case 14:
-			ui.saveScenarioFromBuilder()
-		case 15:
-			ui.deleteSelectedCustomScenario()
 		case 16:
+			ui.saveScenarioFromBuilder()
+		case 17:
+			ui.deleteSelectedCustomScenario()
+		case 18:
 			ui.enterMenu()
 		}
 	}
@@ -639,6 +639,12 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 		}
 	case 9:
 		ui.sb.Scenario.DefaultDays = clampInt(ui.sb.Scenario.DefaultDays+delta*3, 1, 365)
+	case 10:
+		ui.sb.Scenario.MapWidthCells += delta * 2
+		ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells = clampScenarioMapSize(modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)], ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells)
+	case 11:
+		ui.sb.Scenario.MapHeightCells += delta * 2
+		ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells = clampScenarioMapSize(modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)], ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells)
 	}
 	ui.setup.ModeIndex = ui.sb.ModeIndex
 	ui.ensureScenarioSeasonSet()
@@ -679,6 +685,8 @@ func (ui *gameUI) drawScenarioBuilder() {
 		{"Daunting", ui.sb.Scenario.Daunting},
 		{"Motivation", ui.sb.Scenario.Motivation},
 		{"Default Days", fmt.Sprintf("%d", ui.sb.Scenario.DefaultDays)},
+		{"Map Width (cells)", fmt.Sprintf("%d", ui.sb.Scenario.MapWidthCells)},
+		{"Map Height (cells)", fmt.Sprintf("%d", ui.sb.Scenario.MapHeightCells)},
 		{"Phase Builder", fmt.Sprintf("%d phase(s)", ui.scenarioPhaseCount())},
 		{"Player Stats Builder", "Enter"},
 		{"Player Editor", "Enter"},
@@ -702,7 +710,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 		rl.DrawText(value, valueX, y, 19, colorAccent)
 		y += 34
 	}
-	rl.DrawText("Left/Right change mode/player count/location/biome/days", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
+	rl.DrawText("Left/Right change mode/player count/location/biome/days/map size", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
 	rl.DrawText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
 
 	list := ui.scenarioBuilderEntriesForMode(mode)
@@ -722,7 +730,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 				source = "Custom"
 			}
 			s := entry.Scenario
-			line := fmt.Sprintf("%s [%s]  (%s, %s, %dd)", s.Name, source, s.Location, s.Biome, s.DefaultDays)
+			line := fmt.Sprintf("%s [%s]  (%s, %s, %dd, %dx%d)", s.Name, source, s.Location, s.Biome, s.DefaultDays, s.MapWidthCells, s.MapHeightCells)
 			clr := colorText
 			if ui.sb.PickingScenario && i == ui.sb.ListCursor {
 				clr = colorAccent
@@ -887,6 +895,7 @@ func (ui *gameUI) loadSelectedScenario() {
 	ui.sb.SourceID = sel.Scenario.ID
 	ui.sb.SourceName = sel.Scenario.Name
 	ui.sb.SourceCustom = sel.Custom
+	ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells = clampScenarioMapSize(mode, ui.sb.Scenario.MapWidthCells, ui.sb.Scenario.MapHeightCells)
 	ui.ensureScenarioSeasonSet()
 	if sel.Custom {
 		ui.sb.Status = "Loaded custom scenario into editor"
@@ -918,6 +927,7 @@ func (ui *gameUI) saveScenarioFromBuilder() {
 	if scenario.DefaultDays <= 0 {
 		scenario.DefaultDays = 30
 	}
+	scenario.MapWidthCells, scenario.MapHeightCells = clampScenarioMapSize(mode, scenario.MapWidthCells, scenario.MapHeightCells)
 	normalizeScenarioForMode(&scenario, mode)
 
 	editingBuiltIn := ui.sb.SourceID != "" && !ui.sb.SourceCustom
@@ -961,6 +971,39 @@ func (ui *gameUI) saveScenarioFromBuilder() {
 	ui.sb.SourceID = scenario.ID
 	ui.sb.SourceName = scenario.Name
 	ui.sb.SourceCustom = true
+}
+
+func clampScenarioMapSize(mode game.GameMode, width, height int) (int, int) {
+	defaultW, defaultH := 72, 72
+	switch mode {
+	case game.ModeAlone:
+		defaultW, defaultH = 36, 36
+	case game.ModeNakedAndAfraid:
+		defaultW, defaultH = 100, 100
+	case game.ModeNakedAndAfraidXL:
+		defaultW, defaultH = 125, 125
+	}
+	if width <= 0 {
+		width = defaultW
+	}
+	if height <= 0 {
+		height = defaultH
+	}
+	switch mode {
+	case game.ModeAlone:
+		width = clampInt(width, 28, 46)
+		height = clampInt(height, 28, 46)
+	case game.ModeNakedAndAfraid:
+		width = clampInt(width, 88, 125)
+		height = clampInt(height, 88, 125)
+	case game.ModeNakedAndAfraidXL:
+		width = clampInt(width, 100, 150)
+		height = clampInt(height, 100, 150)
+	default:
+		width = clampInt(width, 50, 140)
+		height = clampInt(height, 50, 140)
+	}
+	return width, height
 }
 
 func (ui *gameUI) deleteSelectedCustomScenario() {

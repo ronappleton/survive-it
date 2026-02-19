@@ -5,6 +5,8 @@ type Scenario struct {
 	Name               string
 	Location           string
 	Biome              string
+	MapWidthCells      int
+	MapHeightCells     int
 	Wildlife           []string
 	Description        string
 	Daunting           string

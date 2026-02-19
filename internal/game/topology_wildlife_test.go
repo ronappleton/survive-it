@@ -95,3 +95,78 @@ func TestHuntPressureReducesPreyEncounterRate(t *testing.T) {
 		t.Fatalf("expected high hunt pressure to reduce prey encounters, low=%d high=%d", low, high)
 	}
 }
+
+func TestTopologySizeForScenarioUsesScenarioConfig(t *testing.T) {
+	w, h := topologySizeForScenario(ModeNakedAndAfraid, Scenario{
+		MapWidthCells:  92,
+		MapHeightCells: 101,
+	})
+	if w != 92 || h != 101 {
+		t.Fatalf("expected explicit scenario size to be used, got %dx%d", w, h)
+	}
+}
+
+func TestTopologySizeForScenarioClampsByMode(t *testing.T) {
+	w, h := topologySizeForScenario(ModeAlone, Scenario{
+		MapWidthCells:  500,
+		MapHeightCells: 9,
+	})
+	if w != 46 || h != 28 {
+		t.Fatalf("expected alone clamp to 46x28, got %dx%d", w, h)
+	}
+}
+
+func TestSwampBiomeProducesMoreInsectEncountersThanDesert(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 30},
+		Seed:        5101,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+
+	cells := make([]TopoCell, 9)
+	for i := range cells {
+		cells[i] = TopoCell{
+			Biome: TopoBiomeForest,
+		}
+	}
+	run.Topology = WorldTopology{
+		Width:  3,
+		Height: 3,
+		Cells:  cells,
+	}
+	run.CellStates = make([]CellState, 9)
+	run.FogMask = make([]bool, 9)
+	run.Travel.PosX = 1
+	run.Travel.PosY = 1
+	run.ClockHours = 19.5 // dusk
+	run.Day = 4
+
+	idx, ok := run.topoIndex(1, 1)
+	if !ok {
+		t.Fatalf("expected center topology index")
+	}
+
+	countInsects := func(biome uint8) int {
+		run.Topology.Cells[idx] = TopoCell{Biome: biome}
+		run.CellStates[idx] = CellState{}
+		hits := 0
+		for i := 0; i < 900; i++ {
+			ev, ok := run.RollWildlifeEncounter(1, 1, 1, "forage", i)
+			if ok && ev.Channel == "insect" {
+				hits++
+			}
+		}
+		return hits
+	}
+
+	desert := countInsects(TopoBiomeDesert)
+	swamp := countInsects(TopoBiomeSwamp)
+	if swamp <= desert {
+		t.Fatalf("expected swamp to produce more insect encounters than desert, desert=%d swamp=%d", desert, swamp)
+	}
+}
