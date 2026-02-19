@@ -50,6 +50,15 @@ func TestBuiltInScenariosAreValid(t *testing.T) {
 		if scenario.DefaultSeasonSetID == "" {
 			t.Fatalf("scenario %s must have a default season set", scenario.ID)
 		}
+		if scenario.LocationMeta != nil {
+			if scenario.LocationMeta.ProfileID == "" {
+				t.Fatalf("scenario %s has LocationMeta but empty ProfileID", scenario.ID)
+			}
+			bb := scenario.LocationMeta.BBox
+			if bb[0] >= bb[2] || bb[1] >= bb[3] {
+				t.Fatalf("scenario %s has invalid bbox: %+v", scenario.ID, bb)
+			}
+		}
 	}
 
 	for mode, count := range modeCount {

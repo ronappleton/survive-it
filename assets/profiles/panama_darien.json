@@ -1,0 +1,15 @@
+{
+  "id": "panama_darien",
+  "name": "Panama Survival (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -30.891,
+  "elev_p50": 0.813,
+  "elev_p90": 11.563,
+  "slope_p50": 0.887,
+  "slope_p90": 4.173,
+  "ruggedness": 2.4,
+  "river_density": 0.0606,
+  "lake_coverage": 0.014,
+  "notes": "Derived from 34x34 elevation samples in bbox [-79.0000, 7.2000, -77.2000, 9.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

@@ -39,10 +39,15 @@ func BuiltInScenarios() []Scenario {
 		case ModeAlone:
 			mapW, mapH = 36, 36
 		}
+		loc := builtInScenarioLocationMeta(id)
+		if loc != nil && strings.TrimSpace(loc.Name) == "" {
+			loc.Name = name
+		}
 		return Scenario{
 			ID:                 id,
 			Name:               name,
 			Location:           inferScenarioLocation(name),
+			LocationMeta:       loc,
 			Biome:              biome,
 			MapWidthCells:      mapW,
 			MapHeightCells:     mapH,
@@ -122,6 +127,153 @@ func BuiltInScenarios() []Scenario {
 		build("naaxl_montana_frozen_14", ModeNakedAndAfraidXL, "NAA XL Frozen Montana (14)", "cold_mountain",
 			"Frozen-team variant emphasizing cold-weather survival execution.", "Cold stress compounds quickly when calories run thin.", "Operate cleanly under pressure and conquer the freeze.", 14, IssuedKit{}, winterSeasons),
 	}
+}
+
+var builtInLocationMetaByScenarioID = map[ScenarioID]ScenarioLocation{
+	ScenarioVancouverIslandID: {
+		Name:      "Vancouver Island",
+		BBox:      [4]float64{-128.5, 48.2, -123.0, 50.9},
+		ProfileID: "vancouver_island",
+	},
+	"patagonia_argentina": {
+		Name:      "Patagonia (Argentina)",
+		BBox:      [4]float64{-72.5, -51.5, -67.0, -46.0},
+		ProfileID: "patagonia_argentina",
+	},
+	"mongolia_khentii": {
+		Name:      "Khentii Mountains (Mongolia)",
+		BBox:      [4]float64{107.0, 47.0, 111.8, 50.2},
+		ProfileID: "khentii_mountains",
+	},
+	"great_slave_lake_100": {
+		Name:      "Great Slave Lake (Canada)",
+		BBox:      [4]float64{-117.5, 60.5, -108.0, 63.2},
+		ProfileID: "great_slave_lake",
+	},
+	"great_slave_lake_365": {
+		Name:      "Great Slave Lake (Canada)",
+		BBox:      [4]float64{-117.5, 60.5, -108.0, 63.2},
+		ProfileID: "great_slave_lake",
+	},
+	"chilko_lake_bc": {
+		Name:      "Chilko Lake (British Columbia)",
+		BBox:      [4]float64{-125.5, 50.8, -123.4, 52.5},
+		ProfileID: "chilko_lake",
+	},
+	"labrador_coast": {
+		Name:      "Labrador Coast (Canada)",
+		BBox:      [4]float64{-61.8, 52.5, -55.0, 57.0},
+		ProfileID: "labrador_coast",
+	},
+	"reindeer_lake": {
+		Name:      "Reindeer Lake (Saskatchewan)",
+		BBox:      [4]float64{-104.7, 55.0, -101.0, 58.8},
+		ProfileID: "reindeer_lake",
+	},
+	"mackenzie_delta": {
+		Name:      "Mackenzie River Delta (NWT)",
+		BBox:      [4]float64{-137.8, 67.1, -132.0, 70.0},
+		ProfileID: "mackenzie_delta",
+	},
+	"naa_panama": {
+		Name:      "Panama Survival (NAA)",
+		BBox:      [4]float64{-79.0, 7.2, -77.2, 9.2},
+		ProfileID: "panama_darien",
+	},
+	"naa_costa_rica": {
+		Name:      "Costa Rica Jungle (NAA)",
+		BBox:      [4]float64{-85.8, 9.0, -82.6, 11.2},
+		ProfileID: "costa_rica_jungle",
+	},
+	"naa_tanzania": {
+		Name:      "Tanzania Savanna (NAA)",
+		BBox:      [4]float64{33.0, -3.5, 35.6, -1.2},
+		ProfileID: "tanzania_savanna",
+	},
+	"naa_namibia": {
+		Name:      "Namib Desert (NAA)",
+		BBox:      [4]float64{14.0, -25.5, 16.8, -22.0},
+		ProfileID: "namib_desert",
+	},
+	"naa_nicaragua": {
+		Name:      "Nicaragua Jungle (NAA)",
+		BBox:      [4]float64{-86.8, 10.8, -83.5, 13.2},
+		ProfileID: "nicaragua_jungle",
+	},
+	"naa_colombia": {
+		Name:      "Colombia Jungle (NAA)",
+		BBox:      [4]float64{-75.5, 0.5, -72.0, 3.5},
+		ProfileID: "colombia_jungle",
+	},
+	"naa_mexico_yucatan": {
+		Name:      "Yucatan (NAA)",
+		BBox:      [4]float64{-90.8, 18.4, -87.2, 21.8},
+		ProfileID: "yucatan_dry_forest",
+	},
+	"naa_florida_everglades": {
+		Name:      "Florida Everglades (NAA)",
+		BBox:      [4]float64{-81.7, 24.8, -80.0, 26.5},
+		ProfileID: "florida_everglades",
+	},
+	"naa_louisiana_swamp": {
+		Name:      "Louisiana Swamp (NAA)",
+		BBox:      [4]float64{-92.2, 29.0, -89.0, 31.2},
+		ProfileID: "louisiana_swamp",
+	},
+	"naa_philippines": {
+		Name:      "Philippines Island (NAA)",
+		BBox:      [4]float64{120.3, 13.0, 123.5, 15.8},
+		ProfileID: "philippines_island",
+	},
+	"naa_alaska": {
+		Name:      "Alaska Cold Region (NAA)",
+		BBox:      [4]float64{-153.0, 63.0, -147.0, 67.0},
+		ProfileID: "alaska_cold_region",
+	},
+	"naaxl_colombia_40": {
+		Name:      "NAA XL Colombia (40)",
+		BBox:      [4]float64{-75.8, 1.0, -72.5, 4.0},
+		ProfileID: "colombia_jungle",
+	},
+	"naaxl_south_africa_40": {
+		Name:      "NAA XL South Africa (40)",
+		BBox:      [4]float64{23.0, -26.7, 27.0, -23.0},
+		ProfileID: "south_africa_savanna",
+	},
+	"naaxl_ecuador_40": {
+		Name:      "NAA XL Ecuador (40)",
+		BBox:      [4]float64{-78.9, -2.4, -76.0, 0.7},
+		ProfileID: "ecuador_jungle",
+	},
+	"naaxl_nicaragua_40": {
+		Name:      "NAA XL Nicaragua (40)",
+		BBox:      [4]float64{-86.8, 10.8, -83.5, 13.2},
+		ProfileID: "nicaragua_jungle",
+	},
+	"naaxl_philippines_40": {
+		Name:      "NAA XL Philippines (40)",
+		BBox:      [4]float64{120.3, 13.0, 123.5, 15.8},
+		ProfileID: "philippines_island",
+	},
+	"naaxl_louisiana_60": {
+		Name:      "NAA XL Louisiana (60)",
+		BBox:      [4]float64{-92.2, 29.0, -89.0, 31.2},
+		ProfileID: "louisiana_swamp",
+	},
+	"naaxl_montana_frozen_14": {
+		Name:      "NAA XL Frozen Montana (14)",
+		BBox:      [4]float64{-113.0, 45.6, -109.7, 48.0},
+		ProfileID: "montana_frozen",
+	},
+}
+
+func builtInScenarioLocationMeta(id ScenarioID) *ScenarioLocation {
+	loc, ok := builtInLocationMetaByScenarioID[id]
+	if !ok {
+		return nil
+	}
+	copyLoc := loc
+	return &copyLoc
 }
 
 func inferScenarioLocation(name string) string {

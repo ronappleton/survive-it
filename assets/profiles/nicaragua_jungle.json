@@ -1,0 +1,15 @@
+{
+  "id": "nicaragua_jungle",
+  "name": "Nicaragua Jungle (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -1.173,
+  "elev_p50": 1.6,
+  "elev_p90": 11.363,
+  "slope_p50": 0.267,
+  "slope_p90": 1.239,
+  "ruggedness": 1.1992,
+  "river_density": 0.0631,
+  "lake_coverage": 0.0202,
+  "notes": "Derived from 34x34 elevation samples in bbox [-86.8000, 10.8000, -83.5000, 13.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "montana_frozen",
+  "name": "NAA XL Frozen Montana (14)",
+  "cell_meters": 100,
+  "elev_p10": 25.888,
+  "elev_p50": 37.363,
+  "elev_p90": 51.313,
+  "slope_p50": 1.089,
+  "slope_p90": 2.679,
+  "ruggedness": 1.7864,
+  "river_density": 0.0606,
+  "lake_coverage": 0.0343,
+  "notes": "Derived from 34x34 elevation samples in bbox [-113.0000, 45.6000, -109.7000, 48.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

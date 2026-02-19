@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Encounter rolls are deterministic and hash-seeded by seed/cell/day/time/action/roll index.
+// - Tables are channel-based (mammal/bird/fish/insect) and already modulated by pressure/disturbance.
+// - Wiring species IDs to AnimalCatalog keeps encounters consistent with expanded content registries.
 type WildlifeEncounter struct {
 	Channel        string
 	Species        string
@@ -18,11 +22,13 @@ type WildlifeEncounter struct {
 }
 
 type encounterSpecies struct {
+	AnimalID  string
 	Name      string
 	Weight    int
 	Prey      bool
 	Predator  bool
 	Scavenger bool
+	Nocturnal bool
 }
 
 const (
@@ -66,100 +72,198 @@ func pickWeightedIndex(seed int64, x, y, day int, block TimeBlock, action string
 	return -1
 }
 
+func wildlifeNameByID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return ""
+	}
+	for _, animal := range AnimalCatalog() {
+		if animal.ID == id {
+			return animal.Name
+		}
+	}
+	return ""
+}
+
+func speciesEntry(id string, weight int, prey bool, predator bool, scavenger bool, nocturnal bool) encounterSpecies {
+	name := wildlifeNameByID(id)
+	if name == "" {
+		name = strings.ReplaceAll(id, "_", " ")
+	}
+	return encounterSpecies{
+		AnimalID:  id,
+		Name:      name,
+		Weight:    weight,
+		Prey:      prey,
+		Predator:  predator,
+		Scavenger: scavenger,
+		Nocturnal: nocturnal,
+	}
+}
+
 func biomeEncounterList(biome uint8, channel string) []encounterSpecies {
 	switch channel {
 	case "mammal":
 		switch biome {
 		case TopoBiomeDesert:
 			return []encounterSpecies{
-				{Name: "rabbit", Weight: 30, Prey: true},
-				{Name: "lizard", Weight: 28, Prey: true},
-				{Name: "fox", Weight: 14, Predator: true},
-				{Name: "coyote", Weight: 10, Predator: true},
+				speciesEntry("rabbit", 24, true, false, false, true),
+				speciesEntry("kangaroo", 12, true, false, false, false),
+				speciesEntry("camel", 6, true, false, false, false),
+				speciesEntry("iguana", 14, true, false, false, true),
+				speciesEntry("monitor_lizard", 10, false, true, false, true),
+				speciesEntry("fox", 10, false, true, true, true),
+				speciesEntry("coyote", 12, false, true, true, true),
+				speciesEntry("jackal", 9, false, true, true, true),
 			}
 		case TopoBiomeJungle, TopoBiomeSwamp:
 			return []encounterSpecies{
-				{Name: "boar", Weight: 22, Prey: true},
-				{Name: "small deer", Weight: 18, Prey: true},
-				{Name: "monkey", Weight: 14, Prey: true},
-				{Name: "jaguar sign", Weight: 9, Predator: true},
-				{Name: "wild dog pack", Weight: 8, Predator: true},
+				speciesEntry("boar", 18, true, false, false, false),
+				speciesEntry("deer", 14, true, false, false, false),
+				speciesEntry("capybara", 16, true, false, false, false),
+				speciesEntry("muskrat", 14, true, false, false, true),
+				speciesEntry("alligator", 9, false, true, false, true),
+				speciesEntry("caiman", 8, false, true, false, true),
+				speciesEntry("crocodile", 6, false, true, false, true),
+				speciesEntry("jaguar", 8, false, true, false, true),
+				speciesEntry("python", 7, false, true, false, true),
 			}
 		case TopoBiomeTundra, TopoBiomeBoreal:
 			return []encounterSpecies{
-				{Name: "hare", Weight: 30, Prey: true},
-				{Name: "caribou sign", Weight: 16, Prey: true},
-				{Name: "fox", Weight: 13, Predator: true},
-				{Name: "wolf", Weight: 11, Predator: true},
+				speciesEntry("rabbit", 20, true, false, false, true),
+				speciesEntry("caribou", 14, true, false, false, false),
+				speciesEntry("moose", 8, true, false, false, false),
+				speciesEntry("beaver", 8, true, false, false, true),
+				speciesEntry("fox", 11, false, true, true, true),
+				speciesEntry("wolf", 12, false, true, false, true),
+				speciesEntry("brown_bear", 7, false, true, true, true),
 			}
 		case TopoBiomeMountain:
 			return []encounterSpecies{
-				{Name: "goat sign", Weight: 20, Prey: true},
-				{Name: "hare", Weight: 20, Prey: true},
-				{Name: "cougar sign", Weight: 10, Predator: true},
-				{Name: "wolf", Weight: 8, Predator: true},
+				speciesEntry("mountain_goat", 16, true, false, false, false),
+				speciesEntry("deer", 14, true, false, false, false),
+				speciesEntry("elk", 10, true, false, false, false),
+				speciesEntry("rabbit", 16, true, false, false, true),
+				speciesEntry("cougar", 10, false, true, false, true),
+				speciesEntry("wolf", 8, false, true, false, true),
+				speciesEntry("black_bear", 7, false, true, true, true),
 			}
 		default:
 			return []encounterSpecies{
-				{Name: "rabbit", Weight: 28, Prey: true},
-				{Name: "deer sign", Weight: 22, Prey: true},
-				{Name: "wild pig", Weight: 14, Prey: true},
-				{Name: "coyote", Weight: 10, Predator: true},
-				{Name: "wolf", Weight: 8, Predator: true},
+				speciesEntry("rabbit", 22, true, false, false, true),
+				speciesEntry("deer", 18, true, false, false, false),
+				speciesEntry("boar", 12, true, false, false, false),
+				speciesEntry("beaver", 8, true, false, false, true),
+				speciesEntry("coyote", 10, false, true, true, true),
+				speciesEntry("wolf", 8, false, true, false, true),
+				speciesEntry("black_bear", 7, false, true, true, true),
 			}
 		}
 	case "bird":
 		switch biome {
 		case TopoBiomeWetland, TopoBiomeSwamp:
 			return []encounterSpecies{
-				{Name: "duck", Weight: 26, Prey: true},
-				{Name: "heron", Weight: 18, Prey: true},
-				{Name: "crow", Weight: 16, Scavenger: true},
-				{Name: "vulture", Weight: 10, Scavenger: true},
+				speciesEntry("duck", 22, true, false, false, false),
+				speciesEntry("heron", 14, true, false, false, false),
+				speciesEntry("egret", 12, true, false, false, false),
+				speciesEntry("goose", 10, true, false, false, false),
+				speciesEntry("crow", 12, false, false, true, false),
+				speciesEntry("raven", 8, false, false, true, false),
+				speciesEntry("kingfisher", 10, true, false, false, false),
 			}
 		case TopoBiomeDesert:
 			return []encounterSpecies{
-				{Name: "quail", Weight: 24, Prey: true},
-				{Name: "dove", Weight: 20, Prey: true},
-				{Name: "raven", Weight: 14, Scavenger: true},
-				{Name: "hawk", Weight: 9, Predator: true},
+				speciesEntry("quail", 24, true, false, false, false),
+				speciesEntry("dove", 20, true, false, false, false),
+				speciesEntry("partridge", 14, true, false, false, false),
+				speciesEntry("raven", 12, false, false, true, false),
+				speciesEntry("crow", 9, false, false, true, false),
 			}
 		default:
 			return []encounterSpecies{
-				{Name: "grouse", Weight: 22, Prey: true},
-				{Name: "songbird", Weight: 24, Prey: true},
-				{Name: "crow", Weight: 15, Scavenger: true},
-				{Name: "hawk", Weight: 9, Predator: true},
+				speciesEntry("grouse", 18, true, false, false, false),
+				speciesEntry("pheasant", 16, true, false, false, false),
+				speciesEntry("wild_turkey", 10, true, false, false, false),
+				speciesEntry("quail", 14, true, false, false, false),
+				speciesEntry("seagull", 8, true, false, true, false),
+				speciesEntry("pelican", 6, true, false, false, false),
+				speciesEntry("crow", 10, false, false, true, false),
+				speciesEntry("raven", 8, false, false, true, false),
 			}
 		}
 	case "fish":
-		return []encounterSpecies{
-			{Name: "trout", Weight: 28, Prey: true},
-			{Name: "perch", Weight: 24, Prey: true},
-			{Name: "catfish", Weight: 18, Prey: true},
-			{Name: "eel", Weight: 10, Prey: true},
+		switch biome {
+		case TopoBiomeSwamp, TopoBiomeWetland:
+			return []encounterSpecies{
+				speciesEntry("catfish", 20, true, false, false, true),
+				speciesEntry("carp", 16, true, false, false, false),
+				speciesEntry("tilapia", 16, true, false, false, false),
+				speciesEntry("eel", 10, true, false, false, true),
+				speciesEntry("bluegill", 14, true, false, false, false),
+				speciesEntry("crappie", 12, true, false, false, false),
+			}
+		case TopoBiomeJungle:
+			return []encounterSpecies{
+				speciesEntry("tilapia", 18, true, false, false, false),
+				speciesEntry("piranha", 14, true, false, false, true),
+				speciesEntry("arapaima", 10, true, false, false, false),
+				speciesEntry("catla", 14, true, false, false, false),
+				speciesEntry("rohu", 14, true, false, false, false),
+				speciesEntry("eel", 8, true, false, false, true),
+			}
+		case TopoBiomeDesert:
+			return []encounterSpecies{
+				speciesEntry("carp", 18, true, false, false, false),
+				speciesEntry("catfish", 16, true, false, false, true),
+				speciesEntry("tilapia", 14, true, false, false, false),
+				speciesEntry("bluegill", 12, true, false, false, false),
+			}
+		case TopoBiomeTundra, TopoBiomeBoreal:
+			return []encounterSpecies{
+				speciesEntry("char", 18, true, false, false, false),
+				speciesEntry("trout", 18, true, false, false, false),
+				speciesEntry("grayling", 16, true, false, false, false),
+				speciesEntry("walleye", 14, true, false, false, false),
+				speciesEntry("northern_pike", 10, true, false, false, true),
+				speciesEntry("perch", 12, true, false, false, false),
+			}
+		default:
+			return []encounterSpecies{
+				speciesEntry("trout", 18, true, false, false, false),
+				speciesEntry("perch", 16, true, false, false, false),
+				speciesEntry("walleye", 12, true, false, false, false),
+				speciesEntry("catfish", 12, true, false, false, true),
+				speciesEntry("sturgeon", 8, true, false, false, false),
+				speciesEntry("eel", 8, true, false, false, true),
+			}
 		}
 	default: // insect
 		switch biome {
 		case TopoBiomeSwamp, TopoBiomeWetland, TopoBiomeJungle:
 			return []encounterSpecies{
-				{Name: "mosquitoes", Weight: 34},
-				{Name: "biting flies", Weight: 24},
-				{Name: "ticks", Weight: 16},
-				{Name: "ants", Weight: 12},
+				speciesEntry("mosquito", 30, false, false, false, true),
+				speciesEntry("black_fly", 24, false, false, false, true),
+				speciesEntry("midge", 20, false, false, false, true),
+				speciesEntry("tick", 18, false, false, false, false),
+				speciesEntry("leech", 18, false, false, false, true),
+				speciesEntry("fire_ant", 12, false, false, false, false),
+				speciesEntry("wasp", 10, false, false, false, false),
 			}
 		case TopoBiomeDesert:
 			return []encounterSpecies{
-				{Name: "ants", Weight: 26},
-				{Name: "gnats", Weight: 22},
-				{Name: "scorpions", Weight: 10},
+				speciesEntry("fire_ant", 20, false, false, false, false),
+				speciesEntry("midge", 16, false, false, false, true),
+				speciesEntry("scorpion", 14, false, true, false, true),
+				speciesEntry("wolf_spider", 10, false, true, false, true),
+				speciesEntry("centipede", 10, false, true, false, true),
 			}
 		default:
 			return []encounterSpecies{
-				{Name: "gnats", Weight: 24},
-				{Name: "mosquitoes", Weight: 18},
-				{Name: "ticks", Weight: 14},
-				{Name: "flies", Weight: 20},
+				speciesEntry("midge", 22, false, false, false, true),
+				speciesEntry("mosquito", 18, false, false, false, true),
+				speciesEntry("tick", 14, false, false, false, false),
+				speciesEntry("horsefly", 14, false, false, false, true),
+				speciesEntry("bee", 10, false, false, false, false),
 			}
 		}
 	}
@@ -424,7 +528,14 @@ func (s *RunState) RollWildlifeEncounter(playerID, x, y int, action string, roll
 				w += 8
 			}
 		}
-		if cell.Biome == TopoBiomeDesert && channel == "insect" && sp.Name != "ants" && sp.Name != "scorpions" {
+		if sp.Nocturnal {
+			if block == TimeBlockNight || block == TimeBlockDusk {
+				w += 5
+			} else {
+				w -= 3
+			}
+		}
+		if cell.Biome == TopoBiomeDesert && channel == "insect" && sp.AnimalID != "fire_ant" && sp.AnimalID != "scorpion" {
 			w -= 6
 		}
 		if (cell.Biome == TopoBiomeSwamp || cell.Biome == TopoBiomeWetland || cell.Biome == TopoBiomeJungle) && channel == "insect" {
@@ -478,4 +589,34 @@ func (s *RunState) RollWildlifeEncounter(playerID, x, y int, action string, roll
 		}
 	}
 	return event, true
+}
+
+func wildlifeEncounterSpeciesIDs() []string {
+	biomes := []uint8{
+		TopoBiomeForest,
+		TopoBiomeGrassland,
+		TopoBiomeJungle,
+		TopoBiomeWetland,
+		TopoBiomeSwamp,
+		TopoBiomeDesert,
+		TopoBiomeMountain,
+		TopoBiomeTundra,
+		TopoBiomeBoreal,
+	}
+	channels := []string{"mammal", "bird", "fish", "insect"}
+	seen := map[string]bool{}
+	out := make([]string, 0, 128)
+	for _, biome := range biomes {
+		for _, channel := range channels {
+			for _, sp := range biomeEncounterList(biome, channel) {
+				id := strings.TrimSpace(strings.ToLower(sp.AnimalID))
+				if id == "" || seen[id] {
+					continue
+				}
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }

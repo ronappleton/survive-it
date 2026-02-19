@@ -11,6 +11,45 @@ Each 100m cell is `TopoCell`:
 - flags (`water`, `river`, `lake`, `coast`)
 - roughness (movement cost influence)
 
+## Real-World Terrain Profiles (Offline Runtime)
+
+Source: `internal/game/gen_profile.go`, `cmd/genprofile`, `cmd/genprofiles`.
+
+`GenProfile` files under `assets/profiles/*.json` are compact terrain summaries distilled from real-world elevation samples:
+
+- `elev_p10/p50/p90`
+- `slope_p50/p90`
+- `ruggedness`
+- `river_density`
+- `lake_coverage`
+
+Runtime is fully offline:
+
+- the game only loads local JSON profiles via `LoadGenProfile`
+- no map/elevation network calls are made while playing
+- if a profile is missing, `DefaultGenProfile()` keeps generation backward compatible
+
+## Build-Time Profile Generation
+
+One-time developer tools:
+
+- `go run ./cmd/genprofile --bbox "minLon,minLat,maxLon,maxLat" --out "assets/profiles/<id>.json" --cell 100`
+- `go run ./cmd/genprofiles`
+
+Notes:
+
+- raw download/cache data goes to `.cache/genprofile/...`
+- only distilled `assets/profiles/*.json` should be committed
+
+## Adding a New Real-World Scenario
+
+1. Set scenario metadata in `internal/game/scenarios_builtin.go`:
+   - `LocationMeta.Name`
+   - `LocationMeta.BBox`
+   - `LocationMeta.ProfileID`
+2. Run `go run ./cmd/genprofiles` (or `cmd/genprofile` for one profile).
+3. Commit `assets/profiles/<profile_id>.json`.
+
 ## Map Size by Mode and Scenario
 
 Sizing function: `topologySizeForScenario`.
@@ -26,14 +65,15 @@ Scenario-level fields:
 
 ## Generation Pipeline
 
-`GenerateWorldTopology` builds deterministic terrain from seed:
+`GenerateWorldTopologyWithProfile` builds deterministic terrain from seed and profile:
 
 1. layered value noise for elevation
-2. moisture and temperature maps with biases from biome tags
-3. biome assignment by thresholds
-4. downhill flow and accumulation for river carving
-5. lake/coast/water flags
-6. roughness assignment
+2. profile-aware percentile mapping (`p10/p50/p90`)
+3. moisture and temperature maps with biome biases
+4. biome assignment by thresholds
+5. downhill flow accumulation and profile-tuned river threshold
+6. lake coverage expansion toward profile target
+7. coast/water flags and roughness assignment
 
 ## Fog of War
 

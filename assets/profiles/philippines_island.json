@@ -1,0 +1,15 @@
+{
+  "id": "philippines_island",
+  "name": "Philippines Island (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -55.74,
+  "elev_p50": -0.116,
+  "elev_p90": 6.788,
+  "slope_p50": 0.949,
+  "slope_p90": 3.61,
+  "ruggedness": 2.4,
+  "river_density": 0.0614,
+  "lake_coverage": 0.0109,
+  "notes": "Derived from 34x34 elevation samples in bbox [120.3000, 13.0000, 123.5000, 15.8000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "vancouver_island",
+  "name": "Vancouver Island",
+  "cell_meters": 100,
+  "elev_p10": -59.884,
+  "elev_p50": 0.188,
+  "elev_p90": 29.2,
+  "slope_p50": 1.246,
+  "slope_p90": 3.211,
+  "ruggedness": 2.4,
+  "river_density": 0.0614,
+  "lake_coverage": 0.0125,
+  "notes": "Derived from 34x34 elevation samples in bbox [-128.5000, 48.2000, -123.0000, 50.9000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

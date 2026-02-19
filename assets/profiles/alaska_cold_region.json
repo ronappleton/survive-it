@@ -1,0 +1,15 @@
+{
+  "id": "alaska_cold_region",
+  "name": "Alaska Cold Region (NAA)",
+  "cell_meters": 100,
+  "elev_p10": 3.238,
+  "elev_p50": 8.475,
+  "elev_p90": 25.913,
+  "slope_p50": 0.63,
+  "slope_p90": 1.649,
+  "ruggedness": 1.9352,
+  "river_density": 0.0614,
+  "lake_coverage": 0.067,
+  "notes": "Derived from 34x34 elevation samples in bbox [-153.0000, 63.0000, -147.0000, 67.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

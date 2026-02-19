@@ -1,0 +1,15 @@
+{
+  "id": "labrador_coast",
+  "name": "Labrador Coast (Canada)",
+  "cell_meters": 100,
+  "elev_p10": -51.391,
+  "elev_p50": 0,
+  "elev_p90": 9.685,
+  "slope_p50": 0.321,
+  "slope_p90": 1.044,
+  "ruggedness": 2.4,
+  "river_density": 0.0606,
+  "lake_coverage": 0.0109,
+  "notes": "Derived from 34x34 elevation samples in bbox [-61.8000, 52.5000, -55.0000, 57.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

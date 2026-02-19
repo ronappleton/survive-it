@@ -1,0 +1,15 @@
+{
+  "id": "great_slave_lake",
+  "name": "Great Slave Lake (Canada)",
+  "cell_meters": 100,
+  "elev_p10": 3.925,
+  "elev_p50": 6.125,
+  "elev_p90": 10.263,
+  "slope_p50": 0.096,
+  "slope_p90": 0.273,
+  "ruggedness": 0.4387,
+  "river_density": 0.0675,
+  "lake_coverage": 0.14,
+  "notes": "Derived from 34x34 elevation samples in bbox [-117.5000, 60.5000, -108.0000, 63.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

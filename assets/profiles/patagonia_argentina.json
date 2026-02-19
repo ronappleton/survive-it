@@ -1,0 +1,15 @@
+{
+  "id": "patagonia_argentina",
+  "name": "Patagonia (Argentina)",
+  "cell_meters": 100,
+  "elev_p10": -1.168,
+  "elev_p50": 8.075,
+  "elev_p90": 22.925,
+  "slope_p50": 0.344,
+  "slope_p90": 1.257,
+  "ruggedness": 1.7864,
+  "river_density": 0.0657,
+  "lake_coverage": 0.0343,
+  "notes": "Derived from 34x34 elevation samples in bbox [-72.5000, -51.5000, -67.0000, -46.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

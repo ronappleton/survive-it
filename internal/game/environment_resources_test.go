@@ -527,6 +527,110 @@ func TestPreserveSmokeCommandCreatesSmokedMeat(t *testing.T) {
 	}
 }
 
+func TestShelterStageProgressionAndLocationModifiers(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1501,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+
+	shelter, err := run.BuildShelter(1, string(ShelterLeanTo))
+	if err != nil {
+		t.Fatalf("build shelter stage 1: %v", err)
+	}
+	if run.Shelter.Stage != 1 {
+		t.Fatalf("expected stage 1 after first build, got %d", run.Shelter.Stage)
+	}
+
+	spec, ok := shelterByID(shelter.ID)
+	if !ok {
+		t.Fatalf("expected shelter spec")
+	}
+	base := shelterMetricsForState(spec, run.Shelter)
+
+	thatch, ok := run.findResourceForBiome("thatch_bundle")
+	if !ok {
+		t.Fatalf("expected thatch_bundle resource")
+	}
+	if err := run.addResourceStock(thatch, 1); err != nil {
+		t.Fatalf("add thatch bundle: %v", err)
+	}
+
+	if _, err := run.BuildShelter(1, string(ShelterLeanTo)); err != nil {
+		t.Fatalf("build shelter stage 2: %v", err)
+	}
+	if run.Shelter.Stage != 2 {
+		t.Fatalf("expected stage 2 after second build, got %d", run.Shelter.Stage)
+	}
+
+	idx, ok := run.topoIndex(run.Shelter.SiteX, run.Shelter.SiteY)
+	if !ok {
+		t.Fatalf("expected valid shelter topology index")
+	}
+	cell := run.Topology.Cells[idx]
+	cell.Flags |= TopoFlagWater
+	run.Topology.Cells[idx] = cell
+
+	withLocation, ok := run.currentShelterMetrics()
+	if !ok {
+		t.Fatalf("expected active shelter metrics")
+	}
+	if withLocation.DrynessProtection >= base.DrynessProtection {
+		t.Fatalf("expected near-water site to reduce dryness protection, base=%d with=%d", base.DrynessProtection, withLocation.DrynessProtection)
+	}
+}
+
+func TestLogCabinBuildRequiresMultipleStages(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 60},
+		Seed:        1502,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+
+	addResource := func(id string, qty float64) {
+		spec, ok := run.findResourceForBiome(id)
+		if !ok {
+			t.Fatalf("resource %s not found", id)
+		}
+		if err := run.addResourceStock(spec, qty); err != nil {
+			t.Fatalf("add resource %s: %v", id, err)
+		}
+	}
+	addResource("stone_cobble", 3)
+	addResource("thatch_bundle", 3)
+	addResource("mud", 2.0)
+
+	spec, ok := shelterByID(ShelterLogCabin)
+	if !ok {
+		t.Fatalf("expected log cabin spec")
+	}
+	if len(spec.Stages) < 5 {
+		t.Fatalf("expected log cabin to have many stages, got %d", len(spec.Stages))
+	}
+
+	for i := 1; i <= len(spec.Stages); i++ {
+		if _, err := run.BuildShelter(1, string(ShelterLogCabin)); err != nil {
+			t.Fatalf("stage %d build failed: %v", i, err)
+		}
+		if run.Shelter.Stage != i {
+			t.Fatalf("expected stage %d after build, got %d", i, run.Shelter.Stage)
+		}
+	}
+	if _, err := run.BuildShelter(1, string(ShelterLogCabin)); err == nil {
+		t.Fatalf("expected final build attempt to fail once fully built")
+	}
+}
+
 func TestAdvanceDayFoodDegradationRawVsPreserved(t *testing.T) {
 	run, err := NewRunState(RunConfig{
 		Mode:        ModeAlone,

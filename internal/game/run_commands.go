@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Run command handlers are thin adapters over RunState systems (forage/craft/trap/travel/fire/shelter).
+// - Shelter status/build output is generated here, so staged shelter progress is surfaced without loop refactors.
+// - Keeping command signatures stable preserves parser/UI integration while extending simulation depth.
 type RunCommandResult struct {
 	Handled       bool
 	Message       string
@@ -891,9 +895,16 @@ func (s *RunState) executeShelterCommand(fields []string) RunCommandResult {
 		}
 		spec, ok := shelterByID(s.Shelter.Type)
 		if !ok {
-			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s durability %d%%", s.Shelter.Type, s.Shelter.Durability)}
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s stage %d durability %d%%", s.Shelter.Type, s.Shelter.Stage, s.Shelter.Durability)}
 		}
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s durability %d%%", spec.Name, s.Shelter.Durability)}
+		stageCount := len(spec.Stages)
+		if stageCount == 0 {
+			stageCount = 1
+		}
+		if metrics, ok := s.currentShelterMetrics(); ok {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s stage %d/%d durability %d%% | ins:%d rain:%d wind:%d insect:%d storage:%.0fkg", spec.Name, max(1, s.Shelter.Stage), stageCount, s.Shelter.Durability, metrics.Insulation, metrics.RainProtection, metrics.WindProtection, metrics.InsectProtection, metrics.StorageCapacityKg)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter: %s stage %d/%d durability %d%%", spec.Name, max(1, s.Shelter.Stage), stageCount, s.Shelter.Durability)}
 	}
 
 	switch fields[0] {
@@ -921,7 +932,11 @@ func (s *RunState) executeShelterCommand(fields []string) RunCommandResult {
 		if err != nil {
 			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Shelter build failed: %v", err)}
 		}
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d built %s. Durability 100%%.", playerID, shelter.Name)}
+		stageCount := len(shelter.Stages)
+		if stageCount == 0 {
+			stageCount = 1
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d built %s stage %d/%d. Durability %d%%.", playerID, shelter.Name, max(1, s.Shelter.Stage), stageCount, s.Shelter.Durability)}
 	default:
 		return RunCommandResult{Handled: true, Message: "Usage: shelter list | shelter build <id> [p#] | shelter status"}
 	}

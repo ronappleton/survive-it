@@ -1,0 +1,15 @@
+{
+  "id": "south_africa_savanna",
+  "name": "NAA XL South Africa (40)",
+  "cell_meters": 100,
+  "elev_p10": 24.975,
+  "elev_p50": 27.625,
+  "elev_p90": 34.5,
+  "slope_p50": 0.114,
+  "slope_p90": 0.301,
+  "ruggedness": 0.6756,
+  "river_density": 0.064,
+  "lake_coverage": 0.0093,
+  "notes": "Derived from 34x34 elevation samples in bbox [23.0000, -26.7000, 27.0000, -23.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

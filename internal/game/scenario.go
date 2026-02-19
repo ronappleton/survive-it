@@ -4,6 +4,7 @@ type Scenario struct {
 	ID                 ScenarioID
 	Name               string
 	Location           string
+	LocationMeta       *ScenarioLocation `json:"-"`
 	Biome              string
 	MapWidthCells      int
 	MapHeightCells     int
@@ -16,6 +17,12 @@ type Scenario struct {
 	IssuedKit          IssuedKit
 	SeasonSets         []SeasonSet
 	DefaultSeasonSetID SeasonSetID
+}
+
+type ScenarioLocation struct {
+	Name      string
+	BBox      [4]float64
+	ProfileID string
 }
 
 type IssuedKit struct {

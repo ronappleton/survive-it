@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Trap gameplay is table-driven: TrapCatalog defines setup cost/chance/yield and daily resolution is deterministic.
+// - Only meaningful state is persisted (condition, armed state, pending catch kg/type), which keeps simulation cheap.
+// - Catch output maps through trapCatchItemID/name, so expanding target channels is safe with small ID mapping hooks.
 type TrapSpec struct {
 	ID                string
 	Name              string
@@ -59,7 +63,7 @@ type TrapCheckResult struct {
 }
 
 func TrapCatalog() []TrapSpec {
-	return []TrapSpec{
+	base := []TrapSpec{
 		{
 			ID: "gorge_hook_line", Name: "Gorge Hook Line",
 			Description:  "Carved gorge hook and fiber line for passive fish takes near still edges.",
@@ -124,6 +128,84 @@ func TrapCatalog() []TrapSpec {
 			MinBushcraft: 1, BaseChance: 0.31, BaseHours: 0.65, ConditionLoss: 7, YieldMinKg: 0.2, YieldMaxKg: 1.2,
 			RequiresCrafted: []string{"trap_trigger_set"},
 			RequiresKit:     []KitItem{KitParacord50ft, KitSnareWire},
+		},
+	}
+	return append(base, expandedTrapCatalog()...)
+}
+
+func expandedTrapCatalog() []TrapSpec {
+	return []TrapSpec{
+		{
+			ID: "trail_twitchup", Name: "Trail Twitch-Up",
+			Description:  "Twitch-up variant tuned for hare and squirrel trails.",
+			BiomeTags:    []string{"forest", "boreal", "mountain", "savanna"},
+			Targets:      []string{"small_game"},
+			MinBushcraft: 2, BaseChance: 0.25, BaseHours: 0.9, ConditionLoss: 8, YieldMinKg: 0.2, YieldMaxKg: 1.0,
+			RequiresCrafted: []string{"spring_snare_kit"},
+		},
+		{
+			ID: "rolling_log_deadfall", Name: "Rolling Log Deadfall",
+			Description:  "Weighted rolling deadfall for medium trail game.",
+			BiomeTags:    []string{"forest", "mountain", "boreal", "badlands"},
+			Targets:      []string{"small_game", "medium_game"},
+			MinBushcraft: 3, BaseChance: 0.2, BaseHours: 1.6, ConditionLoss: 10, YieldMinKg: 0.5, YieldMaxKg: 3.2,
+			RequiresCrafted: []string{"deadfall_kit", "wood_mallet"},
+		},
+		{
+			ID: "snare_fence", Name: "Snare Fence",
+			Description:  "Guided fence line with multiple noose points.",
+			BiomeTags:    []string{"savanna", "badlands", "forest", "boreal", "mountain"},
+			Targets:      []string{"small_game"},
+			MinBushcraft: 2, BaseChance: 0.28, BaseHours: 1.4, ConditionLoss: 7, YieldMinKg: 0.25, YieldMaxKg: 1.3,
+			RequiresCrafted: []string{"spring_snare_kit", "heavy_cordage"},
+		},
+		{
+			ID: "fish_weir", Name: "Fish Weir",
+			Description:  "Stake and funnel weir for shallow channels.",
+			BiomeTags:    []string{"river", "delta", "wetlands", "coast"},
+			Targets:      []string{"fish"},
+			MinBushcraft: 2, BaseChance: 0.33, BaseHours: 2.2, ConditionLoss: 5, YieldMinKg: 0.4, YieldMaxKg: 2.8, NeedsWater: true,
+			RequiresCrafted: []string{"fish_weir_stakes"},
+		},
+		{
+			ID: "gill_net_set", Name: "Gill Net Set",
+			Description:  "Set gill net in current seam for passive catches.",
+			BiomeTags:    []string{"coast", "delta", "river", "lake", "wetlands"},
+			Targets:      []string{"fish"},
+			MinBushcraft: 3, BaseChance: 0.36, BaseHours: 1.8, ConditionLoss: 6, YieldMinKg: 0.5, YieldMaxKg: 3.5, NeedsWater: true,
+			RequiresCrafted: []string{"gill_net"},
+		},
+		{
+			ID: "trotline", Name: "Trotline",
+			Description:  "Longline with multiple hooks for overnight fish catches.",
+			BiomeTags:    []string{"river", "lake", "delta", "coast"},
+			Targets:      []string{"fish"},
+			MinBushcraft: 2, BaseChance: 0.31, BaseHours: 1.2, ConditionLoss: 4, YieldMinKg: 0.3, YieldMaxKg: 2.6, NeedsWater: true,
+			RequiresCrafted: []string{"trotline_set"},
+		},
+		{
+			ID: "eel_pot", Name: "Eel Pot",
+			Description:  "Narrow-mouthed pot trap for eels and small fish.",
+			BiomeTags:    []string{"river", "delta", "swamp", "wetlands", "coast"},
+			Targets:      []string{"fish"},
+			MinBushcraft: 2, BaseChance: 0.27, BaseHours: 1.5, ConditionLoss: 4, YieldMinKg: 0.2, YieldMaxKg: 1.6, NeedsWater: true,
+			RequiresCrafted: []string{"fish_trap_basket"},
+		},
+		{
+			ID: "reptile_noose", Name: "Reptile Noose",
+			Description:  "Pole-noose setup for lizards and snakes.",
+			BiomeTags:    []string{"desert", "dry", "savanna", "jungle", "wetlands"},
+			Targets:      []string{"reptile"},
+			MinBushcraft: 2, BaseChance: 0.2, BaseHours: 0.9, ConditionLoss: 7, YieldMinKg: 0.15, YieldMaxKg: 1.8,
+			RequiresCrafted: []string{"natural_twine"},
+		},
+		{
+			ID: "crab_pot", Name: "Crab Pot",
+			Description:  "Weighted pot trap for tidal and estuary shellfish.",
+			BiomeTags:    []string{"coast", "delta", "island", "wetlands"},
+			Targets:      []string{"fish"},
+			MinBushcraft: 1, BaseChance: 0.23, BaseHours: 1.4, ConditionLoss: 4, YieldMinKg: 0.2, YieldMaxKg: 1.4, NeedsWater: true,
+			RequiresCrafted: []string{"fish_trap_basket", "heavy_cordage"},
 		},
 	}
 }
@@ -371,6 +453,10 @@ func trapCatchItemID(target string) string {
 		return "fish_carcass"
 	case "bird":
 		return "bird_carcass"
+	case "medium_game":
+		return "medium_game_carcass"
+	case "reptile":
+		return "reptile_carcass"
 	default:
 		return "small_game_carcass"
 	}
@@ -382,6 +468,10 @@ func trapCatchName(target string) string {
 		return "Fish Carcass"
 	case "bird":
 		return "Bird Carcass"
+	case "medium_game":
+		return "Medium Game Carcass"
+	case "reptile":
+		return "Reptile Carcass"
 	default:
 		return "Small Game Carcass"
 	}

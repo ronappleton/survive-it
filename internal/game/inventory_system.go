@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Camp storage is currently derived from shelter type plus crafted container bonuses.
+// - Inventory stacks are merged/consumed by ID with age-aware depletion, so capacity hooks are lightweight.
+// - Shelter-stage storage can be integrated safely by swapping the shelter capacity lookup only.
 type InventoryItem struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`
@@ -72,7 +76,9 @@ func (s *RunState) campCapacityKg() float64 {
 	// Minimal ground cache before shelter.
 	capKg := 8.0
 	if s.Shelter.Type != "" && s.Shelter.Durability > 0 {
-		if shelter, ok := shelterByID(s.Shelter.Type); ok && shelter.StorageCapacityKg > 0 {
+		if metrics, ok := s.currentShelterMetrics(); ok && metrics.StorageCapacityKg > 0 {
+			capKg = metrics.StorageCapacityKg
+		} else if shelter, ok := shelterByID(s.Shelter.Type); ok && shelter.StorageCapacityKg > 0 {
 			capKg = shelter.StorageCapacityKg
 		}
 	}

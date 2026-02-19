@@ -1,0 +1,15 @@
+{
+  "id": "khentii_mountains",
+  "name": "Khentii Mountains (Mongolia)",
+  "cell_meters": 100,
+  "elev_p10": 26.138,
+  "elev_p50": 33.95,
+  "elev_p90": 44.025,
+  "slope_p50": 0.639,
+  "slope_p90": 1.419,
+  "ruggedness": 1.2816,
+  "river_density": 0.0649,
+  "lake_coverage": 0.0483,
+  "notes": "Derived from 34x34 elevation samples in bbox [107.0000, 47.0000, 111.8000, 50.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

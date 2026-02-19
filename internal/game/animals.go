@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - AnimalCatalog is the authoritative table for catch simulation, nutrition, and disease/ailment risk profiles.
+// - Domain + biome tags drive selection, and outcomes are deterministic by seed/day/actor.
+// - Expanding registry entries is safe as long as IDs remain stable and per-spec ranges/risks are coherent.
 type AnimalDomain string
 
 const (
@@ -90,7 +94,7 @@ type CatchResult struct {
 }
 
 func AnimalCatalog() []AnimalSpec {
-	return []AnimalSpec{
+	catalog := []AnimalSpec{
 		{
 			ID:               "deer",
 			Name:             "Deer",
@@ -1327,6 +1331,216 @@ func AnimalCatalog() []AnimalSpec {
 			DiseaseRisks: []DiseaseRisk{
 				{ID: "albatross_gi", Name: "Bird-borne contamination", BaseChance: 0.08, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentFoodPoison, Name: "Food Poisoning", Days: 2, EnergyPenalty: 3, HydrationPenalty: 5, MoralePenalty: 3}},
 			},
+		},
+	}
+	return append(catalog, expandedAnimalCatalog()...)
+}
+
+func expandedAnimalCatalog() []AnimalSpec {
+	return []AnimalSpec{
+		{
+			ID:               "mosquito",
+			Name:             "Mosquito",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"swamp", "wetlands", "delta", "jungle", "coast"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000004,
+			EdibleYieldRatio: 0.05,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 90, ProteinG: 20, FatG: 2},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "mosquito_vector", Name: "Vector-borne fever risk", BaseChance: 0.09, CarrierPart: "blood", Effect: AilmentTemplate{Type: AilmentGIInfection, Name: "Feverish Infection", Days: 2, EnergyPenalty: 2, HydrationPenalty: 2, MoralePenalty: 3}},
+			},
+		},
+		{
+			ID:               "black_fly",
+			Name:             "Black Fly",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"river", "wetlands", "boreal", "subarctic", "forest"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000003,
+			EdibleYieldRatio: 0.05,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 92, ProteinG: 21, FatG: 2},
+		},
+		{
+			ID:               "midge",
+			Name:             "Midge",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"wetlands", "swamp", "tundra", "boreal", "coast"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000002,
+			EdibleYieldRatio: 0.05,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 88, ProteinG: 20, FatG: 2},
+		},
+		{
+			ID:               "tick",
+			Name:             "Tick",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"forest", "boreal", "savanna", "wetlands", "jungle"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000003,
+			EdibleYieldRatio: 0.05,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 95, ProteinG: 21, FatG: 3},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "tick_fever", Name: "Tick-borne fever risk", BaseChance: 0.11, CarrierPart: "blood", Effect: AilmentTemplate{Type: AilmentGIInfection, Name: "Tick Fever", Days: 3, EnergyPenalty: 3, HydrationPenalty: 2, MoralePenalty: 4}},
+			},
+		},
+		{
+			ID:               "leech",
+			Name:             "Leech",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"swamp", "wetlands", "river", "jungle", "delta"},
+			WeightMinKg:      0.0002,
+			WeightMaxKg:      0.004,
+			EdibleYieldRatio: 0.08,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 80, ProteinG: 17, FatG: 1},
+		},
+		{
+			ID:               "fire_ant",
+			Name:             "Fire Ant",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"savanna", "badlands", "desert", "jungle", "wetlands"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000003,
+			EdibleYieldRatio: 0.06,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 97, ProteinG: 22, FatG: 2},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "fire_ant_sting", Name: "Sting reaction", BaseChance: 0.07, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentEnvenomation, Name: "Sting Reaction", Days: 1, EnergyPenalty: 2, HydrationPenalty: 1, MoralePenalty: 3}},
+			},
+		},
+		{
+			ID:               "wasp",
+			Name:             "Wasp",
+			Domain:           AnimalDomainAir,
+			BiomeTags:        []string{"forest", "savanna", "coast", "wetlands", "jungle"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000004,
+			EdibleYieldRatio: 0.04,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 100, ProteinG: 24, FatG: 2},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "wasp_sting", Name: "Sting reaction", BaseChance: 0.08, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentEnvenomation, Name: "Sting Reaction", Days: 1, EnergyPenalty: 2, HydrationPenalty: 1, MoralePenalty: 3}},
+			},
+		},
+		{
+			ID:               "bee",
+			Name:             "Wild Bee",
+			Domain:           AnimalDomainAir,
+			BiomeTags:        []string{"forest", "savanna", "coast", "mountain", "jungle"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000004,
+			EdibleYieldRatio: 0.04,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 98, ProteinG: 23, FatG: 2},
+		},
+		{
+			ID:               "horsefly",
+			Name:             "Horsefly",
+			Domain:           AnimalDomainAir,
+			BiomeTags:        []string{"wetlands", "river", "savanna", "forest", "coast"},
+			WeightMinKg:      0.000001,
+			WeightMaxKg:      0.000004,
+			EdibleYieldRatio: 0.04,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 94, ProteinG: 22, FatG: 2},
+		},
+		{
+			ID:               "centipede",
+			Name:             "Centipede",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"jungle", "swamp", "wetlands", "desert", "badlands"},
+			WeightMinKg:      0.001,
+			WeightMaxKg:      0.03,
+			EdibleYieldRatio: 0.2,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 102, ProteinG: 19, FatG: 3},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "centipede_venom", Name: "Venom contamination", BaseChance: 0.12, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentEnvenomation, Name: "Mild Envenomation", Days: 1, EnergyPenalty: 2, HydrationPenalty: 2, MoralePenalty: 2}},
+			},
+		},
+		{
+			ID:               "viper",
+			Name:             "Viper",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"forest", "savanna", "badlands", "mountain", "dry"},
+			WeightMinKg:      0.5,
+			WeightMaxKg:      4.2,
+			EdibleYieldRatio: 0.35,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 95, ProteinG: 20, FatG: 1},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "viper_venom", Name: "Venom contamination", BaseChance: 0.2, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentEnvenomation, Name: "Envenomation", Days: 2, EnergyPenalty: 4, HydrationPenalty: 4, MoralePenalty: 5}},
+			},
+		},
+		{
+			ID:               "water_snake",
+			Name:             "Water Snake",
+			Domain:           AnimalDomainLand,
+			BiomeTags:        []string{"wetlands", "swamp", "delta", "river", "lake"},
+			WeightMinKg:      0.3,
+			WeightMaxKg:      2.5,
+			EdibleYieldRatio: 0.34,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 93, ProteinG: 19, FatG: 1},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "water_snake_venom", Name: "Venom contamination", BaseChance: 0.14, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentEnvenomation, Name: "Envenomation", Days: 2, EnergyPenalty: 3, HydrationPenalty: 3, MoralePenalty: 4}},
+			},
+		},
+		{
+			ID:               "gar",
+			Name:             "Gar",
+			Domain:           AnimalDomainWater,
+			BiomeTags:        []string{"river", "delta", "wetlands", "lake", "swamp"},
+			WeightMinKg:      0.7,
+			WeightMaxKg:      15,
+			EdibleYieldRatio: 0.53,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 122, ProteinG: 22, FatG: 3},
+		},
+		{
+			ID:               "bowfin",
+			Name:             "Bowfin",
+			Domain:           AnimalDomainWater,
+			BiomeTags:        []string{"swamp", "wetlands", "river", "lake", "delta"},
+			WeightMinKg:      0.6,
+			WeightMaxKg:      9,
+			EdibleYieldRatio: 0.52,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 119, ProteinG: 21, FatG: 3},
+		},
+		{
+			ID:               "chub",
+			Name:             "Chub",
+			Domain:           AnimalDomainWater,
+			BiomeTags:        []string{"river", "lake", "boreal", "mountain", "forest"},
+			WeightMinKg:      0.05,
+			WeightMaxKg:      1.1,
+			EdibleYieldRatio: 0.49,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 112, ProteinG: 19, FatG: 3},
+		},
+		{
+			ID:               "suckerfish",
+			Name:             "Suckerfish",
+			Domain:           AnimalDomainWater,
+			BiomeTags:        []string{"river", "lake", "delta", "wetlands", "forest"},
+			WeightMinKg:      0.2,
+			WeightMaxKg:      3.8,
+			EdibleYieldRatio: 0.51,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 116, ProteinG: 20, FatG: 3},
+		},
+		{
+			ID:               "vulture",
+			Name:             "Vulture",
+			Domain:           AnimalDomainAir,
+			BiomeTags:        []string{"savanna", "badlands", "desert", "mountain", "dry"},
+			WeightMinKg:      1.2,
+			WeightMaxKg:      6.5,
+			EdibleYieldRatio: 0.4,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 170, ProteinG: 23, FatG: 7},
+			DiseaseRisks: []DiseaseRisk{
+				{ID: "vulture_gi", Name: "Scavenger contamination", BaseChance: 0.12, CarrierPart: "any", Effect: AilmentTemplate{Type: AilmentFoodPoison, Name: "GI Food Illness", Days: 2, EnergyPenalty: 3, HydrationPenalty: 4, MoralePenalty: 3}},
+			},
+		},
+		{
+			ID:               "owl",
+			Name:             "Owl",
+			Domain:           AnimalDomainAir,
+			BiomeTags:        []string{"forest", "boreal", "mountain", "wetlands", "coast"},
+			WeightMinKg:      0.4,
+			WeightMaxKg:      3.8,
+			EdibleYieldRatio: 0.42,
+			NutritionPer100g: NutritionPer100g{CaloriesKcal: 176, ProteinG: 22, FatG: 8},
 		},
 	}
 }

@@ -1,0 +1,15 @@
+{
+  "id": "louisiana_swamp",
+  "name": "Louisiana Swamp (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -0.117,
+  "elev_p50": 0.15,
+  "elev_p90": 1.95,
+  "slope_p50": 0.024,
+  "slope_p90": 0.121,
+  "ruggedness": 0.1514,
+  "river_density": 0.0614,
+  "lake_coverage": 0.067,
+  "notes": "Derived from 34x34 elevation samples in bbox [-92.2000, 29.0000, -89.0000, 31.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

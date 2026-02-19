@@ -145,7 +145,11 @@ func (s *RunState) initTopology() {
 		return
 	}
 	w, h := topologySizeForScenario(s.Config.Mode, s.Scenario)
-	topology := GenerateWorldTopology(s.Config.Seed, s.Scenario.Biome, w, h)
+	profile := DefaultGenProfile()
+	if scenarioProfile, ok := LoadScenarioGenProfile(s.Scenario); ok {
+		profile = scenarioProfile
+	}
+	topology := GenerateWorldTopologyWithProfile(s.Config.Seed, s.Scenario.Biome, w, h, profile)
 	s.Topology = topology
 	s.CellStates = make([]CellState, len(topology.Cells))
 	s.FogMask = make([]bool, len(topology.Cells))
@@ -421,7 +425,36 @@ func roughnessForBiome(biome uint8, noise float64, elevation int8) uint8 {
 	return uint8(base)
 }
 
+func roughnessForBiomeWithProfile(biome uint8, noise float64, elevation int8, profile *GenProfile) uint8 {
+	base := roughnessForBiome(biome, noise, elevation)
+	if profile == nil {
+		return base
+	}
+	ref := DefaultGenProfile()
+	scale := clampFloat(profile.Ruggedness/ref.Ruggedness, 0.65, 1.8)
+	slopeScale := clampFloat(profile.SlopeP90/ref.SlopeP90, 0.7, 1.6)
+	scaled := int(math.Round(float64(base) * ((scale + slopeScale) / 2.0)))
+	if scaled < 1 {
+		scaled = 1
+	}
+	if scaled > 9 {
+		scaled = 9
+	}
+	return uint8(scaled)
+}
+
 func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTopology {
+	return GenerateWorldTopologyWithProfile(seed, biome, width, height, DefaultGenProfile())
+}
+
+func GenerateWorldTopologyWithProfile(seed int64, biome string, width, height int, profile *GenProfile) WorldTopology {
+	if profile == nil {
+		profile = DefaultGenProfile()
+	}
+	profileCopy := *profile
+	normalizeGenProfile(&profileCopy)
+	profile = &profileCopy
+
 	if width < 8 {
 		width = 8
 	}
@@ -447,32 +480,46 @@ func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTop
 		moistureBias += 0.12
 	}
 
+	rawElev := make([]float64, len(cells))
+	rawMoist := make([]float64, len(cells))
+	rawTemp := make([]float64, len(cells))
+	rawRough := make([]float64, len(cells))
+	refProfile := DefaultGenProfile()
+	ridgeScale := clampFloat(profile.Ruggedness/refProfile.Ruggedness, 0.7, 1.7)
+	baseTempDrop := clampFloat(profile.SlopeP50/refProfile.SlopeP50, 0.7, 1.6)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			idx := y*width + x
+			nElev := layeredNoise(seed, float64(x), float64(y), "elev")
+			nRidge := layeredNoise(seed+11, float64(x), float64(y), "ridge")
+			rawElev[idx] = ((nElev - 0.5) * 120.0) + ((math.Abs(nRidge-0.5) - 0.25) * 34.0 * ridgeScale) - 8
+			rawMoist[idx] = layeredNoise(seed+31, float64(x), float64(y), "moist")
+			rawTemp[idx] = layeredNoise(seed+47, float64(x), float64(y), "temp")
+			rawRough[idx] = layeredNoise(seed+91, float64(x), float64(y), "rough")
+		}
+	}
+	elevations := mapElevationsToProfile(rawElev, profile)
+	waterline := profileWaterline(profile)
 	for y := 0; y < height; y++ {
 		lat := float64(y) / float64(max(1, height-1))
 		latTemp := 1.0 - math.Abs(lat-0.5)*0.7
 		for x := 0; x < width; x++ {
 			idx := y*width + x
-			nElev := layeredNoise(seed, float64(x), float64(y), "elev")
-			nRidge := layeredNoise(seed+11, float64(x), float64(y), "ridge")
-			nMoist := layeredNoise(seed+31, float64(x), float64(y), "moist")
-			nTemp := layeredNoise(seed+47, float64(x), float64(y), "temp")
-			elevVal := ((nElev - 0.5) * 120.0) + ((math.Abs(nRidge-0.5) - 0.25) * 34.0) - 8
-			elevation := int8(clamp(int(math.Round(elevVal)), -90, 90))
-			tempVal := clampFloat(latTemp+(nTemp-0.5)*0.35+tempBias-float64(elevation)/220.0, 0, 1)
-			moistVal := clampFloat(nMoist+moistureBias-float64(elevation)/280.0, 0, 1)
+			elevation := int8(clamp(int(math.Round(elevations[idx])), -90, 90))
+			tempVal := clampFloat(latTemp+(rawTemp[idx]-0.5)*0.35+tempBias-float64(elevation)/(220.0*baseTempDrop), 0, 1)
+			moistVal := clampFloat(rawMoist[idx]+moistureBias-float64(elevation)/280.0, 0, 1)
 			temp := uint8(math.Round(tempVal * 255))
 			moist := uint8(math.Round(moistVal * 255))
 
 			flags := uint8(0)
-			if elevation <= -22 {
+			if int(elevation) <= waterline {
 				flags |= TopoFlagWater
 			}
 			if (strings.Contains(biomeNorm, "coast") || strings.Contains(biomeNorm, "island")) && (x < 2 || y < 2 || x > width-3 || y > height-3) {
 				flags |= TopoFlagWater
 			}
-
 			b := initialTopoBiome(elevation, moist, temp)
-			rough := roughnessForBiome(b, layeredNoise(seed+91, float64(x), float64(y), "rough"), elevation)
+			rough := roughnessForBiomeWithProfile(b, rawRough[idx], elevation, profile)
 			cells[idx] = TopoCell{
 				Elevation:   elevation,
 				Moisture:    moist,
@@ -527,7 +574,7 @@ func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTop
 			accum[next] += accum[idx]
 		}
 	}
-	riverThreshold := max(16, (width*height)/180)
+	riverThreshold := riverThresholdForProfile(accum, cells, profile)
 	for idx := range cells {
 		if cells[idx].Flags&TopoFlagWater != 0 {
 			continue
@@ -535,10 +582,11 @@ func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTop
 		if accum[idx] >= riverThreshold {
 			cells[idx].Flags |= TopoFlagRiver | TopoFlagWater
 		}
-		if cells[idx].Flags&TopoFlagWater == 0 && int(cells[idx].Elevation) <= -10 && cells[idx].Moisture >= 180 {
+		if cells[idx].Flags&TopoFlagWater == 0 && int(cells[idx].Elevation) <= profileLakeElevation(profile) && cells[idx].Moisture >= 180 {
 			cells[idx].Flags |= TopoFlagLake | TopoFlagWater
 		}
 	}
+	expandLakeCoverage(cells, width, height, profile.LakeCoverage)
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			idx := y*width + x
@@ -571,4 +619,173 @@ func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTop
 		Height: height,
 		Cells:  cells,
 	}
+}
+
+func mapElevationsToProfile(rawElev []float64, profile *GenProfile) []float64 {
+	if len(rawElev) == 0 {
+		return nil
+	}
+	if profile == nil {
+		profile = DefaultGenProfile()
+	}
+	sorted := append([]float64(nil), rawElev...)
+	sort.Float64s(sorted)
+	srcMin := sorted[0]
+	srcMax := sorted[len(sorted)-1]
+	src10 := percentileFromSorted(sorted, 0.10)
+	src50 := percentileFromSorted(sorted, 0.50)
+	src90 := percentileFromSorted(sorted, 0.90)
+	spread := maxFloat64(1.0, profile.ElevP90-profile.ElevP10)
+	dstMin := profile.ElevP10 - spread*0.85
+	dstMax := profile.ElevP90 + spread*0.85
+	src := [5]float64{srcMin, src10, src50, src90, srcMax}
+	dst := [5]float64{dstMin, profile.ElevP10, profile.ElevP50, profile.ElevP90, dstMax}
+	mapped := make([]float64, len(rawElev))
+	for i, v := range rawElev {
+		mapped[i] = clampFloat(piecewiseLinearMap(v, src, dst), -90, 90)
+	}
+	return mapped
+}
+
+func piecewiseLinearMap(v float64, src, dst [5]float64) float64 {
+	for i := 1; i < len(src); i++ {
+		if v <= src[i] {
+			return lerpWithBounds(v, src[i-1], src[i], dst[i-1], dst[i])
+		}
+	}
+	return lerpWithBounds(v, src[len(src)-2], src[len(src)-1], dst[len(dst)-2], dst[len(dst)-1])
+}
+
+func lerpWithBounds(v, srcA, srcB, dstA, dstB float64) float64 {
+	den := srcB - srcA
+	if math.Abs(den) < 1e-9 {
+		return (dstA + dstB) * 0.5
+	}
+	t := (v - srcA) / den
+	return dstA + (dstB-dstA)*t
+}
+
+func percentileFromSorted(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if q <= 0 {
+		return sorted[0]
+	}
+	if q >= 1 {
+		return sorted[len(sorted)-1]
+	}
+	pos := q * float64(len(sorted)-1)
+	lo := int(math.Floor(pos))
+	hi := int(math.Ceil(pos))
+	if lo == hi {
+		return sorted[lo]
+	}
+	frac := pos - float64(lo)
+	return sorted[lo] + (sorted[hi]-sorted[lo])*frac
+}
+
+func profileWaterline(profile *GenProfile) int {
+	if profile == nil {
+		return -22
+	}
+	depth := profile.ElevP10 - profile.ElevP50
+	shift := int(math.Round(depth * 0.20))
+	return clamp(-22+shift, -45, -5)
+}
+
+func profileLakeElevation(profile *GenProfile) int {
+	if profile == nil {
+		return -10
+	}
+	span := maxFloat64(1.0, profile.ElevP90-profile.ElevP10)
+	return clamp(int(math.Round(profile.ElevP10+span*0.22)), -24, 12)
+}
+
+func riverThresholdForProfile(accum []int, cells []TopoCell, profile *GenProfile) int {
+	if len(accum) == 0 || len(cells) == 0 {
+		return 16
+	}
+	target := 0.055
+	if profile != nil {
+		target = profile.RiverDensity
+	}
+	target = clampFloat(target, 0.005, 0.25)
+	candidates := make([]int, 0, len(accum))
+	for i := range accum {
+		if i >= len(cells) || cells[i].Flags&TopoFlagWater != 0 {
+			continue
+		}
+		candidates = append(candidates, accum[i])
+	}
+	if len(candidates) == 0 {
+		return 16
+	}
+	sort.Ints(candidates)
+	k := int(math.Round((1.0 - target) * float64(len(candidates)-1)))
+	k = clamp(k, 0, len(candidates)-1)
+	threshold := candidates[k]
+	if threshold < 4 {
+		threshold = 4
+	}
+	return threshold
+}
+
+func expandLakeCoverage(cells []TopoCell, width, height int, targetCoverage float64) {
+	if len(cells) == 0 || width <= 0 || height <= 0 {
+		return
+	}
+	targetCoverage = clampFloat(targetCoverage, 0, 0.35)
+	target := int(math.Round(float64(len(cells)) * targetCoverage))
+	if target <= 0 {
+		return
+	}
+	current := 0
+	for _, cell := range cells {
+		if cell.Flags&TopoFlagLake != 0 {
+			current++
+		}
+	}
+	if current >= target {
+		return
+	}
+	type candidate struct {
+		idx       int
+		elevation int
+		moisture  int
+	}
+	candidates := make([]candidate, 0, len(cells))
+	for idx, cell := range cells {
+		if cell.Flags&TopoFlagWater != 0 {
+			continue
+		}
+		x := idx % width
+		y := idx / width
+		if x == 0 || y == 0 || x == width-1 || y == height-1 {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			idx:       idx,
+			elevation: int(cell.Elevation),
+			moisture:  int(cell.Moisture),
+		})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].elevation != candidates[j].elevation {
+			return candidates[i].elevation < candidates[j].elevation
+		}
+		return candidates[i].moisture > candidates[j].moisture
+	})
+	need := target - current
+	for i := 0; i < need && i < len(candidates); i++ {
+		idx := candidates[i].idx
+		cells[idx].Flags |= TopoFlagLake | TopoFlagWater
+	}
+}
+
+func maxFloat64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

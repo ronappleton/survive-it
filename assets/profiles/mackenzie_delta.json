@@ -1,0 +1,15 @@
+{
+  "id": "mackenzie_delta",
+  "name": "Mackenzie River Delta (NWT)",
+  "cell_meters": 100,
+  "elev_p10": -0.199,
+  "elev_p50": 0.548,
+  "elev_p90": 13.1,
+  "slope_p50": 0.111,
+  "slope_p90": 1.283,
+  "ruggedness": 1.1838,
+  "river_density": 0.0614,
+  "lake_coverage": 0.14,
+  "notes": "Derived from 34x34 elevation samples in bbox [-137.8000, 67.1000, -132.0000, 70.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

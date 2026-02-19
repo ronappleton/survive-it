@@ -1,0 +1,15 @@
+{
+  "id": "namib_desert",
+  "name": "Namib Desert (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -2.793,
+  "elev_p50": 19.075,
+  "elev_p90": 39.138,
+  "slope_p50": 0.508,
+  "slope_p90": 1.171,
+  "ruggedness": 2.4,
+  "river_density": 0.0614,
+  "lake_coverage": 0.0047,
+  "notes": "Derived from 34x34 elevation samples in bbox [14.0000, -25.5000, 16.8000, -22.0000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

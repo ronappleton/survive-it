@@ -1,0 +1,15 @@
+{
+  "id": "tanzania_savanna",
+  "name": "Tanzania Savanna (NAA)",
+  "cell_meters": 100,
+  "elev_p10": 28.35,
+  "elev_p50": 33.15,
+  "elev_p90": 44.6,
+  "slope_p50": 0.306,
+  "slope_p90": 0.934,
+  "ruggedness": 1.2146,
+  "river_density": 0.0614,
+  "lake_coverage": 0.14,
+  "notes": "Derived from 34x34 elevation samples in bbox [33.0000, -3.5000, 35.6000, -1.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

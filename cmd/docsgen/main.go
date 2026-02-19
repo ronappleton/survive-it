@@ -11,6 +11,9 @@ import (
 	"github.com/appengine-ltd/survive-it/internal/game"
 )
 
+// Discovery summary:
+// - Catalog docs are generated directly from in-code registry functions, so schema additions must be reflected here.
+// - Keeping docsgen synchronized with registry fields prevents documentation drift after content expansion.
 type docFile struct {
 	Name    string
 	Title   string
@@ -123,9 +126,9 @@ func generatePlantsDoc() docFile {
 	var b strings.Builder
 	b.WriteString("# Plants\n\n")
 	b.WriteString("Source: `internal/game/environment_resources.go` (`PlantCatalog`).\n\n")
-	b.WriteString(fmt.Sprintf("Total plant foods: **%d**.\n\n", len(items)))
-	b.WriteString("| ID | Name | Category | Biome Tags | Yield (g) | Nutrition /100g |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString(fmt.Sprintf("Total plants: **%d**.\n\n", len(items)))
+	b.WriteString("| ID | Name | Category | Biome Tags | Seasons | Yield (g) | Nutrition /100g | Utility Tags | Medicinal | Toxicity | Toxic Symptoms |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, p := range items {
 		b.WriteString("| ")
 		b.WriteString(escape(p.ID))
@@ -136,9 +139,19 @@ func generatePlantsDoc() docFile {
 		b.WriteString(" | ")
 		b.WriteString(escape(strings.Join(p.BiomeTags, ", ")))
 		b.WriteString(" | ")
+		b.WriteString(escape(formatSeasonTags(p.SeasonTags)))
+		b.WriteString(" | ")
 		b.WriteString(fmt.Sprintf("%d-%d", p.YieldMinG, p.YieldMaxG))
 		b.WriteString(" | ")
 		b.WriteString(escape(fmt.Sprintf("%dkcal %dgP %dgF %dgS", p.NutritionPer100g.CaloriesKcal, p.NutritionPer100g.ProteinG, p.NutritionPer100g.FatG, p.NutritionPer100g.SugarG)))
+		b.WriteString(" | ")
+		b.WriteString(escape(strings.Join(p.UtilityTags, ", ")))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(p.Medicinal))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(p.Toxicity))
+		b.WriteString(" | ")
+		b.WriteString(escape(strings.Join(p.ToxicSymptoms, ", ")))
 		b.WriteString(" |\n")
 	}
 
@@ -196,8 +209,8 @@ func generateTreesDoc() docFile {
 	b.WriteString("# Trees\n\n")
 	b.WriteString("Source: `internal/game/environment_resources.go` (`TreeCatalog`).\n\n")
 	b.WriteString(fmt.Sprintf("Total trees: **%d**.\n\n", len(items)))
-	b.WriteString("| ID | Name | Wood Type | Biome Tags | Gather (kg) | Heat Factor | Burn Factor | Spark Ease |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| ID | Name | Wood Type | Biome Tags | Gather (kg) | Heat | Burn | Spark | Hardness | Structural | Resin | Rot Resist | Smoke | Bark Resource | Bark Uses | Tags |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, t := range items {
 		b.WriteString("| ")
 		b.WriteString(escape(t.ID))
@@ -215,6 +228,22 @@ func generateTreesDoc() docFile {
 		b.WriteString(fmt.Sprintf("%.2f", t.BurnFactor))
 		b.WriteString(" | ")
 		b.WriteString(strconv.Itoa(t.SparkEase))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(t.Hardness))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(t.Structural))
+		b.WriteString(" | ")
+		b.WriteString(fmt.Sprintf("%.2f", t.ResinQuality))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(t.RotResistance))
+		b.WriteString(" | ")
+		b.WriteString(fmt.Sprintf("%.2f", t.SmokeFactor))
+		b.WriteString(" | ")
+		b.WriteString(escape(t.BarkResource))
+		b.WriteString(" | ")
+		b.WriteString(escape(strings.Join(t.BarkUses, ", ")))
+		b.WriteString(" | ")
+		b.WriteString(escape(strings.Join(t.Tags, ", ")))
 		b.WriteString(" |\n")
 	}
 
@@ -345,8 +374,8 @@ func generateSheltersDoc() docFile {
 	b.WriteString("# Shelters\n\n")
 	b.WriteString("Source: `internal/game/environment_resources.go` (`ShelterCatalog`).\n\n")
 	b.WriteString(fmt.Sprintf("Total shelters: **%d**.\n\n", len(items)))
-	b.WriteString("| ID | Name | Storage (kg) | Insulation | Rain | Wind | Insect | Durability Loss/Day | Build Cost (E/H2O) | Morale Bonus | Biomes |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| ID | Name | Storage (kg) | Insulation | Rain | Wind | Insect | Dryness | Predator | Comfort | Stealth | Durability Loss/Day | Build Cost (E/H2O) | Morale Bonus | Stages | Sleep Shelter | Upgrade Components | Biomes |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, s := range items {
 		b.WriteString("| ")
 		b.WriteString(escape(string(s.ID)))
@@ -363,11 +392,25 @@ func generateSheltersDoc() docFile {
 		b.WriteString(" | ")
 		b.WriteString(strconv.Itoa(s.InsectProtection))
 		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(s.DrynessProtection))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(s.PredatorSafety))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(s.Comfort))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(s.Stealth))
+		b.WriteString(" | ")
 		b.WriteString(strconv.Itoa(s.DurabilityPerDay))
 		b.WriteString(" | ")
 		b.WriteString(fmt.Sprintf("%d/%d", s.BuildEnergyCost, s.BuildHydrationCost))
 		b.WriteString(" | ")
 		b.WriteString(strconv.Itoa(s.BuildMoraleBonus))
+		b.WriteString(" | ")
+		b.WriteString(strconv.Itoa(len(s.Stages)))
+		b.WriteString(" | ")
+		b.WriteString(yesNo(s.SleepShelter))
+		b.WriteString(" | ")
+		b.WriteString(escape(strings.Join(s.UpgradeComponents, ", ")))
 		b.WriteString(" | ")
 		b.WriteString(escape(strings.Join(s.BiomeTags, ", ")))
 		b.WriteString(" |\n")
@@ -389,8 +432,8 @@ func generateScenariosDoc() docFile {
 	b.WriteString("# Scenarios\n\n")
 	b.WriteString("Source: `internal/game/scenarios_builtin.go` (`BuiltInScenarios`).\n\n")
 	b.WriteString(fmt.Sprintf("Total built-in scenarios: **%d**.\n\n", len(items)))
-	b.WriteString("| ID | Name | Modes | Days | Location | Biome | Map (cells) | Default Season Set | Season Phases |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| ID | Name | Modes | Days | Location | Profile ID | BBox | Biome | Map (cells) | Default Season Set | Season Phases |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, s := range items {
 		modes := make([]string, 0, len(s.SupportedModes))
 		for _, m := range s.SupportedModes {
@@ -406,6 +449,17 @@ func generateScenariosDoc() docFile {
 		b.WriteString(strconv.Itoa(s.DefaultDays))
 		b.WriteString(" | ")
 		b.WriteString(escape(s.Location))
+		b.WriteString(" | ")
+		profileID := ""
+		bbox := ""
+		if s.LocationMeta != nil {
+			profileID = s.LocationMeta.ProfileID
+			bb := s.LocationMeta.BBox
+			bbox = fmt.Sprintf("%.2f, %.2f, %.2f, %.2f", bb[0], bb[1], bb[2], bb[3])
+		}
+		b.WriteString(escape(profileID))
+		b.WriteString(" | ")
+		b.WriteString(escape(bbox))
 		b.WriteString(" | ")
 		b.WriteString(escape(s.Biome))
 		b.WriteString(" | ")
@@ -491,6 +545,17 @@ func formatSeasonSets(sets []game.SeasonSet) string {
 		parts = append(parts, fmt.Sprintf("%s[%s]", set.ID, strings.Join(phases, ",")))
 	}
 	return strings.Join(parts, "; ")
+}
+
+func formatSeasonTags(tags []game.SeasonID) string {
+	if len(tags) == 0 {
+		return "any"
+	}
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		out = append(out, string(tag))
+	}
+	return strings.Join(out, ", ")
 }
 
 func formatFloat(v float64) string {

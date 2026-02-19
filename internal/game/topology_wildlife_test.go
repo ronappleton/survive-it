@@ -170,3 +170,20 @@ func TestSwampBiomeProducesMoreInsectEncountersThanDesert(t *testing.T) {
 		t.Fatalf("expected swamp to produce more insect encounters than desert, desert=%d swamp=%d", desert, swamp)
 	}
 }
+
+func TestWildlifeEncounterSpeciesIDsResolveToAnimalCatalog(t *testing.T) {
+	animalIDs := map[string]bool{}
+	for _, animal := range AnimalCatalog() {
+		animalIDs[animal.ID] = true
+	}
+
+	ids := wildlifeEncounterSpeciesIDs()
+	if len(ids) == 0 {
+		t.Fatalf("expected wildlife encounter species ids")
+	}
+	for _, id := range ids {
+		if !animalIDs[id] {
+			t.Fatalf("encounter species id %q missing from AnimalCatalog", id)
+		}
+	}
+}

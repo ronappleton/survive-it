@@ -1,0 +1,15 @@
+{
+  "id": "yucatan_dry_forest",
+  "name": "Yucatan (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -0.51,
+  "elev_p50": 0.45,
+  "elev_p90": 3.125,
+  "slope_p50": 0.036,
+  "slope_p90": 0.267,
+  "ruggedness": 0.8682,
+  "river_density": 0.064,
+  "lake_coverage": 0.0047,
+  "notes": "Derived from 34x34 elevation samples in bbox [-90.8000, 18.4000, -87.2000, 21.8000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

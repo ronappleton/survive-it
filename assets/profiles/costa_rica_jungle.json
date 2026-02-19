@@ -1,0 +1,15 @@
+{
+  "id": "costa_rica_jungle",
+  "name": "Costa Rica Jungle (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -42.126,
+  "elev_p50": 0.938,
+  "elev_p90": 29.6,
+  "slope_p50": 1.37,
+  "slope_p90": 4.259,
+  "ruggedness": 2.4,
+  "river_density": 0.0606,
+  "lake_coverage": 0.003,
+  "notes": "Derived from 34x34 elevation samples in bbox [-85.8000, 9.0000, -82.6000, 11.2000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "florida_everglades",
+  "name": "Florida Everglades (NAA)",
+  "cell_meters": 100,
+  "elev_p10": -2.063,
+  "elev_p50": 0.1,
+  "elev_p90": 0.25,
+  "slope_p50": 0.016,
+  "slope_p90": 0.453,
+  "ruggedness": 0.423,
+  "river_density": 0.0606,
+  "lake_coverage": 0.003,
+  "notes": "Derived from 34x34 elevation samples in bbox [-81.7000, 24.8000, -80.0000, 26.5000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

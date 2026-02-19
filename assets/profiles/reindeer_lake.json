@@ -1,0 +1,15 @@
+{
+  "id": "reindeer_lake",
+  "name": "Reindeer Lake (Saskatchewan)",
+  "cell_meters": 100,
+  "elev_p10": 8.363,
+  "elev_p50": 9.6,
+  "elev_p90": 11.188,
+  "slope_p50": 0.111,
+  "slope_p90": 0.227,
+  "ruggedness": 0.2059,
+  "river_density": 0.0727,
+  "lake_coverage": 0.1246,
+  "notes": "Derived from 34x34 elevation samples in bbox [-104.7000, 55.0000, -101.0000, 58.8000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}

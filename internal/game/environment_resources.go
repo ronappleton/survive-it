@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Catalogs are defined as slice-returning registry functions and selected by biome tag substring matching.
+// - Foraging is deterministic from seed/day/actor and currently consumes immediately via ForageAndConsume.
+// - Shelter/crafting/trap systems use lightweight data-driven specs and command handlers over shared RunState.
 type PlantCategory string
 
 const (
@@ -17,6 +21,10 @@ const (
 	PlantCategoryBerries   PlantCategory = "berries"
 	PlantCategoryFruits    PlantCategory = "fruits"
 	PlantCategoryVegetable PlantCategory = "vegetables"
+	PlantCategoryNutsSeeds PlantCategory = "nuts_seeds"
+	PlantCategoryMedicinal PlantCategory = "medicinal"
+	PlantCategoryToxic     PlantCategory = "toxic"
+	PlantCategoryUtility   PlantCategory = "utility"
 )
 
 type PlantSpec struct {
@@ -24,9 +32,14 @@ type PlantSpec struct {
 	Name             string
 	Category         PlantCategory
 	BiomeTags        []string
+	SeasonTags       []SeasonID
 	YieldMinG        int
 	YieldMaxG        int
 	NutritionPer100g NutritionPer100g
+	UtilityTags      []string
+	Medicinal        int
+	Toxicity         int
+	ToxicSymptoms    []string
 }
 
 type ForageResult struct {
@@ -36,7 +49,7 @@ type ForageResult struct {
 }
 
 func PlantCatalog() []PlantSpec {
-	return []PlantSpec{
+	base := []PlantSpec{
 		{ID: "burdock_root", Name: "Burdock Root", Category: PlantCategoryRoots, BiomeTags: []string{"forest", "temperate", "mountain"}, YieldMinG: 120, YieldMaxG: 600, NutritionPer100g: NutritionPer100g{CaloriesKcal: 72, ProteinG: 1, FatG: 0, SugarG: 2}},
 		{ID: "cattail_root", Name: "Cattail Rhizome", Category: PlantCategoryRoots, BiomeTags: []string{"wetlands", "swamp", "delta", "lake"}, YieldMinG: 200, YieldMaxG: 900, NutritionPer100g: NutritionPer100g{CaloriesKcal: 80, ProteinG: 2, FatG: 0, SugarG: 3}},
 		{ID: "yuca_root", Name: "Yuca Root", Category: PlantCategoryRoots, BiomeTags: []string{"jungle", "savanna", "tropical"}, YieldMinG: 180, YieldMaxG: 1100, NutritionPer100g: NutritionPer100g{CaloriesKcal: 160, ProteinG: 1, FatG: 0, SugarG: 2}},
@@ -61,6 +74,62 @@ func PlantCatalog() []PlantSpec {
 		{ID: "prickly_pear_pad", Name: "Prickly Pear Pad", Category: PlantCategoryVegetable, BiomeTags: []string{"desert", "dry", "badlands"}, YieldMinG: 120, YieldMaxG: 550, NutritionPer100g: NutritionPer100g{CaloriesKcal: 16, ProteinG: 1, FatG: 0, SugarG: 1}},
 		{ID: "bamboo_shoot", Name: "Bamboo Shoot", Category: PlantCategoryVegetable, BiomeTags: []string{"jungle", "tropical", "wetlands"}, YieldMinG: 200, YieldMaxG: 900, NutritionPer100g: NutritionPer100g{CaloriesKcal: 27, ProteinG: 3, FatG: 0, SugarG: 3}},
 	}
+	return append(base, expandedPlantCatalog()...)
+}
+
+func expandedPlantCatalog() []PlantSpec {
+	return []PlantSpec{
+		{ID: "wild_onion", Name: "Wild Onion", Category: PlantCategoryRoots, BiomeTags: []string{"forest", "grassland", "river", "mountain"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonDry}, YieldMinG: 60, YieldMaxG: 260, NutritionPer100g: NutritionPer100g{CaloriesKcal: 40, ProteinG: 1, FatG: 0, SugarG: 4}, UtilityTags: []string{"flavoring"}},
+		{ID: "arrowhead_tuber", Name: "Arrowhead Tuber", Category: PlantCategoryRoots, BiomeTags: []string{"wetlands", "swamp", "lake", "river"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 100, YieldMaxG: 520, NutritionPer100g: NutritionPer100g{CaloriesKcal: 98, ProteinG: 2, FatG: 0, SugarG: 2}},
+		{ID: "lotus_root", Name: "Lotus Root", Category: PlantCategoryRoots, BiomeTags: []string{"delta", "wetlands", "lake", "jungle"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 110, YieldMaxG: 640, NutritionPer100g: NutritionPer100g{CaloriesKcal: 74, ProteinG: 2, FatG: 0, SugarG: 1}},
+		{ID: "wild_garlic", Name: "Wild Garlic", Category: PlantCategoryVegetable, BiomeTags: []string{"forest", "mountain", "river", "boreal"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWet}, YieldMinG: 50, YieldMaxG: 220, NutritionPer100g: NutritionPer100g{CaloriesKcal: 110, ProteinG: 6, FatG: 0, SugarG: 1}, Medicinal: 1, UtilityTags: []string{"antimicrobial"}},
+		{ID: "amaranth_leaf", Name: "Wild Amaranth Greens", Category: PlantCategoryVegetable, BiomeTags: []string{"savanna", "badlands", "river", "forest"}, SeasonTags: []SeasonID{SeasonDry, SeasonWet}, YieldMinG: 90, YieldMaxG: 420, NutritionPer100g: NutritionPer100g{CaloriesKcal: 23, ProteinG: 3, FatG: 0, SugarG: 1}},
+		{ID: "sea_beet", Name: "Sea Beet", Category: PlantCategoryVegetable, BiomeTags: []string{"coast", "island", "delta"}, SeasonTags: []SeasonID{SeasonDry, SeasonAutumn}, YieldMinG: 80, YieldMaxG: 390, NutritionPer100g: NutritionPer100g{CaloriesKcal: 19, ProteinG: 2, FatG: 0, SugarG: 0}},
+		{ID: "purslane", Name: "Purslane", Category: PlantCategoryVegetable, BiomeTags: []string{"desert", "dry", "coast", "savanna", "forest"}, SeasonTags: []SeasonID{SeasonDry, SeasonWet}, YieldMinG: 80, YieldMaxG: 360, NutritionPer100g: NutritionPer100g{CaloriesKcal: 20, ProteinG: 2, FatG: 0, SugarG: 1}, Medicinal: 1},
+		{ID: "chickweed", Name: "Chickweed", Category: PlantCategoryVegetable, BiomeTags: []string{"forest", "river", "wetlands", "coast"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 70, YieldMaxG: 350, NutritionPer100g: NutritionPer100g{CaloriesKcal: 18, ProteinG: 2, FatG: 0, SugarG: 1}, Medicinal: 1},
+
+		{ID: "huckleberry", Name: "Huckleberry", Category: PlantCategoryBerries, BiomeTags: []string{"mountain", "forest", "boreal"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 60, YieldMaxG: 320, NutritionPer100g: NutritionPer100g{CaloriesKcal: 50, ProteinG: 1, FatG: 0, SugarG: 8}},
+		{ID: "lingonberry", Name: "Lingonberry", Category: PlantCategoryBerries, BiomeTags: []string{"boreal", "subarctic", "tundra", "forest"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWinter}, YieldMinG: 50, YieldMaxG: 250, NutritionPer100g: NutritionPer100g{CaloriesKcal: 43, ProteinG: 1, FatG: 0, SugarG: 6}, Medicinal: 1},
+		{ID: "elderberry", Name: "Elderberry", Category: PlantCategoryBerries, BiomeTags: []string{"forest", "river", "wetlands", "coast"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 70, YieldMaxG: 420, NutritionPer100g: NutritionPer100g{CaloriesKcal: 73, ProteinG: 1, FatG: 0, SugarG: 7}, Medicinal: 1, Toxicity: 1, ToxicSymptoms: []string{"nausea if unripe"}},
+		{ID: "juniper_berry", Name: "Juniper Berry", Category: PlantCategoryBerries, BiomeTags: []string{"mountain", "dry", "boreal", "forest"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWinter}, YieldMinG: 25, YieldMaxG: 120, NutritionPer100g: NutritionPer100g{CaloriesKcal: 44, ProteinG: 0, FatG: 1, SugarG: 4}, Medicinal: 1, UtilityTags: []string{"flavoring"}},
+		{ID: "cloudberry", Name: "Cloudberry", Category: PlantCategoryBerries, BiomeTags: []string{"tundra", "subarctic", "wetlands", "boreal"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 40, YieldMaxG: 210, NutritionPer100g: NutritionPer100g{CaloriesKcal: 51, ProteinG: 1, FatG: 0, SugarG: 6}},
+		{ID: "cranberry", Name: "Cranberry", Category: PlantCategoryBerries, BiomeTags: []string{"wetlands", "swamp", "lake", "boreal"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWet}, YieldMinG: 60, YieldMaxG: 330, NutritionPer100g: NutritionPer100g{CaloriesKcal: 46, ProteinG: 0, FatG: 0, SugarG: 4}, Medicinal: 1},
+
+		{ID: "wild_plum", Name: "Wild Plum", Category: PlantCategoryFruits, BiomeTags: []string{"forest", "savanna", "river"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 90, YieldMaxG: 460, NutritionPer100g: NutritionPer100g{CaloriesKcal: 46, ProteinG: 1, FatG: 0, SugarG: 10}},
+		{ID: "fig", Name: "Wild Fig", Category: PlantCategoryFruits, BiomeTags: []string{"jungle", "tropical", "coast", "island"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 110, YieldMaxG: 560, NutritionPer100g: NutritionPer100g{CaloriesKcal: 74, ProteinG: 1, FatG: 0, SugarG: 16}},
+		{ID: "persimmon", Name: "Persimmon", Category: PlantCategoryFruits, BiomeTags: []string{"forest", "mountain", "river", "coast"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 80, YieldMaxG: 430, NutritionPer100g: NutritionPer100g{CaloriesKcal: 81, ProteinG: 1, FatG: 0, SugarG: 18}},
+		{ID: "soursop", Name: "Soursop", Category: PlantCategoryFruits, BiomeTags: []string{"jungle", "tropical", "wetlands"}, SeasonTags: []SeasonID{SeasonWet}, YieldMinG: 150, YieldMaxG: 950, NutritionPer100g: NutritionPer100g{CaloriesKcal: 66, ProteinG: 1, FatG: 0, SugarG: 13}},
+		{ID: "breadfruit", Name: "Breadfruit", Category: PlantCategoryFruits, BiomeTags: []string{"island", "coast", "tropical"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 200, YieldMaxG: 1300, NutritionPer100g: NutritionPer100g{CaloriesKcal: 103, ProteinG: 1, FatG: 0, SugarG: 11}},
+
+		{ID: "acorn", Name: "Acorn", Category: PlantCategoryNutsSeeds, BiomeTags: []string{"forest", "temperate", "mountain", "coast"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWinter}, YieldMinG: 120, YieldMaxG: 880, NutritionPer100g: NutritionPer100g{CaloriesKcal: 387, ProteinG: 6, FatG: 24, SugarG: 0}, UtilityTags: []string{"acorn flour"}},
+		{ID: "pine_nut", Name: "Pine Nut", Category: PlantCategoryNutsSeeds, BiomeTags: []string{"boreal", "mountain", "forest", "subarctic"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWinter}, YieldMinG: 50, YieldMaxG: 300, NutritionPer100g: NutritionPer100g{CaloriesKcal: 673, ProteinG: 14, FatG: 68, SugarG: 4}},
+		{ID: "hazelnut", Name: "Hazelnut", Category: PlantCategoryNutsSeeds, BiomeTags: []string{"forest", "temperate", "river"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 80, YieldMaxG: 460, NutritionPer100g: NutritionPer100g{CaloriesKcal: 628, ProteinG: 15, FatG: 61, SugarG: 4}},
+		{ID: "beech_nut", Name: "Beech Nut", Category: PlantCategoryNutsSeeds, BiomeTags: []string{"forest", "boreal", "mountain"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 70, YieldMaxG: 360, NutritionPer100g: NutritionPer100g{CaloriesKcal: 576, ProteinG: 6, FatG: 50, SugarG: 1}},
+		{ID: "water_lily_seed", Name: "Water Lily Seed", Category: PlantCategoryNutsSeeds, BiomeTags: []string{"lake", "wetlands", "swamp", "delta"}, SeasonTags: []SeasonID{SeasonWet}, YieldMinG: 90, YieldMaxG: 440, NutritionPer100g: NutritionPer100g{CaloriesKcal: 353, ProteinG: 17, FatG: 2, SugarG: 1}},
+
+		{ID: "willow_herb", Name: "Willow Herb", Category: PlantCategoryMedicinal, BiomeTags: []string{"forest", "river", "boreal", "mountain"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 30, YieldMaxG: 140, NutritionPer100g: NutritionPer100g{CaloriesKcal: 18, ProteinG: 2, FatG: 0, SugarG: 1}, Medicinal: 2, UtilityTags: []string{"anti-inflammatory tea"}},
+		{ID: "yarrow", Name: "Yarrow", Category: PlantCategoryMedicinal, BiomeTags: []string{"grassland", "savanna", "mountain", "forest"}, SeasonTags: []SeasonID{SeasonDry, SeasonAutumn}, YieldMinG: 25, YieldMaxG: 110, NutritionPer100g: NutritionPer100g{CaloriesKcal: 20, ProteinG: 1, FatG: 0, SugarG: 1}, Medicinal: 2, UtilityTags: []string{"wound herb"}},
+		{ID: "chamomile", Name: "Wild Chamomile", Category: PlantCategoryMedicinal, BiomeTags: []string{"grassland", "forest", "river", "coast"}, SeasonTags: []SeasonID{SeasonDry, SeasonWet}, YieldMinG: 20, YieldMaxG: 90, NutritionPer100g: NutritionPer100g{CaloriesKcal: 17, ProteinG: 1, FatG: 0, SugarG: 0}, Medicinal: 2, UtilityTags: []string{"calming tea"}},
+		{ID: "echinacea", Name: "Echinacea", Category: PlantCategoryMedicinal, BiomeTags: []string{"savanna", "forest", "badlands"}, SeasonTags: []SeasonID{SeasonDry, SeasonAutumn}, YieldMinG: 25, YieldMaxG: 110, NutritionPer100g: NutritionPer100g{CaloriesKcal: 24, ProteinG: 1, FatG: 0, SugarG: 1}, Medicinal: 2, UtilityTags: []string{"immune support"}},
+		{ID: "comfrey", Name: "Comfrey", Category: PlantCategoryMedicinal, BiomeTags: []string{"river", "wetlands", "forest", "coast"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 30, YieldMaxG: 150, NutritionPer100g: NutritionPer100g{CaloriesKcal: 28, ProteinG: 4, FatG: 0, SugarG: 1}, Medicinal: 1, UtilityTags: []string{"poultice"}},
+		{ID: "aloe_vera", Name: "Aloe Vera", Category: PlantCategoryMedicinal, BiomeTags: []string{"desert", "dry", "coast", "island"}, SeasonTags: []SeasonID{SeasonDry}, YieldMinG: 60, YieldMaxG: 280, NutritionPer100g: NutritionPer100g{CaloriesKcal: 15, ProteinG: 0, FatG: 0, SugarG: 0}, Medicinal: 2, UtilityTags: []string{"burn gel"}},
+		{ID: "usnea_lichen", Name: "Usnea Lichen", Category: PlantCategoryMedicinal, BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, SeasonTags: []SeasonID{SeasonWet, SeasonWinter}, YieldMinG: 10, YieldMaxG: 60, NutritionPer100g: NutritionPer100g{CaloriesKcal: 12, ProteinG: 0, FatG: 0, SugarG: 0}, Medicinal: 1, UtilityTags: []string{"antiseptic wash"}},
+
+		{ID: "hemlock_shoot", Name: "Poison Hemlock Shoot", Category: PlantCategoryToxic, BiomeTags: []string{"river", "wetlands", "forest", "temperate"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 20, YieldMaxG: 90, NutritionPer100g: NutritionPer100g{CaloriesKcal: 15, ProteinG: 1, FatG: 0, SugarG: 0}, Toxicity: 5, ToxicSymptoms: []string{"neurological collapse"}},
+		{ID: "oleander_leaf", Name: "Oleander Leaf", Category: PlantCategoryToxic, BiomeTags: []string{"coast", "desert", "dry", "island"}, SeasonTags: []SeasonID{SeasonDry}, YieldMinG: 15, YieldMaxG: 70, NutritionPer100g: NutritionPer100g{CaloriesKcal: 11, ProteinG: 1, FatG: 0, SugarG: 0}, Toxicity: 5, ToxicSymptoms: []string{"cardiac distress"}},
+		{ID: "nightshade_berry", Name: "Nightshade Berry", Category: PlantCategoryToxic, BiomeTags: []string{"forest", "badlands", "savanna", "coast"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonWet}, YieldMinG: 25, YieldMaxG: 120, NutritionPer100g: NutritionPer100g{CaloriesKcal: 22, ProteinG: 1, FatG: 0, SugarG: 2}, Toxicity: 4, ToxicSymptoms: []string{"vomiting", "confusion"}},
+		{ID: "moonseed", Name: "Moonseed", Category: PlantCategoryToxic, BiomeTags: []string{"forest", "river", "wetlands"}, SeasonTags: []SeasonID{SeasonAutumn}, YieldMinG: 20, YieldMaxG: 110, NutritionPer100g: NutritionPer100g{CaloriesKcal: 20, ProteinG: 1, FatG: 0, SugarG: 2}, Toxicity: 4, ToxicSymptoms: []string{"severe cramps"}},
+		{ID: "castor_seed", Name: "Castor Seed", Category: PlantCategoryToxic, BiomeTags: []string{"savanna", "badlands", "dry", "tropical"}, SeasonTags: []SeasonID{SeasonDry, SeasonWet}, YieldMinG: 20, YieldMaxG: 100, NutritionPer100g: NutritionPer100g{CaloriesKcal: 80, ProteinG: 4, FatG: 3, SugarG: 1}, Toxicity: 5, ToxicSymptoms: []string{"organ damage"}},
+
+		{ID: "dogbane_fiber", Name: "Dogbane Fiber Plant", Category: PlantCategoryUtility, BiomeTags: []string{"forest", "river", "savanna", "badlands"}, SeasonTags: []SeasonID{SeasonAutumn, SeasonDry}, YieldMinG: 40, YieldMaxG: 180, NutritionPer100g: NutritionPer100g{CaloriesKcal: 8, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"strong cordage"}},
+		{ID: "flax_stalk", Name: "Wild Flax Stalk", Category: PlantCategoryUtility, BiomeTags: []string{"grassland", "savanna", "river", "forest"}, SeasonTags: []SeasonID{SeasonDry, SeasonAutumn}, YieldMinG: 35, YieldMaxG: 170, NutritionPer100g: NutritionPer100g{CaloriesKcal: 12, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"thread", "cloth fiber"}},
+		{ID: "milkweed_stalk", Name: "Milkweed Stalk", Category: PlantCategoryUtility, BiomeTags: []string{"savanna", "badlands", "forest", "coast"}, SeasonTags: []SeasonID{SeasonDry, SeasonAutumn}, YieldMinG: 45, YieldMaxG: 190, NutritionPer100g: NutritionPer100g{CaloriesKcal: 12, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"cordage", "insulation floss"}},
+		{ID: "cattail_leaf", Name: "Cattail Leaf", Category: PlantCategoryUtility, BiomeTags: []string{"wetlands", "swamp", "delta", "lake"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 80, YieldMaxG: 420, NutritionPer100g: NutritionPer100g{CaloriesKcal: 12, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"matting", "thatch", "basketry"}},
+		{ID: "bulrush", Name: "Bulrush", Category: PlantCategoryUtility, BiomeTags: []string{"wetlands", "swamp", "delta", "river", "lake"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 90, YieldMaxG: 500, NutritionPer100g: NutritionPer100g{CaloriesKcal: 10, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"raft lashings", "weaving"}},
+		{ID: "palm_frond", Name: "Palm Frond", Category: PlantCategoryUtility, BiomeTags: []string{"island", "coast", "tropical", "delta"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 90, YieldMaxG: 380, NutritionPer100g: NutritionPer100g{CaloriesKcal: 10, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"thatch", "fans", "screens"}},
+		{ID: "bamboo_culm", Name: "Bamboo Culm", Category: PlantCategoryUtility, BiomeTags: []string{"jungle", "wetlands", "tropical"}, SeasonTags: []SeasonID{SeasonWet, SeasonDry}, YieldMinG: 200, YieldMaxG: 1200, NutritionPer100g: NutritionPer100g{CaloriesKcal: 10, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"poles", "containers", "rafts"}},
+		{ID: "reed_mace", Name: "Reed Mace", Category: PlantCategoryUtility, BiomeTags: []string{"delta", "wetlands", "lake", "river"}, SeasonTags: []SeasonID{SeasonWet, SeasonAutumn}, YieldMinG: 30, YieldMaxG: 140, NutritionPer100g: NutritionPer100g{CaloriesKcal: 14, ProteinG: 0, FatG: 0, SugarG: 0}, UtilityTags: []string{"tinder fluff", "insulation"}},
+	}
 }
 
 func PlantCategories() []PlantCategory {
@@ -70,6 +139,10 @@ func PlantCategories() []PlantCategory {
 		PlantCategoryBerries,
 		PlantCategoryFruits,
 		PlantCategoryVegetable,
+		PlantCategoryNutsSeeds,
+		PlantCategoryMedicinal,
+		PlantCategoryToxic,
+		PlantCategoryUtility,
 	}
 }
 
@@ -86,17 +159,36 @@ func ParsePlantCategory(raw string) PlantCategory {
 		return PlantCategoryFruits
 	case "vegetables", "vegetable", "veg", "greens":
 		return PlantCategoryVegetable
+	case "nuts", "nut", "seeds", "seed", "nuts_seeds":
+		return PlantCategoryNutsSeeds
+	case "medicinal", "medicine", "herb", "herbs":
+		return PlantCategoryMedicinal
+	case "toxic", "poison", "poisonous":
+		return PlantCategoryToxic
+	case "utility", "fiber", "fibre", "cordage", "craft":
+		return PlantCategoryUtility
 	default:
 		return PlantCategoryAny
 	}
 }
 
 func PlantsForBiome(biome string, category PlantCategory) []PlantSpec {
+	return filteredPlantsForBiome(biome, category, "")
+}
+
+func PlantsForBiomeSeason(biome string, category PlantCategory, season SeasonID) []PlantSpec {
+	return filteredPlantsForBiome(biome, category, season)
+}
+
+func filteredPlantsForBiome(biome string, category PlantCategory, season SeasonID) []PlantSpec {
 	norm := normalizeBiome(biome)
 	catalog := PlantCatalog()
 	filtered := make([]PlantSpec, 0, len(catalog))
 	for _, plant := range catalog {
 		if category != PlantCategoryAny && plant.Category != category {
+			continue
+		}
+		if !plantSeasonMatches(plant, season) {
 			continue
 		}
 		for _, tag := range plant.BiomeTags {
@@ -107,14 +199,25 @@ func PlantsForBiome(biome string, category PlantCategory) []PlantSpec {
 		}
 	}
 
+	if len(filtered) == 0 && season != "" {
+		return filteredPlantsForBiome(biome, category, "")
+	}
 	if len(filtered) == 0 && category != PlantCategoryAny {
-		return PlantsForBiome(biome, PlantCategoryAny)
+		return filteredPlantsForBiome(biome, PlantCategoryAny, season)
 	}
 	return filtered
 }
 
 func RandomForage(seed int64, biome string, category PlantCategory, day, actorID int) (ForageResult, error) {
-	pool := PlantsForBiome(biome, category)
+	return randomForageWithSeason(seed, biome, category, day, actorID, "")
+}
+
+func RandomForageForSeason(seed int64, biome string, category PlantCategory, season SeasonID, day, actorID int) (ForageResult, error) {
+	return randomForageWithSeason(seed, biome, category, day, actorID, season)
+}
+
+func randomForageWithSeason(seed int64, biome string, category PlantCategory, day, actorID int, season SeasonID) (ForageResult, error) {
+	pool := filteredPlantsForBiome(biome, category, season)
 	if len(pool) == 0 {
 		return ForageResult{}, fmt.Errorf("no plants available in biome %s", biome)
 	}
@@ -152,7 +255,11 @@ func (s *RunState) ForageAndConsume(playerID int, category PlantCategory, grams 
 		return ForageResult{}, fmt.Errorf("player %d not found", playerID)
 	}
 
-	forage, err := RandomForage(s.Config.Seed, s.Scenario.Biome, category, s.Day, playerID)
+	season, ok := s.CurrentSeason()
+	if !ok {
+		season = ""
+	}
+	forage, err := RandomForageForSeason(s.Config.Seed, s.Scenario.Biome, category, season, s.Day, playerID)
 	if err != nil {
 		return ForageResult{}, err
 	}
@@ -174,9 +281,79 @@ func (s *RunState) ForageAndConsume(playerID int, category PlantCategory, grams 
 	player.Energy = clamp(player.Energy+energyGain, 0, 100)
 	player.Hydration = clamp(player.Hydration+hydrationGain, 0, 100)
 	player.Morale = clamp(player.Morale+moraleGain, 0, 100)
+	s.applyForagePlantEffects(playerID, player, forage)
 	refreshEffectBars(player)
 
 	return forage, nil
+}
+
+func plantSeasonMatches(spec PlantSpec, season SeasonID) bool {
+	if len(spec.SeasonTags) == 0 || season == "" {
+		return true
+	}
+	for _, tag := range spec.SeasonTags {
+		if tag == season {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *RunState) applyForagePlantEffects(playerID int, player *PlayerState, forage ForageResult) {
+	if s == nil || player == nil {
+		return
+	}
+	if forage.Plant.Medicinal > 0 {
+		player.Morale = clamp(player.Morale+clamp(forage.Plant.Medicinal, 1, 3), 0, 100)
+		player.Hydration = clamp(player.Hydration+clamp(forage.Plant.Medicinal/2, 0, 2), 0, 100)
+		if len(player.Ailments) > 0 {
+			reliefRoll := deterministicForageRoll(s.Config.Seed, s.Day, playerID, forage.Plant.ID, "medicinal")
+			if reliefRoll <= 0.12+float64(forage.Plant.Medicinal)*0.05 {
+				player.Ailments[0].DaysRemaining = maxInt(0, player.Ailments[0].DaysRemaining-1)
+				if player.Ailments[0].DaysRemaining == 0 {
+					player.Ailments = append([]Ailment{}, player.Ailments[1:]...)
+				}
+			}
+		}
+	}
+	if forage.Plant.Toxicity <= 0 {
+		return
+	}
+	toxicChance := float64(clamp(forage.Plant.Toxicity, 1, 5))*0.08 - float64(player.Foraging)/300.0 - float64(max(0, player.MentalStrength))/300.0
+	toxicChance = clampFloat(toxicChance, 0.02, 0.42)
+	roll := deterministicForageRoll(s.Config.Seed, s.Day, playerID, forage.Plant.ID, "toxicity")
+	if roll > toxicChance {
+		return
+	}
+	penaltyScale := clamp(forage.Plant.Toxicity, 1, 5)
+	player.Energy = clamp(player.Energy-penaltyScale, 0, 100)
+	player.Hydration = clamp(player.Hydration-(penaltyScale+1), 0, 100)
+	player.Morale = clamp(player.Morale-penaltyScale, 0, 100)
+	ailment := Ailment{
+		Type:             AilmentFoodPoison,
+		Name:             "Foraged Plant Poisoning",
+		DaysRemaining:    1 + penaltyScale/2,
+		EnergyPenalty:    penaltyScale,
+		HydrationPenalty: penaltyScale + 1,
+		MoralePenalty:    penaltyScale,
+	}
+	player.applyAilment(ailment)
+	if penaltyScale >= 4 {
+		player.applyAilment(Ailment{
+			Type:             AilmentVomiting,
+			Name:             "Severe Plant Toxin Reaction",
+			DaysRemaining:    1,
+			EnergyPenalty:    penaltyScale,
+			HydrationPenalty: penaltyScale + 2,
+			MoralePenalty:    penaltyScale,
+		})
+	}
+}
+
+func deterministicForageRoll(seed int64, day, playerID int, plantID, salt string) float64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%d:%d:%d:%s:%s", seed, day, playerID, plantID, salt)))
+	return float64(h.Sum64()%10000) / 10000.0
 }
 
 func nutritionFromPer100g(per100 NutritionPer100g, grams int) NutritionTotals {
@@ -211,7 +388,7 @@ type ResourceStock struct {
 }
 
 func ResourceCatalog() []ResourceSpec {
-	return []ResourceSpec{
+	base := []ResourceSpec{
 		{ID: "dry_grass", Name: "Dry Grass", BiomeTags: []string{"savanna", "badlands", "dry", "desert", "forest"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.85, Flammable: true, Uses: []string{"tinder", "thatch", "insulation"}},
 		{ID: "birch_bark", Name: "Birch Bark", BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, Unit: "sheet", GatherMin: 1, GatherMax: 3, Dryness: 0.8, Flammable: true, Uses: []string{"tinder", "container", "roofing"}},
 		{ID: "cedar_bark", Name: "Cedar Bark", BiomeTags: []string{"coast", "temperate_rainforest", "vancouver", "forest"}, Unit: "sheet", GatherMin: 1, GatherMax: 3, Dryness: 0.78, Flammable: true, Uses: []string{"cordage", "roofing", "bedding"}},
@@ -241,6 +418,35 @@ func ResourceCatalog() []ResourceSpec {
 		{ID: "charcoal", Name: "Charcoal", BiomeTags: []string{"forest", "savanna", "jungle", "mountain", "coast"}, Unit: "chunk", GatherMin: 1, GatherMax: 3, Dryness: 0.95, Flammable: true, Uses: []string{"water filter", "pigment", "fire extender"}},
 		{ID: "drift_reed_fiber", Name: "Drift Reed Fiber", BiomeTags: []string{"delta", "coast", "island", "wetlands"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.5, Flammable: true, Uses: []string{"netting", "cordage"}},
 		{ID: "seaweed_blade", Name: "Seaweed Blade", BiomeTags: []string{"coast", "island", "delta"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.25, Flammable: false, Uses: []string{"wrap", "compost", "iodine rinse"}},
+	}
+	return append(base, expandedResourceCatalog()...)
+}
+
+func expandedResourceCatalog() []ResourceSpec {
+	return []ResourceSpec{
+		{ID: "spruce_bough", Name: "Spruce Bough", BiomeTags: []string{"boreal", "subarctic", "mountain", "forest"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.52, Flammable: true, Uses: []string{"bedding", "thatch", "shelter lining"}},
+		{ID: "fir_bough", Name: "Fir Bough", BiomeTags: []string{"forest", "mountain", "boreal"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.54, Flammable: true, Uses: []string{"bedding", "insulation"}},
+		{ID: "willow_withy", Name: "Willow Withy", BiomeTags: []string{"river", "lake", "wetlands", "delta", "swamp"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.34, Flammable: false, Uses: []string{"wattle walls", "basket frame", "fish weir"}},
+		{ID: "hemp_fiber", Name: "Hemp Fiber", BiomeTags: []string{"savanna", "river", "forest", "badlands"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.62, Flammable: true, Uses: []string{"rope", "cloth", "net"}},
+		{ID: "flax_fiber", Name: "Flax Fiber", BiomeTags: []string{"grassland", "river", "forest", "coast"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.66, Flammable: true, Uses: []string{"thread", "cloth"}},
+		{ID: "bamboo_strip", Name: "Bamboo Strip", BiomeTags: []string{"jungle", "wetlands", "tropical"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.58, Flammable: true, Uses: []string{"lashing", "trap body", "splints"}},
+		{ID: "palm_frond", Name: "Palm Frond", BiomeTags: []string{"island", "coast", "tropical", "delta"}, Unit: "bundle", GatherMin: 1, GatherMax: 5, Dryness: 0.5, Flammable: true, Uses: []string{"thatch", "screen", "mat"}},
+		{ID: "liana_vine", Name: "Liana Vine", BiomeTags: []string{"jungle", "wetlands", "swamp", "tropical"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.44, Flammable: true, Uses: []string{"heavy lashing", "traps"}},
+		{ID: "bark_pitch", Name: "Bark Pitch", BiomeTags: []string{"forest", "boreal", "mountain", "coast"}, Unit: "lump", GatherMin: 1, GatherMax: 2, Dryness: 0.9, Flammable: true, Uses: []string{"sealant", "adhesive", "waterproofing"}},
+		{ID: "birch_tar", Name: "Birch Tar", BiomeTags: []string{"boreal", "forest", "mountain", "subarctic"}, Unit: "lump", GatherMin: 1, GatherMax: 2, Dryness: 0.93, Flammable: true, Uses: []string{"adhesive", "waterproofing"}},
+		{ID: "lichen", Name: "Lichen", BiomeTags: []string{"tundra", "arctic", "boreal", "mountain"}, Unit: "bundle", GatherMin: 1, GatherMax: 3, Dryness: 0.43, Flammable: true, Uses: []string{"tinder", "medicine", "insulation"}},
+		{ID: "horsetail_reed", Name: "Horsetail Reed", BiomeTags: []string{"wetlands", "river", "lake", "forest"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.57, Flammable: true, Uses: []string{"abrasive polish", "matting"}},
+		{ID: "mushroom_tinder", Name: "Tinder Fungus", BiomeTags: []string{"forest", "boreal", "mountain", "wetlands"}, Unit: "chunk", GatherMin: 1, GatherMax: 3, Dryness: 0.7, Flammable: true, Uses: []string{"tinder", "ember transport"}},
+		{ID: "thatch_bundle", Name: "Thatch Bundle", BiomeTags: []string{"savanna", "wetlands", "river", "coast"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.68, Flammable: true, Uses: []string{"roofing", "insulation"}},
+		{ID: "drift_log", Name: "Drift Log", BiomeTags: []string{"coast", "delta", "island", "lake"}, Unit: "piece", GatherMin: 1, GatherMax: 3, Dryness: 0.55, Flammable: true, Uses: []string{"platform beams", "raft body"}},
+		{ID: "gravel", Name: "Gravel", BiomeTags: []string{"river", "delta", "mountain", "badlands", "coast"}, Unit: "kg", GatherMin: 0.5, GatherMax: 3.0, Dryness: 1.0, Flammable: false, Uses: []string{"drainage", "hearth base"}},
+		{ID: "sand", Name: "Sand", BiomeTags: []string{"coast", "delta", "desert", "river"}, Unit: "kg", GatherMin: 0.5, GatherMax: 3.0, Dryness: 1.0, Flammable: false, Uses: []string{"drainage", "pit lining"}},
+		{ID: "shell_fragment", Name: "Shell Fragment", BiomeTags: []string{"coast", "island", "delta", "wetlands"}, Unit: "piece", GatherMin: 1, GatherMax: 6, Dryness: 1.0, Flammable: false, Uses: []string{"scraper", "awls", "ornament"}},
+		{ID: "stone_cobble", Name: "Stone Cobble", BiomeTags: []string{"mountain", "river", "badlands", "coast", "desert"}, Unit: "piece", GatherMin: 1, GatherMax: 5, Dryness: 1.0, Flammable: false, Uses: []string{"hearth", "deadfall weight", "oven"}},
+		{ID: "mud", Name: "Mud", BiomeTags: []string{"wetlands", "swamp", "river", "delta", "lake"}, Unit: "kg", GatherMin: 0.5, GatherMax: 2.4, Dryness: 0.15, Flammable: false, Uses: []string{"wattle daub", "seal"}},
+		{ID: "peat", Name: "Peat", BiomeTags: []string{"wetlands", "swamp", "boreal", "subarctic"}, Unit: "kg", GatherMin: 0.4, GatherMax: 1.8, Dryness: 0.4, Flammable: true, Uses: []string{"smolder fuel", "insulation"}},
+		{ID: "dry_leaf_litter", Name: "Dry Leaf Litter", BiomeTags: []string{"forest", "boreal", "savanna", "mountain"}, Unit: "bundle", GatherMin: 1, GatherMax: 5, Dryness: 0.78, Flammable: true, Uses: []string{"tinder", "bedding"}},
+		{ID: "cane_stalk", Name: "Cane Stalk", BiomeTags: []string{"wetlands", "delta", "jungle", "river"}, Unit: "bundle", GatherMin: 1, GatherMax: 4, Dryness: 0.53, Flammable: true, Uses: []string{"frames", "screens", "fishing stakes"}},
 	}
 }
 
@@ -418,34 +624,75 @@ const (
 )
 
 type TreeSpec struct {
-	ID          string
-	Name        string
-	BiomeTags   []string
-	WoodType    WoodType
-	GatherMinKg float64
-	GatherMaxKg float64
-	HeatFactor  float64
-	BurnFactor  float64
-	SparkEase   int
+	ID            string
+	Name          string
+	BiomeTags     []string
+	WoodType      WoodType
+	GatherMinKg   float64
+	GatherMaxKg   float64
+	HeatFactor    float64
+	BurnFactor    float64
+	SparkEase     int
+	Hardness      int
+	Structural    int
+	ResinQuality  float64
+	RotResistance int
+	SmokeFactor   float64
+	BarkResource  string
+	BarkUses      []string
+	Tags          []string
 }
 
 func TreeCatalog() []TreeSpec {
+	base := []TreeSpec{
+		{ID: "cedar", Name: "Cedar", BiomeTags: []string{"coast", "temperate_rainforest", "vancouver", "forest"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.8, GatherMaxKg: 4.2, HeatFactor: 0.85, BurnFactor: 0.8, SparkEase: 3, Hardness: 2, Structural: 3, ResinQuality: 0.5, RotResistance: 5, SmokeFactor: 0.8, BarkResource: "cedar_bark", BarkUses: []string{"cordage", "roofing"}, Tags: []string{"conifer"}},
+		{ID: "spruce", Name: "Spruce", BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, WoodType: WoodTypeResinous, GatherMinKg: 0.9, GatherMaxKg: 4.5, HeatFactor: 0.92, BurnFactor: 0.85, SparkEase: 4, Hardness: 3, Structural: 4, ResinQuality: 0.85, RotResistance: 3, SmokeFactor: 1.1, BarkResource: "spruce_root", BarkUses: []string{"sewing", "lashing"}, Tags: []string{"conifer"}},
+		{ID: "pine", Name: "Pine", BiomeTags: []string{"mountain", "boreal", "forest", "dry"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.1, HeatFactor: 0.9, BurnFactor: 0.82, SparkEase: 4, Hardness: 2, Structural: 3, ResinQuality: 0.9, RotResistance: 3, SmokeFactor: 1.2, BarkResource: "inner_bark_fiber", BarkUses: []string{"tinder", "fiber"}, Tags: []string{"conifer"}},
+		{ID: "fir", Name: "Fir", BiomeTags: []string{"forest", "mountain", "boreal"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.8, GatherMaxKg: 4.0, HeatFactor: 0.86, BurnFactor: 0.82, SparkEase: 3, Hardness: 2, Structural: 3, ResinQuality: 0.55, RotResistance: 3, SmokeFactor: 1.0, BarkResource: "inner_bark_fiber", BarkUses: []string{"tinder", "bedding"}, Tags: []string{"conifer"}},
+		{ID: "birch", Name: "Birch", BiomeTags: []string{"boreal", "forest", "lake", "subarctic"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.8, HeatFactor: 1.0, BurnFactor: 1.05, SparkEase: 3, Hardness: 4, Structural: 4, ResinQuality: 0.35, RotResistance: 3, SmokeFactor: 0.7, BarkResource: "birch_bark", BarkUses: []string{"container", "tinder"}, Tags: []string{"hardwood"}},
+		{ID: "oak", Name: "Oak", BiomeTags: []string{"forest", "temperate", "coast", "river"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.9, GatherMaxKg: 5.0, HeatFactor: 1.15, BurnFactor: 1.18, SparkEase: 2, Hardness: 5, Structural: 5, ResinQuality: 0.2, RotResistance: 5, SmokeFactor: 0.6, BarkResource: "bast_strip", BarkUses: []string{"tannin", "cordage"}, Tags: []string{"hardwood"}},
+		{ID: "maple", Name: "Maple", BiomeTags: []string{"forest", "mountain", "temperate"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.4, HeatFactor: 1.1, BurnFactor: 1.1, SparkEase: 2, Hardness: 4, Structural: 4, ResinQuality: 0.18, RotResistance: 4, SmokeFactor: 0.65, BarkResource: "inner_bark_fiber", BarkUses: []string{"fiber", "container"}, Tags: []string{"hardwood"}},
+		{ID: "willow", Name: "Willow", BiomeTags: []string{"wetlands", "swamp", "delta", "river", "lake"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 3.0, HeatFactor: 0.74, BurnFactor: 0.7, SparkEase: 2, Hardness: 2, Structural: 2, ResinQuality: 0.1, RotResistance: 2, SmokeFactor: 0.9, BarkResource: "willow_bark", BarkUses: []string{"medicine", "withies"}, Tags: []string{"wetland"}},
+		{ID: "mangrove", Name: "Mangrove", BiomeTags: []string{"delta", "coast", "swamp", "island"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 3.8, HeatFactor: 1.12, BurnFactor: 1.06, SparkEase: 2, Hardness: 4, Structural: 4, ResinQuality: 0.2, RotResistance: 5, SmokeFactor: 0.85, BarkResource: "bast_strip", BarkUses: []string{"lashing", "waterproofing"}, Tags: []string{"wetland", "tropical"}},
+		{ID: "bamboo", Name: "Bamboo", BiomeTags: []string{"jungle", "tropical", "wetlands"}, WoodType: WoodTypeBamboo, GatherMinKg: 0.9, GatherMaxKg: 5.5, HeatFactor: 0.78, BurnFactor: 0.65, SparkEase: 4, Hardness: 3, Structural: 4, ResinQuality: 0.05, RotResistance: 3, SmokeFactor: 0.75, BarkResource: "bamboo_strip", BarkUses: []string{"splints", "containers"}, Tags: []string{"tropical"}},
+		{ID: "acacia", Name: "Acacia", BiomeTags: []string{"savanna", "badlands", "dry"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.5, HeatFactor: 1.08, BurnFactor: 1.02, SparkEase: 2, Hardness: 5, Structural: 4, ResinQuality: 0.18, RotResistance: 4, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"cordage", "tannin"}, Tags: []string{"hardwood", "dryland"}},
+		{ID: "baobab", Name: "Baobab", BiomeTags: []string{"savanna", "dry", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 1.0, GatherMaxKg: 5.8, HeatFactor: 1.18, BurnFactor: 1.16, SparkEase: 2, Hardness: 4, Structural: 5, ResinQuality: 0.1, RotResistance: 4, SmokeFactor: 0.8, BarkResource: "bast_strip", BarkUses: []string{"fiber", "rope"}, Tags: []string{"hardwood", "dryland"}},
+		{ID: "palm", Name: "Palm", BiomeTags: []string{"island", "coast", "tropical", "delta"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 2.6, HeatFactor: 0.72, BurnFactor: 0.68, SparkEase: 3, Hardness: 2, Structural: 2, ResinQuality: 0.08, RotResistance: 2, SmokeFactor: 0.9, BarkResource: "palm_frond", BarkUses: []string{"thatch", "weaving"}, Tags: []string{"tropical"}},
+		{ID: "mesquite", Name: "Mesquite", BiomeTags: []string{"desert", "dry", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.4, HeatFactor: 1.2, BurnFactor: 1.2, SparkEase: 2, Hardness: 5, Structural: 4, ResinQuality: 0.16, RotResistance: 5, SmokeFactor: 0.6, BarkResource: "bast_strip", BarkUses: []string{"fiber", "smoke cure"}, Tags: []string{"hardwood", "dryland"}},
+		{ID: "driftwood", Name: "Driftwood", BiomeTags: []string{"coast", "delta", "island", "lake"}, WoodType: WoodTypeDriftwood, GatherMinKg: 0.4, GatherMaxKg: 2.4, HeatFactor: 0.62, BurnFactor: 0.54, SparkEase: 3, Hardness: 3, Structural: 2, ResinQuality: 0.03, RotResistance: 3, SmokeFactor: 1.3, BarkUses: []string{"rafts", "platforms"}, Tags: []string{"coastal"}},
+	}
+	return append(base, expandedTreeCatalog()...)
+}
+
+func expandedTreeCatalog() []TreeSpec {
 	return []TreeSpec{
-		{ID: "cedar", Name: "Cedar", BiomeTags: []string{"coast", "temperate_rainforest", "vancouver", "forest"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.8, GatherMaxKg: 4.2, HeatFactor: 0.85, BurnFactor: 0.8, SparkEase: 3},
-		{ID: "spruce", Name: "Spruce", BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, WoodType: WoodTypeResinous, GatherMinKg: 0.9, GatherMaxKg: 4.5, HeatFactor: 0.92, BurnFactor: 0.85, SparkEase: 4},
-		{ID: "pine", Name: "Pine", BiomeTags: []string{"mountain", "boreal", "forest", "dry"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.1, HeatFactor: 0.9, BurnFactor: 0.82, SparkEase: 4},
-		{ID: "fir", Name: "Fir", BiomeTags: []string{"forest", "mountain", "boreal"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.8, GatherMaxKg: 4.0, HeatFactor: 0.86, BurnFactor: 0.82, SparkEase: 3},
-		{ID: "birch", Name: "Birch", BiomeTags: []string{"boreal", "forest", "lake", "subarctic"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.8, HeatFactor: 1.0, BurnFactor: 1.05, SparkEase: 3},
-		{ID: "oak", Name: "Oak", BiomeTags: []string{"forest", "temperate", "coast", "river"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.9, GatherMaxKg: 5.0, HeatFactor: 1.15, BurnFactor: 1.18, SparkEase: 2},
-		{ID: "maple", Name: "Maple", BiomeTags: []string{"forest", "mountain", "temperate"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.4, HeatFactor: 1.1, BurnFactor: 1.1, SparkEase: 2},
-		{ID: "willow", Name: "Willow", BiomeTags: []string{"wetlands", "swamp", "delta", "river", "lake"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 3.0, HeatFactor: 0.74, BurnFactor: 0.7, SparkEase: 2},
-		{ID: "mangrove", Name: "Mangrove", BiomeTags: []string{"delta", "coast", "swamp", "island"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 3.8, HeatFactor: 1.12, BurnFactor: 1.06, SparkEase: 2},
-		{ID: "bamboo", Name: "Bamboo", BiomeTags: []string{"jungle", "tropical", "wetlands"}, WoodType: WoodTypeBamboo, GatherMinKg: 0.9, GatherMaxKg: 5.5, HeatFactor: 0.78, BurnFactor: 0.65, SparkEase: 4},
-		{ID: "acacia", Name: "Acacia", BiomeTags: []string{"savanna", "badlands", "dry"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.5, HeatFactor: 1.08, BurnFactor: 1.02, SparkEase: 2},
-		{ID: "baobab", Name: "Baobab", BiomeTags: []string{"savanna", "dry", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 1.0, GatherMaxKg: 5.8, HeatFactor: 1.18, BurnFactor: 1.16, SparkEase: 2},
-		{ID: "palm", Name: "Palm", BiomeTags: []string{"island", "coast", "tropical", "delta"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 2.6, HeatFactor: 0.72, BurnFactor: 0.68, SparkEase: 3},
-		{ID: "mesquite", Name: "Mesquite", BiomeTags: []string{"desert", "dry", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.4, HeatFactor: 1.2, BurnFactor: 1.2, SparkEase: 2},
-		{ID: "driftwood", Name: "Driftwood", BiomeTags: []string{"coast", "delta", "island", "lake"}, WoodType: WoodTypeDriftwood, GatherMinKg: 0.4, GatherMaxKg: 2.4, HeatFactor: 0.62, BurnFactor: 0.54, SparkEase: 3},
+		{ID: "hemlock", Name: "Hemlock", BiomeTags: []string{"forest", "boreal", "coast", "mountain"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.7, GatherMaxKg: 3.9, HeatFactor: 0.84, BurnFactor: 0.78, SparkEase: 3, Hardness: 2, Structural: 3, ResinQuality: 0.45, RotResistance: 3, SmokeFactor: 0.95, BarkResource: "inner_bark_fiber", BarkUses: []string{"tinder", "fiber"}, Tags: []string{"conifer"}},
+		{ID: "larch", Name: "Larch", BiomeTags: []string{"boreal", "subarctic", "mountain", "forest"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.3, HeatFactor: 0.98, BurnFactor: 0.92, SparkEase: 4, Hardness: 3, Structural: 4, ResinQuality: 0.7, RotResistance: 4, SmokeFactor: 0.9, BarkResource: "inner_bark_fiber", BarkUses: []string{"cordage", "tinder"}, Tags: []string{"conifer"}},
+		{ID: "cypress", Name: "Cypress", BiomeTags: []string{"swamp", "wetlands", "delta", "coast"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.8, GatherMaxKg: 4.1, HeatFactor: 0.9, BurnFactor: 0.86, SparkEase: 3, Hardness: 3, Structural: 4, ResinQuality: 0.4, RotResistance: 5, SmokeFactor: 0.85, BarkResource: "bast_strip", BarkUses: []string{"planking", "cordage"}, Tags: []string{"wetland"}},
+		{ID: "juniper", Name: "Juniper", BiomeTags: []string{"desert", "dry", "mountain", "badlands"}, WoodType: WoodTypeResinous, GatherMinKg: 0.6, GatherMaxKg: 3.0, HeatFactor: 0.95, BurnFactor: 0.88, SparkEase: 4, Hardness: 3, Structural: 3, ResinQuality: 0.74, RotResistance: 4, SmokeFactor: 1.1, BarkResource: "inner_bark_fiber", BarkUses: []string{"tinder", "smoke cure"}, Tags: []string{"conifer", "dryland"}},
+		{ID: "ash", Name: "Ash", BiomeTags: []string{"forest", "river", "mountain", "temperate"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.7, HeatFactor: 1.12, BurnFactor: 1.06, SparkEase: 2, Hardness: 4, Structural: 5, ResinQuality: 0.12, RotResistance: 4, SmokeFactor: 0.65, BarkResource: "bast_strip", BarkUses: []string{"tool handles", "splints"}, Tags: []string{"hardwood"}},
+		{ID: "elm", Name: "Elm", BiomeTags: []string{"forest", "river", "temperate", "coast"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.6, HeatFactor: 1.07, BurnFactor: 1.04, SparkEase: 2, Hardness: 4, Structural: 5, ResinQuality: 0.1, RotResistance: 4, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"cordage", "basket frame"}, Tags: []string{"hardwood"}},
+		{ID: "hickory", Name: "Hickory", BiomeTags: []string{"forest", "mountain", "temperate", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.9, GatherMaxKg: 5.1, HeatFactor: 1.2, BurnFactor: 1.17, SparkEase: 2, Hardness: 5, Structural: 5, ResinQuality: 0.1, RotResistance: 4, SmokeFactor: 0.65, BarkResource: "bast_strip", BarkUses: []string{"tool hafts", "smoke curing"}, Tags: []string{"hardwood"}},
+		{ID: "poplar", Name: "Poplar", BiomeTags: []string{"forest", "river", "lake", "wetlands"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.7, GatherMaxKg: 3.6, HeatFactor: 0.8, BurnFactor: 0.75, SparkEase: 3, Hardness: 2, Structural: 2, ResinQuality: 0.1, RotResistance: 2, SmokeFactor: 0.8, BarkResource: "inner_bark_fiber", BarkUses: []string{"fiber", "kindling"}, Tags: []string{"hardwood_light"}},
+		{ID: "sycamore", Name: "Sycamore", BiomeTags: []string{"river", "wetlands", "forest", "coast"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.4, HeatFactor: 1.03, BurnFactor: 0.98, SparkEase: 2, Hardness: 3, Structural: 4, ResinQuality: 0.08, RotResistance: 3, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"weaving", "lining"}, Tags: []string{"wetland"}},
+		{ID: "aspen", Name: "Aspen", BiomeTags: []string{"boreal", "subarctic", "forest", "mountain"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 3.3, HeatFactor: 0.8, BurnFactor: 0.76, SparkEase: 3, Hardness: 2, Structural: 2, ResinQuality: 0.08, RotResistance: 2, SmokeFactor: 0.85, BarkResource: "inner_bark_fiber", BarkUses: []string{"tinder", "inner bark"}, Tags: []string{"boreal"}},
+		{ID: "alder", Name: "Alder", BiomeTags: []string{"coast", "river", "wetlands", "forest"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.8, HeatFactor: 0.95, BurnFactor: 0.9, SparkEase: 2, Hardness: 3, Structural: 3, ResinQuality: 0.12, RotResistance: 3, SmokeFactor: 0.9, BarkResource: "bast_strip", BarkUses: []string{"smoke curing", "dye"}, Tags: []string{"wetland"}},
+		{ID: "cottonwood", Name: "Cottonwood", BiomeTags: []string{"river", "delta", "wetlands", "coast"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.7, GatherMaxKg: 3.5, HeatFactor: 0.76, BurnFactor: 0.72, SparkEase: 3, Hardness: 2, Structural: 2, ResinQuality: 0.1, RotResistance: 2, SmokeFactor: 0.9, BarkResource: "inner_bark_fiber", BarkUses: []string{"cordage", "kindling"}, Tags: []string{"wetland"}},
+		{ID: "beech", Name: "Beech", BiomeTags: []string{"forest", "mountain", "temperate", "coast"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.8, HeatFactor: 1.12, BurnFactor: 1.09, SparkEase: 2, Hardness: 4, Structural: 4, ResinQuality: 0.08, RotResistance: 3, SmokeFactor: 0.65, BarkResource: "bast_strip", BarkUses: []string{"bark strips", "containers"}, Tags: []string{"hardwood"}},
+		{ID: "walnut", Name: "Walnut", BiomeTags: []string{"forest", "river", "temperate", "mountain"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.8, HeatFactor: 1.14, BurnFactor: 1.11, SparkEase: 2, Hardness: 5, Structural: 4, ResinQuality: 0.07, RotResistance: 4, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"bow staves", "tools"}, Tags: []string{"hardwood"}},
+		{ID: "teak", Name: "Teak", BiomeTags: []string{"jungle", "tropical", "wetlands", "coast"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.9, GatherMaxKg: 5.2, HeatFactor: 1.1, BurnFactor: 1.02, SparkEase: 2, Hardness: 5, Structural: 5, ResinQuality: 0.15, RotResistance: 5, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"planking", "rafts"}, Tags: []string{"tropical", "hardwood"}},
+		{ID: "mahogany", Name: "Mahogany", BiomeTags: []string{"jungle", "tropical", "island", "coast"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.9, GatherMaxKg: 5.1, HeatFactor: 1.09, BurnFactor: 1.03, SparkEase: 2, Hardness: 4, Structural: 5, ResinQuality: 0.1, RotResistance: 5, SmokeFactor: 0.7, BarkResource: "bast_strip", BarkUses: []string{"frames", "paddles"}, Tags: []string{"tropical", "hardwood"}},
+		{ID: "kapok", Name: "Kapok", BiomeTags: []string{"jungle", "wetlands", "tropical", "delta"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.7, GatherMaxKg: 3.6, HeatFactor: 0.78, BurnFactor: 0.73, SparkEase: 3, Hardness: 2, Structural: 2, ResinQuality: 0.06, RotResistance: 2, SmokeFactor: 0.85, BarkResource: "inner_bark_fiber", BarkUses: []string{"fiber floss", "cordage"}, Tags: []string{"tropical"}},
+		{ID: "ironwood", Name: "Ironwood", BiomeTags: []string{"island", "coast", "tropical", "dry"}, WoodType: WoodTypeHardwood, GatherMinKg: 1.0, GatherMaxKg: 5.6, HeatFactor: 1.24, BurnFactor: 1.2, SparkEase: 1, Hardness: 5, Structural: 5, ResinQuality: 0.06, RotResistance: 5, SmokeFactor: 0.6, BarkResource: "bast_strip", BarkUses: []string{"mallets", "wedges"}, Tags: []string{"hardwood", "tropical"}},
+		{ID: "eucalyptus", Name: "Eucalyptus", BiomeTags: []string{"savanna", "dry", "coast", "badlands"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.3, HeatFactor: 1.0, BurnFactor: 0.92, SparkEase: 4, Hardness: 3, Structural: 4, ResinQuality: 0.55, RotResistance: 4, SmokeFactor: 1.15, BarkResource: "bast_strip", BarkUses: []string{"medicine leaves", "fuel"}, Tags: []string{"dryland"}},
+		{ID: "casuarina", Name: "Casuarina", BiomeTags: []string{"coast", "island", "dry", "savanna"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.8, GatherMaxKg: 4.2, HeatFactor: 1.13, BurnFactor: 1.07, SparkEase: 2, Hardness: 4, Structural: 4, ResinQuality: 0.12, RotResistance: 4, SmokeFactor: 0.75, BarkResource: "bast_strip", BarkUses: []string{"posts", "stakes"}, Tags: []string{"coastal"}},
+		{ID: "olive", Name: "Wild Olive", BiomeTags: []string{"coast", "dry", "badlands", "savanna"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.7, GatherMaxKg: 3.6, HeatFactor: 1.16, BurnFactor: 1.1, SparkEase: 2, Hardness: 5, Structural: 4, ResinQuality: 0.1, RotResistance: 5, SmokeFactor: 0.68, BarkResource: "bast_strip", BarkUses: []string{"tool handles", "stakes"}, Tags: []string{"dryland"}},
+		{ID: "tamarisk", Name: "Tamarisk", BiomeTags: []string{"desert", "dry", "delta", "badlands"}, WoodType: WoodTypeHardwood, GatherMinKg: 0.6, GatherMaxKg: 3.2, HeatFactor: 0.98, BurnFactor: 0.94, SparkEase: 3, Hardness: 3, Structural: 3, ResinQuality: 0.18, RotResistance: 3, SmokeFactor: 0.9, BarkResource: "bast_strip", BarkUses: []string{"fencing", "twigs"}, Tags: []string{"dryland", "wetland_edge"}},
+		{ID: "saguaro_rib", Name: "Saguaro Rib", BiomeTags: []string{"desert", "dry", "badlands"}, WoodType: WoodTypeDriftwood, GatherMinKg: 0.3, GatherMaxKg: 1.8, HeatFactor: 0.64, BurnFactor: 0.6, SparkEase: 3, Hardness: 2, Structural: 1, ResinQuality: 0.02, RotResistance: 1, SmokeFactor: 1.0, BarkUses: []string{"framework", "splints"}, Tags: []string{"desert"}},
+		{ID: "black_spruce", Name: "Black Spruce", BiomeTags: []string{"boreal", "subarctic", "swamp", "tundra"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.0, HeatFactor: 0.93, BurnFactor: 0.86, SparkEase: 4, Hardness: 3, Structural: 3, ResinQuality: 0.78, RotResistance: 4, SmokeFactor: 1.05, BarkResource: "spruce_root", BarkUses: []string{"sewing root", "pitch"}, Tags: []string{"conifer", "wetland"}},
+		{ID: "tamarack", Name: "Tamarack", BiomeTags: []string{"boreal", "wetlands", "subarctic", "mountain"}, WoodType: WoodTypeResinous, GatherMinKg: 0.8, GatherMaxKg: 4.2, HeatFactor: 1.0, BurnFactor: 0.94, SparkEase: 4, Hardness: 3, Structural: 4, ResinQuality: 0.72, RotResistance: 5, SmokeFactor: 0.95, BarkResource: "inner_bark_fiber", BarkUses: []string{"lashing", "pitch"}, Tags: []string{"conifer", "wetland"}},
+		{ID: "paperbark", Name: "Paperbark", BiomeTags: []string{"swamp", "wetlands", "coast", "tropical"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.6, GatherMaxKg: 3.0, HeatFactor: 0.78, BurnFactor: 0.72, SparkEase: 4, Hardness: 2, Structural: 2, ResinQuality: 0.25, RotResistance: 3, SmokeFactor: 0.9, BarkResource: "birch_bark", BarkUses: []string{"sheet bark", "containers"}, Tags: []string{"wetland", "tropical"}},
+		{ID: "redwood", Name: "Redwood", BiomeTags: []string{"coast", "temperate_rainforest", "forest"}, WoodType: WoodTypeSoftwood, GatherMinKg: 0.9, GatherMaxKg: 5.2, HeatFactor: 0.96, BurnFactor: 0.9, SparkEase: 3, Hardness: 3, Structural: 5, ResinQuality: 0.3, RotResistance: 5, SmokeFactor: 0.85, BarkResource: "cedar_bark", BarkUses: []string{"insulation", "roofing"}, Tags: []string{"conifer", "coastal"}},
 	}
 }
 
@@ -697,18 +944,21 @@ func (s *RunState) StripBark(playerID int, treeID string, requestedQty float64) 
 		}
 	}
 
-	primaryID := "inner_bark_fiber"
-	switch tree.ID {
-	case "birch":
-		primaryID = "birch_bark"
-	case "cedar":
-		primaryID = "cedar_bark"
-	case "willow":
-		primaryID = "willow_bark"
-	case "palm":
-		primaryID = "bast_strip"
-	case "spruce":
-		primaryID = "spruce_root"
+	primaryID := strings.TrimSpace(tree.BarkResource)
+	if primaryID == "" {
+		primaryID = "inner_bark_fiber"
+		switch tree.ID {
+		case "birch":
+			primaryID = "birch_bark"
+		case "cedar":
+			primaryID = "cedar_bark"
+		case "willow":
+			primaryID = "willow_bark"
+		case "palm":
+			primaryID = "bast_strip"
+		case "spruce":
+			primaryID = "spruce_root"
+		}
 	}
 	primary, ok := s.findResourceForBiome(primaryID)
 	if !ok {
@@ -795,15 +1045,44 @@ func (s *RunState) ambientWoodWetness() float64 {
 type ShelterType string
 
 const (
-	ShelterLeanTo        ShelterType = "lean_to"
-	ShelterDebrisHut     ShelterType = "debris_hut"
-	ShelterTarpAFrame    ShelterType = "tarp_a_frame"
-	ShelterSnowCave      ShelterType = "snow_cave"
-	ShelterDesertShade   ShelterType = "desert_shade"
-	ShelterSwampPlatform ShelterType = "swamp_platform"
-	ShelterBambooHut     ShelterType = "bamboo_hut"
-	ShelterRockOverhang  ShelterType = "rock_overhang"
+	ShelterLeanTo           ShelterType = "lean_to"
+	ShelterDebrisHut        ShelterType = "debris_hut"
+	ShelterTarpAFrame       ShelterType = "tarp_a_frame"
+	ShelterSnowCave         ShelterType = "snow_cave"
+	ShelterDesertShade      ShelterType = "desert_shade"
+	ShelterSwampPlatform    ShelterType = "swamp_platform"
+	ShelterBambooHut        ShelterType = "bamboo_hut"
+	ShelterRockOverhang     ShelterType = "rock_overhang"
+	ShelterAFrame           ShelterType = "a_frame"
+	ShelterWattleDaub       ShelterType = "wattle_daub_hut"
+	ShelterRaisedPlatform   ShelterType = "raised_platform_shelter"
+	ShelterEarthDugout      ShelterType = "earth_sheltered_dugout"
+	ShelterLogCabin         ShelterType = "log_cabin"
+	ShelterQuinzee          ShelterType = "quinzee"
+	ShelterHuntingBlind     ShelterType = "hunting_blind"
+	ShelterElevatedCachePod ShelterType = "elevated_cache_pod"
 )
+
+type ShelterStageSpec struct {
+	ID                 string
+	Name               string
+	BuildHours         float64
+	BuildEnergyCost    int
+	BuildHydrationCost int
+	BuildMoraleBonus   int
+	StorageCapacityKg  float64
+	Insulation         int
+	RainProtection     int
+	WindProtection     int
+	InsectProtection   int
+	PredatorSafety     int
+	Comfort            int
+	DrynessProtection  int
+	Stealth            int
+	DurabilityBonus    int
+	RequiresItems      []string
+	RequiresResources  []ResourceRequirement
+}
 
 type ShelterSpec struct {
 	ID                 ShelterType
@@ -818,18 +1097,162 @@ type ShelterSpec struct {
 	BuildMoraleBonus   int
 	BuildEnergyCost    int
 	BuildHydrationCost int
+	PredatorSafety     int
+	Comfort            int
+	DrynessProtection  int
+	Stealth            int
+	Maintenance        int
+	SleepShelter       bool
+	UpgradeComponents  []string
+	Stages             []ShelterStageSpec
 }
 
 func ShelterCatalog() []ShelterSpec {
 	return []ShelterSpec{
-		{ID: ShelterLeanTo, Name: "Lean-to", BiomeTags: []string{"forest", "mountain", "boreal", "coast"}, StorageCapacityKg: 22, Insulation: 2, RainProtection: 2, WindProtection: 2, InsectProtection: 1, DurabilityPerDay: 6, BuildMoraleBonus: 2, BuildEnergyCost: 4, BuildHydrationCost: 2},
-		{ID: ShelterDebrisHut, Name: "Debris Hut", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain"}, StorageCapacityKg: 34, Insulation: 4, RainProtection: 3, WindProtection: 3, InsectProtection: 1, DurabilityPerDay: 5, BuildMoraleBonus: 3, BuildEnergyCost: 6, BuildHydrationCost: 3},
-		{ID: ShelterTarpAFrame, Name: "Tarp A-Frame", BiomeTags: []string{"forest", "coast", "wetlands", "jungle", "mountain"}, StorageCapacityKg: 30, Insulation: 3, RainProtection: 4, WindProtection: 3, InsectProtection: 2, DurabilityPerDay: 4, BuildMoraleBonus: 3, BuildEnergyCost: 3, BuildHydrationCost: 2},
-		{ID: ShelterSnowCave, Name: "Snow Cave", BiomeTags: []string{"arctic", "subarctic", "tundra", "winter"}, StorageCapacityKg: 26, Insulation: 6, RainProtection: 3, WindProtection: 6, InsectProtection: 3, DurabilityPerDay: 7, BuildMoraleBonus: 2, BuildEnergyCost: 8, BuildHydrationCost: 3},
-		{ID: ShelterDesertShade, Name: "Desert Shade", BiomeTags: []string{"desert", "dry", "savanna", "badlands"}, StorageCapacityKg: 18, Insulation: 1, RainProtection: 1, WindProtection: 2, InsectProtection: 2, DurabilityPerDay: 4, BuildMoraleBonus: 2, BuildEnergyCost: 3, BuildHydrationCost: 2},
-		{ID: ShelterSwampPlatform, Name: "Swamp Platform", BiomeTags: []string{"swamp", "wetlands", "delta", "jungle"}, StorageCapacityKg: 28, Insulation: 2, RainProtection: 2, WindProtection: 2, InsectProtection: 5, DurabilityPerDay: 5, BuildMoraleBonus: 3, BuildEnergyCost: 6, BuildHydrationCost: 3},
-		{ID: ShelterBambooHut, Name: "Bamboo Hut", BiomeTags: []string{"jungle", "tropical", "wetlands", "island"}, StorageCapacityKg: 40, Insulation: 3, RainProtection: 4, WindProtection: 3, InsectProtection: 4, DurabilityPerDay: 4, BuildMoraleBonus: 4, BuildEnergyCost: 6, BuildHydrationCost: 3},
-		{ID: ShelterRockOverhang, Name: "Rock Overhang", BiomeTags: []string{"mountain", "badlands", "desert", "coast"}, StorageCapacityKg: 24, Insulation: 3, RainProtection: 2, WindProtection: 4, InsectProtection: 1, DurabilityPerDay: 3, BuildMoraleBonus: 2, BuildEnergyCost: 2, BuildHydrationCost: 1},
+		{
+			ID: ShelterDebrisHut, Name: "Debris Hut", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain"},
+			StorageCapacityKg: 34, Insulation: 5, RainProtection: 4, WindProtection: 4, InsectProtection: 2, PredatorSafety: 2, Comfort: 3, DrynessProtection: 4, Stealth: 4,
+			DurabilityPerDay: 5, Maintenance: 4, BuildMoraleBonus: 3, BuildEnergyCost: 6, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"bough_mattress", "storm_flap", "drainage_ditch", "reflective_fire_wall"},
+			Stages: []ShelterStageSpec{
+				{ID: "frame", Name: "Frame", BuildHours: 2.3, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, StorageCapacityKg: 8, WindProtection: 1, Stealth: 1, DurabilityBonus: 15, RequiresResources: []ResourceRequirement{{ID: "cane_stalk", Qty: 1}}},
+				{ID: "insulation", Name: "Leaf Insulation", BuildHours: 2.4, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, Insulation: 2, WindProtection: 1, DrynessProtection: 1, StorageCapacityKg: 10, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "dry_leaf_litter", Qty: 2}}},
+				{ID: "weatherproofing", Name: "Weatherproofing", BuildHours: 2.0, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, RainProtection: 3, InsectProtection: 1, StorageCapacityKg: 16, DurabilityBonus: 20, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}},
+			},
+		},
+		{
+			ID: ShelterLeanTo, Name: "Lean-to", BiomeTags: []string{"forest", "mountain", "boreal", "coast"},
+			StorageCapacityKg: 24, Insulation: 3, RainProtection: 3, WindProtection: 3, InsectProtection: 1, PredatorSafety: 1, Comfort: 2, DrynessProtection: 2, Stealth: 2,
+			DurabilityPerDay: 6, Maintenance: 4, BuildMoraleBonus: 2, BuildEnergyCost: 4, BuildHydrationCost: 2, SleepShelter: true,
+			UpgradeComponents: []string{"storm_flap", "drainage_ditch", "raised_sleeping_platform"},
+			Stages: []ShelterStageSpec{
+				{ID: "wall", Name: "Back Wall", BuildHours: 1.7, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, WindProtection: 2, StorageCapacityKg: 8, DurabilityBonus: 14},
+				{ID: "roof", Name: "Roofing", BuildHours: 1.6, BuildEnergyCost: 2, BuildHydrationCost: 1, BuildMoraleBonus: 1, RainProtection: 2, StorageCapacityKg: 8, DurabilityBonus: 16, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}},
+				{ID: "insulation", Name: "Insulation Layer", BuildHours: 1.4, BuildEnergyCost: 2, BuildHydrationCost: 1, BuildMoraleBonus: 1, Insulation: 2, Comfort: 2, StorageCapacityKg: 8, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "spruce_bough", Qty: 1}}},
+			},
+		},
+		{
+			ID: ShelterAFrame, Name: "A-Frame Shelter", BiomeTags: []string{"forest", "mountain", "boreal", "coast", "wetlands"},
+			StorageCapacityKg: 30, Insulation: 4, RainProtection: 4, WindProtection: 4, InsectProtection: 2, PredatorSafety: 2, Comfort: 3, DrynessProtection: 4, Stealth: 3,
+			DurabilityPerDay: 5, Maintenance: 5, BuildMoraleBonus: 3, BuildEnergyCost: 5, BuildHydrationCost: 2, SleepShelter: true,
+			UpgradeComponents: []string{"insulated_wall_lining", "storm_flap", "storage_shelves", "reflective_fire_wall"},
+			Stages: []ShelterStageSpec{
+				{ID: "ridge", Name: "Ridge Pole", BuildHours: 1.6, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, WindProtection: 1, DurabilityBonus: 14, RequiresItems: []string{"ridge_pole_kit"}},
+				{ID: "roof", Name: "Roof Panels", BuildHours: 2.0, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, RainProtection: 2, StorageCapacityKg: 10, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}},
+				{ID: "insulate", Name: "Insulation", BuildHours: 1.8, BuildEnergyCost: 2, BuildHydrationCost: 1, BuildMoraleBonus: 1, Insulation: 3, Comfort: 2, DrynessProtection: 2, StorageCapacityKg: 20, DurabilityBonus: 20, RequiresResources: []ResourceRequirement{{ID: "dry_leaf_litter", Qty: 1}}},
+			},
+		},
+		{
+			ID: ShelterWattleDaub, Name: "Wattle & Daub Hut", BiomeTags: []string{"wetlands", "swamp", "river", "forest", "delta"},
+			StorageCapacityKg: 44, Insulation: 5, RainProtection: 5, WindProtection: 5, InsectProtection: 3, PredatorSafety: 3, Comfort: 4, DrynessProtection: 5, Stealth: 2,
+			DurabilityPerDay: 3, Maintenance: 3, BuildMoraleBonus: 4, BuildEnergyCost: 7, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"storm_flap", "stone_hearth", "smoke_hole_baffle", "storage_shelves"},
+			Stages: []ShelterStageSpec{
+				{ID: "wattle", Name: "Wattle Frame", BuildHours: 3.0, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, WindProtection: 2, StorageCapacityKg: 10, DurabilityBonus: 14, RequiresResources: []ResourceRequirement{{ID: "willow_withy", Qty: 2}}},
+				{ID: "daub", Name: "Daub Layer", BuildHours: 3.5, BuildEnergyCost: 5, BuildHydrationCost: 2, BuildMoraleBonus: 2, RainProtection: 3, DrynessProtection: 2, StorageCapacityKg: 14, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "mud", Qty: 1.5}}},
+				{ID: "roof", Name: "Roof Pack", BuildHours: 2.8, BuildEnergyCost: 4, BuildHydrationCost: 1, BuildMoraleBonus: 1, Insulation: 3, Comfort: 2, StorageCapacityKg: 20, DurabilityBonus: 20, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 2}}},
+			},
+		},
+		{
+			ID: ShelterRaisedPlatform, Name: "Raised Platform Shelter", BiomeTags: []string{"swamp", "wetlands", "delta", "jungle", "coast"},
+			StorageCapacityKg: 40, Insulation: 3, RainProtection: 4, WindProtection: 3, InsectProtection: 6, PredatorSafety: 4, Comfort: 4, DrynessProtection: 6, Stealth: 2,
+			DurabilityPerDay: 4, Maintenance: 4, BuildMoraleBonus: 4, BuildEnergyCost: 7, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"bough_mattress", "storm_flap", "elevated_food_cache", "drainage_ditch"},
+			Stages: []ShelterStageSpec{
+				{ID: "piles", Name: "Pile Foundation", BuildHours: 2.8, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, DrynessProtection: 2, PredatorSafety: 1, StorageCapacityKg: 8, DurabilityBonus: 14, RequiresResources: []ResourceRequirement{{ID: "drift_log", Qty: 1}}},
+				{ID: "deck", Name: "Deck Platform", BuildHours: 2.4, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, Comfort: 2, InsectProtection: 2, StorageCapacityKg: 12, DurabilityBonus: 16, RequiresResources: []ResourceRequirement{{ID: "cane_stalk", Qty: 1}}},
+				{ID: "roof", Name: "Roof & Screens", BuildHours: 2.5, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, RainProtection: 3, InsectProtection: 3, DrynessProtection: 2, StorageCapacityKg: 20, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "palm_frond", Qty: 1}}},
+			},
+		},
+		{
+			ID: ShelterEarthDugout, Name: "Earth-Sheltered Dugout", BiomeTags: []string{"forest", "mountain", "badlands", "tundra", "boreal"},
+			StorageCapacityKg: 52, Insulation: 6, RainProtection: 4, WindProtection: 6, InsectProtection: 3, PredatorSafety: 4, Comfort: 4, DrynessProtection: 4, Stealth: 5,
+			DurabilityPerDay: 3, Maintenance: 3, BuildMoraleBonus: 4, BuildEnergyCost: 8, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"stone_hearth", "smoke_hole_baffle", "drainage_ditch", "storage_shelves"},
+			Stages: []ShelterStageSpec{
+				{ID: "excavate", Name: "Excavation", BuildHours: 3.4, BuildEnergyCost: 6, BuildHydrationCost: 2, BuildMoraleBonus: 1, WindProtection: 2, Stealth: 2, DurabilityBonus: 14, RequiresItems: []string{"digging_stick"}},
+				{ID: "timber", Name: "Timber Lining", BuildHours: 3.0, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, Insulation: 2, DrynessProtection: 2, StorageCapacityKg: 16, DurabilityBonus: 18, RequiresResources: []ResourceRequirement{{ID: "gravel", Qty: 1.0}}},
+				{ID: "cap", Name: "Roof Cap", BuildHours: 2.7, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 2, RainProtection: 3, Comfort: 2, StorageCapacityKg: 20, DurabilityBonus: 20, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}},
+			},
+		},
+		{
+			ID: ShelterLogCabin, Name: "Log Cabin", BiomeTags: []string{"forest", "boreal", "mountain", "subarctic"},
+			StorageCapacityKg: 72, Insulation: 7, RainProtection: 7, WindProtection: 7, InsectProtection: 5, PredatorSafety: 6, Comfort: 6, DrynessProtection: 6, Stealth: 2,
+			DurabilityPerDay: 2, Maintenance: 2, BuildMoraleBonus: 5, BuildEnergyCost: 10, BuildHydrationCost: 4, SleepShelter: true,
+			UpgradeComponents: []string{"stone_hearth", "smoke_hole_baffle", "storage_shelves", "elevated_food_cache", "door_latch"},
+			Stages: []ShelterStageSpec{
+				{ID: "foundation", Name: "Foundation", BuildHours: 4.0, BuildEnergyCost: 6, BuildHydrationCost: 2, BuildMoraleBonus: 1, WindProtection: 1, DrynessProtection: 1, DurabilityBonus: 10, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 2}}},
+				{ID: "walls", Name: "Wall Courses", BuildHours: 6.0, BuildEnergyCost: 8, BuildHydrationCost: 3, BuildMoraleBonus: 1, WindProtection: 2, Insulation: 2, StorageCapacityKg: 12, DurabilityBonus: 14},
+				{ID: "roof", Name: "Roof", BuildHours: 5.0, BuildEnergyCost: 7, BuildHydrationCost: 2, BuildMoraleBonus: 1, RainProtection: 3, DrynessProtection: 2, StorageCapacityKg: 12, DurabilityBonus: 15, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 2}}},
+				{ID: "chinking", Name: "Chinking", BuildHours: 3.0, BuildEnergyCost: 4, BuildHydrationCost: 1, BuildMoraleBonus: 1, Insulation: 2, WindProtection: 1, DurabilityBonus: 16, RequiresResources: []ResourceRequirement{{ID: "mud", Qty: 1.2}}},
+				{ID: "hearth", Name: "Hearth", BuildHours: 2.5, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, Comfort: 2, PredatorSafety: 1, StorageCapacityKg: 12, DurabilityBonus: 14, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 1}}},
+				{ID: "door", Name: "Door & Hatch", BuildHours: 2.0, BuildEnergyCost: 2, BuildHydrationCost: 1, BuildMoraleBonus: 1, RainProtection: 1, InsectProtection: 2, StorageCapacityKg: 24, DurabilityBonus: 16},
+			},
+		},
+		{
+			ID: ShelterSnowCave, Name: "Snow Cave", BiomeTags: []string{"arctic", "subarctic", "tundra", "winter"},
+			StorageCapacityKg: 26, Insulation: 6, RainProtection: 3, WindProtection: 6, InsectProtection: 3, PredatorSafety: 3, Comfort: 3, DrynessProtection: 3, Stealth: 4,
+			DurabilityPerDay: 7, Maintenance: 6, BuildMoraleBonus: 2, BuildEnergyCost: 8, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"bough_mattress", "cold_air_trench"},
+			Stages: []ShelterStageSpec{
+				{ID: "drift", Name: "Snow Drift", BuildHours: 1.5, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 0, WindProtection: 2, DurabilityBonus: 12},
+				{ID: "hollow", Name: "Hollow Chamber", BuildHours: 2.2, BuildEnergyCost: 4, BuildHydrationCost: 2, BuildMoraleBonus: 1, Insulation: 3, PredatorSafety: 1, DurabilityBonus: 15},
+				{ID: "vent", Name: "Vent & Entrance Baffle", BuildHours: 1.0, BuildEnergyCost: 1, BuildHydrationCost: 1, BuildMoraleBonus: 1, Comfort: 1, DrynessProtection: 1, DurabilityBonus: 10},
+			},
+		},
+		{
+			ID: ShelterQuinzee, Name: "Quinzee", BiomeTags: []string{"arctic", "subarctic", "tundra", "winter", "boreal"},
+			StorageCapacityKg: 30, Insulation: 7, RainProtection: 3, WindProtection: 7, InsectProtection: 3, PredatorSafety: 3, Comfort: 3, DrynessProtection: 3, Stealth: 4,
+			DurabilityPerDay: 6, Maintenance: 5, BuildMoraleBonus: 3, BuildEnergyCost: 8, BuildHydrationCost: 3, SleepShelter: true,
+			UpgradeComponents: []string{"cold_air_trench", "bough_mattress"},
+			Stages: []ShelterStageSpec{
+				{ID: "mound", Name: "Snow Mound", BuildHours: 2.2, BuildEnergyCost: 3, BuildHydrationCost: 1, BuildMoraleBonus: 1, WindProtection: 2, DurabilityBonus: 10},
+				{ID: "set", Name: "Set & Cure", BuildHours: 1.2, BuildEnergyCost: 1, BuildHydrationCost: 1, BuildMoraleBonus: 0, DurabilityBonus: 8},
+				{ID: "hollow", Name: "Hollow Interior", BuildHours: 2.3, BuildEnergyCost: 4, BuildHydrationCost: 1, BuildMoraleBonus: 1, Insulation: 4, Comfort: 2, DurabilityBonus: 14},
+			},
+		},
+		{
+			ID: ShelterDesertShade, Name: "Desert Shade", BiomeTags: []string{"desert", "dry", "savanna", "badlands"},
+			StorageCapacityKg: 18, Insulation: 1, RainProtection: 1, WindProtection: 2, InsectProtection: 2, PredatorSafety: 1, Comfort: 2, DrynessProtection: 1, Stealth: 2,
+			DurabilityPerDay: 4, Maintenance: 4, BuildMoraleBonus: 2, BuildEnergyCost: 3, BuildHydrationCost: 2, SleepShelter: true,
+			UpgradeComponents: []string{"storm_flap", "reflective_fire_wall"},
+		},
+		{
+			ID: ShelterSwampPlatform, Name: "Swamp Platform", BiomeTags: []string{"swamp", "wetlands", "delta", "jungle"},
+			StorageCapacityKg: 28, Insulation: 2, RainProtection: 2, WindProtection: 2, InsectProtection: 5, PredatorSafety: 3, Comfort: 3, DrynessProtection: 5, Stealth: 2,
+			DurabilityPerDay: 5, Maintenance: 4, BuildMoraleBonus: 3, BuildEnergyCost: 6, BuildHydrationCost: 3, SleepShelter: true,
+		},
+		{
+			ID: ShelterBambooHut, Name: "Bamboo Hut", BiomeTags: []string{"jungle", "tropical", "wetlands", "island"},
+			StorageCapacityKg: 40, Insulation: 3, RainProtection: 4, WindProtection: 3, InsectProtection: 4, PredatorSafety: 3, Comfort: 4, DrynessProtection: 4, Stealth: 2,
+			DurabilityPerDay: 4, Maintenance: 3, BuildMoraleBonus: 4, BuildEnergyCost: 6, BuildHydrationCost: 3, SleepShelter: true,
+		},
+		{
+			ID: ShelterRockOverhang, Name: "Rock Overhang", BiomeTags: []string{"mountain", "badlands", "desert", "coast"},
+			StorageCapacityKg: 24, Insulation: 3, RainProtection: 2, WindProtection: 4, InsectProtection: 1, PredatorSafety: 2, Comfort: 2, DrynessProtection: 2, Stealth: 3,
+			DurabilityPerDay: 3, Maintenance: 2, BuildMoraleBonus: 2, BuildEnergyCost: 2, BuildHydrationCost: 1, SleepShelter: true,
+		},
+		{
+			ID: ShelterHuntingBlind, Name: "Hunting Blind", BiomeTags: []string{"forest", "savanna", "wetlands", "badlands", "mountain"},
+			StorageCapacityKg: 12, Insulation: 0, RainProtection: 1, WindProtection: 2, InsectProtection: 1, PredatorSafety: 0, Comfort: 1, DrynessProtection: 1, Stealth: 6,
+			DurabilityPerDay: 6, Maintenance: 5, BuildMoraleBonus: 1, BuildEnergyCost: 3, BuildHydrationCost: 1, SleepShelter: false,
+			UpgradeComponents: []string{"camouflage_screen", "lookout_platform"},
+			Stages: []ShelterStageSpec{
+				{ID: "hide", Name: "Concealment Frame", BuildHours: 1.4, BuildEnergyCost: 2, BuildHydrationCost: 1, BuildMoraleBonus: 0, WindProtection: 1, Stealth: 3, DurabilityBonus: 12},
+				{ID: "screen", Name: "Camouflage Screen", BuildHours: 1.3, BuildEnergyCost: 1, BuildHydrationCost: 1, BuildMoraleBonus: 1, Stealth: 3, RainProtection: 1, DurabilityBonus: 10},
+			},
+		},
+		{
+			ID: ShelterElevatedCachePod, Name: "Elevated Cache Pod", BiomeTags: []string{"forest", "wetlands", "swamp", "tundra", "boreal"},
+			StorageCapacityKg: 26, Insulation: 0, RainProtection: 2, WindProtection: 2, InsectProtection: 2, PredatorSafety: 5, Comfort: 0, DrynessProtection: 3, Stealth: 3,
+			DurabilityPerDay: 4, Maintenance: 3, BuildMoraleBonus: 2, BuildEnergyCost: 3, BuildHydrationCost: 1, SleepShelter: false,
+			UpgradeComponents: []string{"elevated_food_cache"},
+		},
+		{
+			ID: ShelterTarpAFrame, Name: "Tarp A-Frame", BiomeTags: []string{"forest", "coast", "wetlands", "jungle", "mountain"},
+			StorageCapacityKg: 30, Insulation: 3, RainProtection: 4, WindProtection: 3, InsectProtection: 2, PredatorSafety: 2, Comfort: 3, DrynessProtection: 4, Stealth: 2,
+			DurabilityPerDay: 4, Maintenance: 4, BuildMoraleBonus: 3, BuildEnergyCost: 3, BuildHydrationCost: 2, SleepShelter: true,
+		},
 	}
 }
 
@@ -837,6 +1260,10 @@ type ShelterState struct {
 	Type       ShelterType `json:"type"`
 	Durability int         `json:"durability"`
 	BuiltDay   int         `json:"built_day"`
+	Stage      int         `json:"stage,omitempty"`
+	SiteX      int         `json:"site_x,omitempty"`
+	SiteY      int         `json:"site_y,omitempty"`
+	Upgrades   []string    `json:"upgrades,omitempty"`
 }
 
 func SheltersForBiome(biome string) []ShelterSpec {
@@ -888,17 +1315,254 @@ func (s *RunState) BuildShelter(playerID int, shelterID string) (ShelterSpec, er
 		return ShelterSpec{}, fmt.Errorf("shelter not available in biome: %s", shelterID)
 	}
 
-	s.Shelter = ShelterState{
-		Type:       chosen.ID,
-		Durability: 100,
-		BuiltDay:   s.Day,
+	if s.Shelter.Type != "" && s.Shelter.Type != chosen.ID && s.Shelter.Durability > 0 {
+		return ShelterSpec{}, fmt.Errorf("already maintaining %s; finish or replace deliberately", s.Shelter.Type)
 	}
-	player.Energy = clamp(player.Energy-chosen.BuildEnergyCost, 0, 100)
-	player.Hydration = clamp(player.Hydration-chosen.BuildHydrationCost, 0, 100)
-	player.Morale = clamp(player.Morale+chosen.BuildMoraleBonus, 0, 100)
+
+	stages := chosen.Stages
+	if len(stages) == 0 {
+		stages = defaultShelterStages(chosen)
+	}
+	nextStage := 1
+	if s.Shelter.Type == chosen.ID {
+		nextStage = s.Shelter.Stage + 1
+	}
+	if nextStage > len(stages) {
+		return ShelterSpec{}, fmt.Errorf("%s is already fully built", chosen.Name)
+	}
+	stage := stages[nextStage-1]
+
+	for _, req := range stage.RequiresItems {
+		if !slices.Contains(s.CraftedItems, req) {
+			return ShelterSpec{}, fmt.Errorf("requires crafted item: %s", req)
+		}
+	}
+	if nextStage > 1 {
+		for _, req := range stage.RequiresResources {
+			if s.resourceQty(req.ID) < req.Qty {
+				return ShelterSpec{}, fmt.Errorf("requires resource: %s %.1f", req.ID, req.Qty)
+			}
+		}
+		for _, req := range stage.RequiresResources {
+			_ = s.consumeResourceStock(req.ID, req.Qty)
+		}
+	} else {
+		// Stage one uses immediately available on-site materials to keep first shelter access practical.
+		for _, req := range stage.RequiresResources {
+			if s.resourceQty(req.ID) >= req.Qty {
+				_ = s.consumeResourceStock(req.ID, req.Qty)
+			}
+		}
+	}
+
+	if s.Shelter.Type != chosen.ID {
+		s.Shelter = ShelterState{
+			Type:       chosen.ID,
+			Durability: 30,
+			BuiltDay:   s.Day,
+			Stage:      0,
+			SiteX:      s.Travel.PosX,
+			SiteY:      s.Travel.PosY,
+		}
+	}
+	s.Shelter.Stage = nextStage
+	s.Shelter.Durability = clamp(s.Shelter.Durability+stage.DurabilityBonus, 10, 100)
+
+	energyCost := max(1, stage.BuildEnergyCost)
+	hydrationCost := max(1, stage.BuildHydrationCost)
+	moraleBonus := stage.BuildMoraleBonus
+	if energyCost == 1 && chosen.BuildEnergyCost > 0 {
+		energyCost = chosen.BuildEnergyCost
+	}
+	if hydrationCost == 1 && chosen.BuildHydrationCost > 0 {
+		hydrationCost = chosen.BuildHydrationCost
+	}
+	if moraleBonus == 0 {
+		moraleBonus = chosen.BuildMoraleBonus
+	}
+	player.Energy = clamp(player.Energy-energyCost, 0, 100)
+	player.Hydration = clamp(player.Hydration-hydrationCost, 0, 100)
+	player.Morale = clamp(player.Morale+moraleBonus, 0, 100)
+	if stage.BuildHours > 0 {
+		_ = s.AdvanceActionClock(stage.BuildHours)
+	}
 	refreshEffectBars(player)
 
 	return chosen, nil
+}
+
+func defaultShelterStages(spec ShelterSpec) []ShelterStageSpec {
+	return []ShelterStageSpec{
+		{
+			ID:                 "build",
+			Name:               "Build",
+			BuildHours:         2.0,
+			BuildEnergyCost:    max(1, spec.BuildEnergyCost),
+			BuildHydrationCost: max(1, spec.BuildHydrationCost),
+			BuildMoraleBonus:   max(1, spec.BuildMoraleBonus),
+			StorageCapacityKg:  spec.StorageCapacityKg,
+			Insulation:         spec.Insulation,
+			RainProtection:     spec.RainProtection,
+			WindProtection:     spec.WindProtection,
+			InsectProtection:   spec.InsectProtection,
+			PredatorSafety:     spec.PredatorSafety,
+			Comfort:            spec.Comfort,
+			DrynessProtection:  spec.DrynessProtection,
+			Stealth:            spec.Stealth,
+			DurabilityBonus:    70,
+		},
+	}
+}
+
+type shelterMetrics struct {
+	StorageCapacityKg float64
+	Insulation        int
+	RainProtection    int
+	WindProtection    int
+	InsectProtection  int
+	DurabilityPerDay  int
+	PredatorSafety    int
+	Comfort           int
+	DrynessProtection int
+	Stealth           int
+	Maintenance       int
+}
+
+func shelterMetricsForState(spec ShelterSpec, state ShelterState) shelterMetrics {
+	metrics := shelterMetrics{
+		StorageCapacityKg: spec.StorageCapacityKg,
+		Insulation:        spec.Insulation,
+		RainProtection:    spec.RainProtection,
+		WindProtection:    spec.WindProtection,
+		InsectProtection:  spec.InsectProtection,
+		DurabilityPerDay:  spec.DurabilityPerDay,
+		PredatorSafety:    spec.PredatorSafety,
+		Comfort:           spec.Comfort,
+		DrynessProtection: spec.DrynessProtection,
+		Stealth:           spec.Stealth,
+		Maintenance:       max(1, spec.Maintenance),
+	}
+	if state.Stage <= 0 {
+		return metrics
+	}
+	stages := spec.Stages
+	if len(stages) == 0 {
+		stages = defaultShelterStages(spec)
+	}
+	metrics = shelterMetrics{
+		DurabilityPerDay: max(1, spec.DurabilityPerDay),
+		Maintenance:      max(1, spec.Maintenance),
+	}
+	for i := 0; i < min(state.Stage, len(stages)); i++ {
+		stage := stages[i]
+		metrics.StorageCapacityKg += stage.StorageCapacityKg
+		metrics.Insulation += stage.Insulation
+		metrics.RainProtection += stage.RainProtection
+		metrics.WindProtection += stage.WindProtection
+		metrics.InsectProtection += stage.InsectProtection
+		metrics.PredatorSafety += stage.PredatorSafety
+		metrics.Comfort += stage.Comfort
+		metrics.DrynessProtection += stage.DrynessProtection
+		metrics.Stealth += stage.Stealth
+	}
+	return metrics
+}
+
+func (s *RunState) shelterLocationModifier(state ShelterState) shelterMetrics {
+	if s == nil {
+		return shelterMetrics{}
+	}
+	x, y := state.SiteX, state.SiteY
+	if x == 0 && y == 0 {
+		x, y = s.Travel.PosX, s.Travel.PosY
+	}
+	cell, ok := s.TopologyCellAt(x, y)
+	if !ok {
+		return shelterMetrics{}
+	}
+	mod := shelterMetrics{}
+	if cell.Elevation >= 45 {
+		mod.Insulation -= 1
+		mod.WindProtection -= 2
+		mod.InsectProtection += 1
+		mod.Stealth -= 1
+	}
+	if cell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake|TopoFlagCoast) != 0 || s.isNearWater(x, y) {
+		mod.InsectProtection -= 2
+		mod.DrynessProtection -= 2
+		mod.Comfort -= 1
+	}
+	switch cell.Biome {
+	case TopoBiomeForest, TopoBiomeBoreal, TopoBiomeJungle:
+		mod.WindProtection += 1
+		mod.Stealth += 2
+		mod.DrynessProtection -= 1
+	case TopoBiomeDesert, TopoBiomeGrassland, TopoBiomeTundra:
+		mod.WindProtection -= 1
+		mod.RainProtection -= 1
+		mod.Stealth -= 1
+	case TopoBiomeSwamp, TopoBiomeWetland:
+		mod.InsectProtection -= 1
+		mod.DrynessProtection -= 2
+	}
+	return mod
+}
+
+func (s *RunState) currentShelterMetrics() (shelterMetrics, bool) {
+	if s == nil || s.Shelter.Type == "" || s.Shelter.Durability <= 0 {
+		return shelterMetrics{}, false
+	}
+	spec, ok := shelterByID(s.Shelter.Type)
+	if !ok {
+		return shelterMetrics{}, false
+	}
+	metrics := shelterMetricsForState(spec, s.Shelter)
+	loc := s.shelterLocationModifier(s.Shelter)
+	metrics.Insulation += loc.Insulation
+	metrics.RainProtection += loc.RainProtection
+	metrics.WindProtection += loc.WindProtection
+	metrics.InsectProtection += loc.InsectProtection
+	metrics.PredatorSafety += loc.PredatorSafety
+	metrics.Comfort += loc.Comfort
+	metrics.DrynessProtection += loc.DrynessProtection
+	metrics.Stealth += loc.Stealth
+	metrics.StorageCapacityKg = max(8.0, metrics.StorageCapacityKg+loc.StorageCapacityKg)
+	metrics.DurabilityPerDay = max(1, metrics.DurabilityPerDay-loc.Maintenance/2)
+	metrics = s.applyShelterUpgradeModifiers(metrics)
+	return metrics, true
+}
+
+func (s *RunState) applyShelterUpgradeModifiers(metrics shelterMetrics) shelterMetrics {
+	if s == nil {
+		return metrics
+	}
+	installed := map[string]bool{}
+	for _, id := range s.CraftedItems {
+		installed[strings.TrimSpace(strings.ToLower(id))] = true
+	}
+	for _, id := range s.Shelter.Upgrades {
+		installed[strings.TrimSpace(strings.ToLower(id))] = true
+	}
+	apply := func(id string, fn func()) {
+		if installed[id] {
+			fn()
+		}
+	}
+	apply("raised_sleeping_platform", func() { metrics.Comfort += 2; metrics.DrynessProtection += 1 })
+	apply("bough_mattress", func() { metrics.Comfort += 2; metrics.Insulation += 1 })
+	apply("insulated_wall_lining", func() { metrics.Insulation += 2; metrics.WindProtection += 1 })
+	apply("storm_flap", func() { metrics.RainProtection += 2; metrics.WindProtection += 1 })
+	apply("drainage_ditch", func() { metrics.DrynessProtection += 2; metrics.DurabilityPerDay = max(1, metrics.DurabilityPerDay-1) })
+	apply("reflective_fire_wall", func() { metrics.Insulation += 1; metrics.Comfort += 1 })
+	apply("stone_hearth", func() { metrics.Comfort += 1; metrics.RainProtection += 1 })
+	apply("smoke_hole_baffle", func() { metrics.WindProtection += 1; metrics.RainProtection += 1 })
+	apply("storage_shelves", func() { metrics.StorageCapacityKg += 6 })
+	apply("elevated_food_cache", func() { metrics.StorageCapacityKg += 8; metrics.PredatorSafety += 2 })
+	apply("door_latch", func() { metrics.PredatorSafety += 1; metrics.Stealth += 1 })
+	apply("camouflage_screen", func() { metrics.Stealth += 2 })
+	apply("lookout_platform", func() { metrics.PredatorSafety += 1; metrics.WindProtection += 1 })
+	apply("cold_air_trench", func() { metrics.Insulation += 1; metrics.DrynessProtection += 1 })
+	return metrics
 }
 
 func shelterByID(id ShelterType) (ShelterSpec, bool) {
@@ -1411,16 +2075,21 @@ func (s *RunState) progressCampState() {
 	}
 
 	if s.Shelter.Type != "" && s.Shelter.Durability > 0 {
-		if shelter, ok := shelterByID(s.Shelter.Type); ok {
-			loss := shelter.DurabilityPerDay
-			if isRainyWeather(s.Weather.Type) {
-				loss += 2
-			}
-			if isSevereWeather(s.Weather.Type) {
-				loss += 3
-			}
-			s.Shelter.Durability = clamp(s.Shelter.Durability-loss, 0, 100)
+		metrics, ok := s.currentShelterMetrics()
+		if !ok {
+			metrics = shelterMetrics{DurabilityPerDay: 5}
 		}
+		loss := max(1, metrics.DurabilityPerDay)
+		if isRainyWeather(s.Weather.Type) {
+			loss += max(1, 2-metrics.DrynessProtection/3)
+		}
+		if isSevereWeather(s.Weather.Type) {
+			loss += max(1, 3-metrics.WindProtection/3)
+		}
+		if metrics.Maintenance > 0 {
+			loss = max(1, loss-metrics.Maintenance/5)
+		}
+		s.Shelter.Durability = clamp(s.Shelter.Durability-loss, 0, 100)
 		if s.Shelter.Durability == 0 {
 			s.Shelter = ShelterState{}
 		}
@@ -1429,8 +2098,8 @@ func (s *RunState) progressCampState() {
 	// Prepared fire materials can degrade in persistent wet weather.
 	if isRainyWeather(s.Weather.Type) || s.Weather.Type == WeatherSnow || s.Weather.Type == WeatherBlizzard {
 		wetHit := 0.08
-		if s.Shelter.Type != "" && s.Shelter.Durability > 0 {
-			wetHit *= 0.45
+		if metrics, ok := s.currentShelterMetrics(); ok {
+			wetHit *= clampFloat(0.45-float64(metrics.DrynessProtection)*0.02, 0.2, 0.45)
 		}
 		s.FirePrep.TinderQuality = clampFloat(s.FirePrep.TinderQuality-wetHit, 0, 1)
 		s.FirePrep.KindlingQuality = clampFloat(s.FirePrep.KindlingQuality-wetHit*0.8, 0, 1)
@@ -1470,17 +2139,21 @@ func (s *RunState) campImpactForDay() statDelta {
 	impact := statDelta{}
 
 	if s.Shelter.Type != "" && s.Shelter.Durability > 0 {
-		if shelter, ok := shelterByID(s.Shelter.Type); ok {
+		if shelter, ok := s.currentShelterMetrics(); ok {
 			// Shelter blunts weather stress and bug pressure.
 			impact.Energy += shelter.Insulation / 2
-			impact.Morale += shelter.RainProtection / 2
+			impact.Morale += shelter.Comfort/2 + shelter.RainProtection/3
 			if isRainyWeather(s.Weather.Type) {
 				impact.Energy += shelter.RainProtection/2 + shelter.WindProtection/3
-				impact.Morale += shelter.RainProtection / 2
+				impact.Morale += shelter.DrynessProtection/2 + shelter.RainProtection/3
 			}
 			if biomeIsTropicalWet(s.Scenario.Biome) {
 				impact.Morale += shelter.InsectProtection / 2
 			}
+			if s.Weather.TemperatureC <= 0 {
+				impact.Energy += shelter.Insulation / 3
+			}
+			impact.Morale += shelter.PredatorSafety / 3
 		}
 	} else if isRainyWeather(s.Weather.Type) || isSevereWeather(s.Weather.Type) {
 		impact.Energy -= 2
@@ -1527,7 +2200,7 @@ type ResourceRequirement struct {
 }
 
 func CraftableCatalog() []CraftableSpec {
-	return []CraftableSpec{
+	base := []CraftableSpec{
 		// Fire method components.
 		{ID: "bow_drill_spindle", Name: "Bow Drill Spindle", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Straight spindle for bow drill fire set.", MinBushcraft: 1, WoodKg: 0.2, Effects: statDelta{Morale: 1}},
 		{ID: "bow_drill_hearth_board", Name: "Bow Drill Hearth Board", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "savanna", "badlands", "desert"}, Description: "Hearth board for receiving ember dust.", MinBushcraft: 1, WoodKg: 0.25, Effects: statDelta{Morale: 1}},
@@ -1589,6 +2262,79 @@ func CraftableCatalog() []CraftableSpec {
 		{ID: "woven_tunic", Name: "Woven Tunic", Category: "clothing", BiomeTags: []string{"forest", "boreal", "wetlands", "jungle", "coast"}, Description: "Layered plant-fiber tunic that improves comfort and morale.", MinBushcraft: 1, WeightKg: 1.1, BaseHours: 3.0, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "nettle_fiber", Qty: 2}}, Effects: statDelta{Energy: 1, Morale: 2}},
 		{ID: "hide_moccasins", Name: "Hide Moccasins", Category: "clothing", BiomeTags: []string{"forest", "savanna", "badlands", "mountain", "coast"}, Description: "Soft hide footwear with fiber stitching.", MinBushcraft: 1, WeightKg: 0.5, BaseHours: 2.2, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "rawhide_strip", Qty: 1}}, Effects: statDelta{Energy: 1, Morale: 1}},
 		{ID: "hide_jacket", Name: "Hide Jacket", Category: "clothing", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain", "badlands"}, Description: "Insulating hide layer for cold and wind exposure.", MinBushcraft: 2, WeightKg: 2.0, BaseHours: 4.6, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "rawhide_strip", Qty: 2}}, Effects: statDelta{Energy: 2, Morale: 1}},
+	}
+	return append(base, expandedCraftableCatalog()...)
+}
+
+func expandedCraftableCatalog() []CraftableSpec {
+	return []CraftableSpec{
+		// Tooling and fabrication.
+		{ID: "bone_needle", Name: "Bone Needle", Category: "tools", BiomeTags: []string{"forest", "boreal", "savanna", "jungle", "coast"}, Description: "Fine needle for hide and plant-fiber stitching.", MinBushcraft: 1, WeightKg: 0.03, BaseHours: 0.6, Portable: true, RequiresResources: []ResourceRequirement{{ID: "shell_fragment", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "bone_awl", Name: "Bone Awl", Category: "tools", BiomeTags: []string{"forest", "boreal", "savanna", "jungle", "coast"}, Description: "Piercing awl for leather and bark work.", MinBushcraft: 1, WeightKg: 0.08, BaseHours: 0.7, Portable: true, RequiresResources: []ResourceRequirement{{ID: "shell_fragment", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "stone_adze", Name: "Stone Adze", Category: "tools", BiomeTags: []string{"forest", "mountain", "badlands", "river", "coast"}, Description: "Heavy cutting adze for shaping beams and planks.", MinBushcraft: 2, WeightKg: 1.1, BaseHours: 2.4, Portable: true, RequiresItems: []string{"heavy_cordage"}, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 1}}, Effects: statDelta{Energy: 2}},
+		{ID: "wood_mallet", Name: "Wood Mallet", Category: "tools", BiomeTags: []string{"forest", "mountain", "boreal", "savanna"}, Description: "Mallet used for pegs, wedges, and deadfall setups.", MinBushcraft: 1, WoodKg: 0.9, WeightKg: 0.8, BaseHours: 1.2, Portable: true, Effects: statDelta{Energy: 1}},
+		{ID: "wedge_set", Name: "Wedge Set", Category: "tools", BiomeTags: []string{"forest", "mountain", "boreal", "coast", "badlands"}, Description: "Wedges for splitting wood and opening joints.", MinBushcraft: 1, WoodKg: 0.6, WeightKg: 0.4, BaseHours: 1.0, Portable: true, RequiresItems: []string{"wood_mallet"}, Effects: statDelta{Energy: 1}},
+
+		// Fire and cooking.
+		{ID: "ember_pot", Name: "Ember Pot", Category: "fire", BiomeTags: []string{"forest", "boreal", "mountain", "coast", "river"}, Description: "Keeps live embers for easier fire restart.", MinBushcraft: 2, RequiresFire: true, WeightKg: 1.2, BaseHours: 2.2, Portable: true, RequiresResources: []ResourceRequirement{{ID: "clay", Qty: 1.0}}, Effects: statDelta{Morale: 1}},
+		{ID: "drying_rack", Name: "Drying Rack", Category: "food", BiomeTags: []string{"forest", "coast", "savanna", "jungle", "mountain"}, Description: "Passive drying rack for meat, fish, and herbs.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.4, WeightKg: 4.5, BaseHours: 2.8, Portable: false, RequiresItems: []string{"heavy_cordage"}, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "smoking_rack", Name: "Smoking Rack", Category: "food", BiomeTags: []string{"forest", "coast", "savanna", "jungle", "wetlands"}, Description: "Controlled smoking rack for preservation.", MinBushcraft: 2, RequiresFire: true, RequiresShelter: true, WoodKg: 1.8, WeightKg: 5.0, BaseHours: 3.4, Portable: false, RequiresItems: []string{"drying_rack"}, Effects: statDelta{Morale: 2}},
+		{ID: "stone_oven", Name: "Stone Oven", Category: "food", BiomeTags: []string{"mountain", "badlands", "river", "coast", "forest"}, Description: "Stone-lined oven for baking and long cooks.", MinBushcraft: 2, RequiresFire: true, RequiresShelter: true, WoodKg: 1.0, WeightKg: 14, BaseHours: 5.0, Portable: false, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 3}, {ID: "mud", Qty: 1}}, Effects: statDelta{Morale: 2}},
+		{ID: "clay_oven", Name: "Clay Oven", Category: "food", BiomeTags: []string{"river", "delta", "wetlands", "swamp", "lake", "coast"}, Description: "Compact clay oven improves cook consistency.", MinBushcraft: 2, RequiresFire: true, RequiresShelter: true, WoodKg: 0.8, WeightKg: 10, BaseHours: 4.5, Portable: false, RequiresResources: []ResourceRequirement{{ID: "clay", Qty: 2.2}, {ID: "gravel", Qty: 1}}, Effects: statDelta{Morale: 2}},
+		{ID: "char_cloth", Name: "Char Cloth", Category: "fire", BiomeTags: []string{"forest", "boreal", "coast", "savanna", "jungle"}, Description: "Charred tinder cloth for high-reliability fire starts.", MinBushcraft: 1, RequiresFire: true, WeightKg: 0.04, BaseHours: 0.7, Portable: true, RequiresResources: []ResourceRequirement{{ID: "flax_fiber", Qty: 1}, {ID: "charcoal", Qty: 1}}, Effects: statDelta{Morale: 1}},
+
+		// Hunting and projectile systems.
+		{ID: "hunting_blind", Name: "Hunting Blind", Category: "structures", BiomeTags: []string{"forest", "savanna", "wetlands", "badlands", "mountain"}, Description: "Concealed blind for patient hunting setups.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.3, WeightKg: 3.5, BaseHours: 2.1, Portable: false, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "camouflage_screen", Name: "Camouflage Screen", Category: "shelter_upgrade", BiomeTags: []string{"forest", "savanna", "wetlands", "jungle", "mountain"}, Description: "Camouflage panel for blinds and camps.", MinBushcraft: 1, RequiresShelter: true, WeightKg: 0.8, BaseHours: 1.3, Portable: false, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "dry_leaf_litter", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "fire_hardened_spear", Name: "Fire-Hardened Spear", Category: "hunting", BiomeTags: []string{"forest", "coast", "river", "jungle", "savanna", "badlands"}, Description: "General-purpose hunting and fishing spear.", MinBushcraft: 1, RequiresFire: true, WoodKg: 0.8, WeightKg: 1.2, BaseHours: 1.4, Portable: true, Effects: statDelta{Energy: 1}},
+		{ID: "atlatl", Name: "Atlatl Thrower", Category: "hunting", BiomeTags: []string{"forest", "mountain", "savanna", "badlands", "coast"}, Description: "Spear thrower that increases launch force.", MinBushcraft: 2, WoodKg: 0.6, WeightKg: 0.7, BaseHours: 2.0, Portable: true, RequiresItems: []string{"fire_hardened_spear", "natural_twine"}, Effects: statDelta{Morale: 1}},
+		{ID: "short_bow", Name: "Short Bow", Category: "hunting", BiomeTags: []string{"forest", "coast", "savanna", "badlands", "mountain"}, Description: "Compact hunting bow for mixed terrain.", MinBushcraft: 2, WoodKg: 0.8, WeightKg: 0.9, BaseHours: 3.2, Portable: true, RequiresItems: []string{"heavy_cordage"}, Effects: statDelta{Morale: 2}},
+		{ID: "long_bow", Name: "Long Bow", Category: "hunting", BiomeTags: []string{"forest", "boreal", "mountain", "coast"}, Description: "Longer draw bow with better range.", MinBushcraft: 3, WoodKg: 1.1, WeightKg: 1.3, BaseHours: 4.1, Portable: true, RequiresItems: []string{"short_bow", "heavy_cordage"}, Effects: statDelta{Morale: 2}},
+		{ID: "stone_arrow_bundle", Name: "Stone Arrow Bundle", Category: "hunting", BiomeTags: []string{"forest", "mountain", "badlands", "coast", "savanna"}, Description: "Bundle of stone-tipped arrows.", MinBushcraft: 2, WeightKg: 0.7, BaseHours: 1.8, Portable: true, RequiresItems: []string{"short_bow", "natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "stone_flake", Qty: 2}}, Effects: statDelta{Energy: 1}},
+		{ID: "bone_arrow_bundle", Name: "Bone Arrow Bundle", Category: "hunting", BiomeTags: []string{"forest", "boreal", "wetlands", "coast", "jungle"}, Description: "Light arrows tipped with bone/shell.", MinBushcraft: 2, WeightKg: 0.6, BaseHours: 1.7, Portable: true, RequiresItems: []string{"short_bow", "natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "shell_fragment", Qty: 2}}, Effects: statDelta{Energy: 1}},
+
+		// Trapping and fishing infrastructure.
+		{ID: "spring_snare_kit", Name: "Spring Snare Kit", Category: "trapping", BiomeTags: []string{"forest", "boreal", "savanna", "mountain", "badlands"}, Description: "Prebuilt spring snare loops and toggles.", MinBushcraft: 2, WeightKg: 0.5, BaseHours: 1.6, Portable: true, RequiresItems: []string{"trap_trigger_set", "heavy_cordage"}, Effects: statDelta{Morale: 1}},
+		{ID: "deadfall_kit", Name: "Deadfall Kit", Category: "trapping", BiomeTags: []string{"forest", "boreal", "mountain", "badlands", "desert"}, Description: "Prepared trigger sticks and guide pegs for deadfalls.", MinBushcraft: 2, WeightKg: 0.7, BaseHours: 1.4, Portable: true, RequiresItems: []string{"trap_trigger_set", "wedge_set"}, Effects: statDelta{Energy: 1}},
+		{ID: "fish_trap_basket", Name: "Fish Trap Basket", Category: "fishing", BiomeTags: []string{"delta", "river", "lake", "swamp", "coast", "wetlands"}, Description: "Funnel fish basket for passive channel trapping.", MinBushcraft: 1, WeightKg: 1.2, BaseHours: 1.8, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "reed_bundle", Qty: 2}}, Effects: statDelta{Energy: 1}},
+		{ID: "fish_weir_stakes", Name: "Fish Weir Stakes", Category: "fishing", BiomeTags: []string{"river", "delta", "wetlands", "coast"}, Description: "Stake set for temporary stream weirs.", MinBushcraft: 2, WeightKg: 2.0, BaseHours: 2.6, Portable: false, RequiresItems: []string{"heavy_cordage"}, RequiresResources: []ResourceRequirement{{ID: "willow_withy", Qty: 2}}, Effects: statDelta{Energy: 1}},
+		{ID: "gill_net", Name: "Gill Net", Category: "fishing", BiomeTags: []string{"coast", "delta", "lake", "river", "wetlands"}, Description: "Net for unattended fish capture in current.", MinBushcraft: 3, WeightKg: 2.2, BaseHours: 4.0, Portable: true, RequiresItems: []string{"heavy_cordage"}, RequiresResources: []ResourceRequirement{{ID: "hemp_fiber", Qty: 2}}, Effects: statDelta{Morale: 1}},
+		{ID: "trotline_set", Name: "Trotline Set", Category: "fishing", BiomeTags: []string{"river", "lake", "delta", "coast"}, Description: "Longline with multiple gorge hooks.", MinBushcraft: 2, WeightKg: 0.9, BaseHours: 2.0, Portable: true, RequiresItems: []string{"fish_gorge_hooks", "heavy_cordage"}, Effects: statDelta{Energy: 1}},
+
+		// Bedding, storage, and shelter upgrades.
+		{ID: "raised_sleeping_platform", Name: "Raised Sleeping Platform", Category: "shelter_upgrade", BiomeTags: []string{"forest", "wetlands", "swamp", "jungle", "coast"}, Description: "Keeps sleeping area off wet or cold ground.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 1.6, WeightKg: 5.5, BaseHours: 2.6, Portable: false, RequiresResources: []ResourceRequirement{{ID: "spruce_bough", Qty: 1}}, Effects: statDelta{Energy: 2, Morale: 1}},
+		{ID: "bough_mattress", Name: "Bough Mattress", Category: "shelter_upgrade", BiomeTags: []string{"forest", "boreal", "wetlands", "mountain"}, Description: "Springy bough layer that improves sleep quality.", MinBushcraft: 1, RequiresShelter: true, WeightKg: 2.0, BaseHours: 1.1, Portable: false, RequiresResources: []ResourceRequirement{{ID: "spruce_bough", Qty: 2}}, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "insulated_bedding", Name: "Insulated Bedding", Category: "shelter_upgrade", BiomeTags: []string{"forest", "boreal", "tundra", "mountain", "wetlands"}, Description: "Multi-layer bedding for cold-weather rest.", MinBushcraft: 2, RequiresShelter: true, WeightKg: 1.6, BaseHours: 2.2, Portable: false, RequiresResources: []ResourceRequirement{{ID: "dry_moss", Qty: 2}, {ID: "rawhide_strip", Qty: 1}}, Effects: statDelta{Energy: 2, Morale: 1}},
+		{ID: "groundsheet", Name: "Groundsheet", Category: "shelter_upgrade", BiomeTags: []string{"forest", "coast", "wetlands", "savanna", "jungle"}, Description: "Water-resistant sheet to keep bedroll dry.", MinBushcraft: 1, RequiresShelter: true, WeightKg: 1.0, BaseHours: 1.4, Portable: false, RequiresResources: []ResourceRequirement{{ID: "bark_pitch", Qty: 1}, {ID: "reed_bundle", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "storm_flap", Name: "Storm Flap", Category: "shelter_upgrade", BiomeTags: []string{"forest", "coast", "wetlands", "mountain", "tundra"}, Description: "Wind/rain flap for shelter entrances.", MinBushcraft: 1, RequiresShelter: true, WeightKg: 0.7, BaseHours: 1.2, Portable: false, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "drainage_ditch", Name: "Drainage Ditch", Category: "shelter_upgrade", BiomeTags: []string{"forest", "wetlands", "swamp", "mountain", "coast"}, Description: "Perimeter ditch to reduce pooling water.", MinBushcraft: 1, RequiresShelter: true, BaseHours: 1.0, Portable: false, RequiresItems: []string{"digging_stick"}, RequiresResources: []ResourceRequirement{{ID: "gravel", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "reflective_fire_wall", Name: "Reflective Fire Wall", Category: "shelter_upgrade", BiomeTags: []string{"forest", "mountain", "boreal", "badlands"}, Description: "Reflector wall that bounces heat into shelter.", MinBushcraft: 2, RequiresFire: true, RequiresShelter: true, WoodKg: 1.2, WeightKg: 2.5, BaseHours: 2.1, Portable: false, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 1}}, Effects: statDelta{Energy: 2}},
+		{ID: "stone_hearth", Name: "Stone Hearth", Category: "shelter_upgrade", BiomeTags: []string{"forest", "mountain", "badlands", "coast", "boreal"}, Description: "Contained hearth for safer heat and cooking.", MinBushcraft: 2, RequiresFire: true, RequiresShelter: true, WeightKg: 8, BaseHours: 2.8, Portable: false, RequiresResources: []ResourceRequirement{{ID: "stone_cobble", Qty: 2}, {ID: "mud", Qty: 0.8}}, Effects: statDelta{Morale: 1}},
+		{ID: "smoke_hole_baffle", Name: "Smoke-Hole Baffle", Category: "shelter_upgrade", BiomeTags: []string{"forest", "boreal", "mountain", "tundra", "wetlands"}, Description: "Improves smoke exit while reducing wind-driven rain.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 0.7, WeightKg: 1.2, BaseHours: 1.8, Portable: false, RequiresResources: []ResourceRequirement{{ID: "thatch_bundle", Qty: 1}}, Effects: statDelta{Morale: 1}},
+		{ID: "storage_shelves", Name: "Storage Shelves", Category: "shelter_upgrade", BiomeTags: []string{"forest", "coast", "mountain", "jungle", "boreal"}, Description: "Raised shelves to keep stores off damp ground.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.1, WeightKg: 3.0, BaseHours: 1.9, Portable: false, Effects: statDelta{Morale: 1}},
+		{ID: "elevated_food_cache", Name: "Elevated Food Cache", Category: "storage", BiomeTags: []string{"forest", "boreal", "wetlands", "tundra", "mountain"}, Description: "Suspended cache to protect food from scavengers.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 1.7, WeightKg: 4.2, BaseHours: 2.7, Portable: false, RequiresItems: []string{"heavy_cordage"}, Effects: statDelta{Morale: 1}},
+		{ID: "underground_cold_pit", Name: "Underground Cold Pit", Category: "storage", BiomeTags: []string{"forest", "boreal", "mountain", "badlands", "tundra"}, Description: "Cool pit storage for preserving perishables.", MinBushcraft: 2, RequiresShelter: true, BaseHours: 2.5, Portable: false, RequiresItems: []string{"digging_stick"}, RequiresResources: []ResourceRequirement{{ID: "gravel", Qty: 1}, {ID: "clay", Qty: 0.8}}, Effects: statDelta{Energy: 1}},
+		{ID: "drying_box", Name: "Drying Box", Category: "storage", BiomeTags: []string{"forest", "coast", "savanna", "jungle", "badlands"}, Description: "Ventilated drying box for jerky and herbs.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 1.2, WeightKg: 3.4, BaseHours: 2.0, Portable: false, RequiresItems: []string{"drying_rack"}, Effects: statDelta{Morale: 1}},
+
+		// Mobility/transport.
+		{ID: "hand_sled", Name: "Hand Sled", Category: "transport", BiomeTags: []string{"tundra", "arctic", "subarctic", "boreal", "mountain"}, Description: "Simple drag sled for moving heavy loads.", MinBushcraft: 2, WoodKg: 2.2, WeightKg: 7.5, BaseHours: 3.2, Portable: false, RequiresItems: []string{"wedge_set", "heavy_cordage"}, Effects: statDelta{Energy: 1}},
+		{ID: "travois", Name: "Travois", Category: "transport", BiomeTags: []string{"savanna", "badlands", "forest", "mountain", "desert"}, Description: "Pole drag for hauling camp materials.", MinBushcraft: 1, WoodKg: 1.8, WeightKg: 6.2, BaseHours: 2.4, Portable: false, RequiresItems: []string{"heavy_cordage"}, Effects: statDelta{Energy: 1}},
+		{ID: "snowshoes", Name: "Snowshoes", Category: "transport", BiomeTags: []string{"tundra", "arctic", "subarctic", "boreal", "mountain"}, Description: "Flotation footwear for deep snow travel.", MinBushcraft: 2, WeightKg: 2.1, BaseHours: 3.3, Portable: true, RequiresItems: []string{"heavy_cordage"}, RequiresResources: []ResourceRequirement{{ID: "willow_withy", Qty: 1}}, Effects: statDelta{Energy: 2}},
+		{ID: "skis", Name: "Improvised Skis", Category: "transport", BiomeTags: []string{"tundra", "arctic", "subarctic", "boreal", "mountain"}, Description: "Skis for efficient winter movement.", MinBushcraft: 3, WeightKg: 2.8, BaseHours: 4.2, Portable: true, RequiresItems: []string{"wood_mallet", "wedge_set", "heavy_cordage"}, Effects: statDelta{Energy: 2, Morale: 1}},
+
+		// Structures and defenses.
+		{ID: "lookout_platform", Name: "Lookout Platform", Category: "structures", BiomeTags: []string{"forest", "savanna", "wetlands", "badlands", "coast"}, Description: "Raised observation platform to scout terrain.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 2.4, WeightKg: 9, BaseHours: 3.8, Portable: false, RequiresItems: []string{"wedge_set"}, Effects: statDelta{Morale: 2}},
+		{ID: "perimeter_deadfall_deterrent", Name: "Perimeter Deadfall Deterrent", Category: "structures", BiomeTags: []string{"forest", "boreal", "mountain", "badlands", "savanna"}, Description: "Non-lethal perimeter obstacle to discourage intrusions.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 1.6, WeightKg: 4.8, BaseHours: 2.2, Portable: false, RequiresItems: []string{"deadfall_kit"}, Effects: statDelta{Morale: 1}},
+		{ID: "raised_storage_platform", Name: "Raised Storage Platform", Category: "structures", BiomeTags: []string{"forest", "wetlands", "swamp", "delta", "jungle"}, Description: "Platform for dry gear storage above flood line.", MinBushcraft: 2, RequiresShelter: true, WoodKg: 2.0, WeightKg: 7, BaseHours: 2.9, Portable: false, RequiresItems: []string{"heavy_cordage"}, Effects: statDelta{Morale: 1}},
+		{ID: "door_latch", Name: "Door Latch", Category: "shelter_upgrade", BiomeTags: []string{"forest", "boreal", "mountain", "coast", "badlands"}, Description: "Simple latch to secure shelter entry.", MinBushcraft: 1, RequiresShelter: true, WoodKg: 0.4, WeightKg: 0.3, BaseHours: 0.8, Portable: false, RequiresItems: []string{"bone_awl"}, Effects: statDelta{Morale: 1}},
+		{ID: "cold_air_trench", Name: "Cold-Air Trench", Category: "shelter_upgrade", BiomeTags: []string{"arctic", "subarctic", "tundra", "boreal", "mountain"}, Description: "Entrance trench that traps heavy cold air.", MinBushcraft: 1, RequiresShelter: true, BaseHours: 1.0, Portable: false, RequiresItems: []string{"digging_stick"}, Effects: statDelta{Energy: 1}},
+		{ID: "insulated_wall_lining", Name: "Insulated Wall Lining", Category: "shelter_upgrade", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain", "wetlands"}, Description: "Additional inner wall insulation layer.", MinBushcraft: 2, RequiresShelter: true, WeightKg: 1.7, BaseHours: 2.1, Portable: false, RequiresResources: []ResourceRequirement{{ID: "dry_moss", Qty: 1}, {ID: "thatch_bundle", Qty: 1}}, Effects: statDelta{Energy: 2}},
+
+		// Additional clothing progression.
+		{ID: "hide_trousers", Name: "Hide Trousers", Category: "clothing", BiomeTags: []string{"forest", "boreal", "subarctic", "mountain", "badlands"}, Description: "Insulated hide legwear.", MinBushcraft: 2, WeightKg: 1.5, BaseHours: 3.8, Portable: true, RequiresItems: []string{"bone_needle", "natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "rawhide_strip", Qty: 2}}, Effects: statDelta{Energy: 2}},
+		{ID: "bark_cloak", Name: "Bark Cloak", Category: "clothing", BiomeTags: []string{"forest", "boreal", "coast", "wetlands", "jungle"}, Description: "Layered bark/fiber cloak for rain and wind.", MinBushcraft: 1, WeightKg: 1.2, BaseHours: 2.6, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "cedar_bark", Qty: 1}, {ID: "bast_strip", Qty: 1}}, Effects: statDelta{Energy: 1, Morale: 1}},
+		{ID: "reed_sandals", Name: "Reed Sandals", Category: "clothing", BiomeTags: []string{"wetlands", "swamp", "delta", "coast", "jungle"}, Description: "Woven reed sandals for wet terrain.", MinBushcraft: 0, WeightKg: 0.3, BaseHours: 0.9, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "reed_bundle", Qty: 1}}, Effects: statDelta{Energy: 1}},
+		{ID: "fiber_poncho", Name: "Fiber Poncho", Category: "clothing", BiomeTags: []string{"forest", "coast", "wetlands", "jungle", "savanna"}, Description: "Quick rain poncho from woven fibers.", MinBushcraft: 1, WeightKg: 0.9, BaseHours: 1.8, Portable: true, RequiresItems: []string{"natural_twine"}, RequiresResources: []ResourceRequirement{{ID: "hemp_fiber", Qty: 1}}, Effects: statDelta{Morale: 1}},
 	}
 }
 
@@ -1701,6 +2447,11 @@ func (s *RunState) CraftItem(playerID int, craftID string) (CraftOutcome, error)
 	if !slices.Contains(s.CraftedItems, chosen.ID) {
 		s.CraftedItems = append(s.CraftedItems, chosen.ID)
 	}
+	if s.Shelter.Type != "" && s.Shelter.Durability > 0 && (strings.EqualFold(chosen.Category, "shelter_upgrade") || isShelterUpgradeID(chosen.ID)) {
+		if !slices.Contains(s.Shelter.Upgrades, chosen.ID) {
+			s.Shelter.Upgrades = append(s.Shelter.Upgrades, chosen.ID)
+		}
+	}
 	rng := seededRNG(seedFromLabel(s.Config.Seed, fmt.Sprintf("craft:%s:%d:%d", chosen.ID, s.Day, playerID)))
 	qualityScore := float64(effectiveCraft) + float64(player.MentalStrength)/2 + rng.Float64()*2.4 - 1.2
 	quality := qualityFromScore(qualityScore)
@@ -1740,6 +2491,30 @@ func (s *RunState) CraftItem(playerID int, craftID string) (CraftOutcome, error)
 		HoursSpent: hours,
 		StoredAt:   storeAt,
 	}, nil
+}
+
+func isShelterUpgradeID(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "raised_sleeping_platform",
+		"bough_mattress",
+		"insulated_bedding",
+		"groundsheet",
+		"storm_flap",
+		"drainage_ditch",
+		"reflective_fire_wall",
+		"stone_hearth",
+		"smoke_hole_baffle",
+		"storage_shelves",
+		"elevated_food_cache",
+		"door_latch",
+		"camouflage_screen",
+		"lookout_platform",
+		"cold_air_trench",
+		"insulated_wall_lining":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseWoodType(raw string) WoodType {

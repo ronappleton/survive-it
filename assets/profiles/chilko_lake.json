@@ -1,0 +1,15 @@
+{
+  "id": "chilko_lake",
+  "name": "Chilko Lake (British Columbia)",
+  "cell_meters": 100,
+  "elev_p10": 25.788,
+  "elev_p50": 33.913,
+  "elev_p90": 55.425,
+  "slope_p50": 2.14,
+  "slope_p90": 7.414,
+  "ruggedness": 2.2964,
+  "river_density": 0.0649,
+  "lake_coverage": 0.0654,
+  "notes": "Derived from 34x34 elevation samples in bbox [-125.5000, 50.8000, -123.4000, 52.5000]",
+  "source": "Mapzen Terrarium elevation tiles (AWS public), distilled to compact profile stats"
+}
