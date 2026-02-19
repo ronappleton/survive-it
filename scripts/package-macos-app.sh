@@ -35,6 +35,79 @@ find_binary_for_arch() {
   return 1
 }
 
+find_archive_for_arch() {
+  local arch="$1"
+  local exact_tgz="${DIST_DIR}/${PROJECT_NAME}_${VERSION}_darwin_${arch}.tar.gz"
+  local exact_zip="${DIST_DIR}/${PROJECT_NAME}_${VERSION}_darwin_${arch}.zip"
+  if [[ -f "${exact_tgz}" ]]; then
+    echo "${exact_tgz}"
+    return 0
+  fi
+  if [[ -f "${exact_zip}" ]]; then
+    echo "${exact_zip}"
+    return 0
+  fi
+  local found
+  found="$(find "${DIST_DIR}" -maxdepth 1 -type f \( -name "*_darwin_${arch}.tar.gz" -o -name "*_darwin_${arch}.zip" \) | head -n 1 || true)"
+  if [[ -n "${found}" ]]; then
+    echo "${found}"
+    return 0
+  fi
+  return 1
+}
+
+extract_binary_for_arch() {
+  local arch="$1"
+  local archive_path
+  archive_path="$(find_archive_for_arch "${arch}" || true)"
+  if [[ -z "${archive_path}" ]]; then
+    return 1
+  fi
+
+  local extract_dir="${DIST_DIR}/macos-app-build/extracted/${arch}"
+  rm -rf "${extract_dir}"
+  mkdir -p "${extract_dir}"
+
+  case "${archive_path}" in
+    *.tar.gz)
+      tar -xzf "${archive_path}" -C "${extract_dir}"
+      ;;
+    *.zip)
+      ditto -x -k "${archive_path}" "${extract_dir}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  local found
+  found="$(find "${extract_dir}" -type f -name "survive-it" -perm -u+x | head -n 1 || true)"
+  if [[ -z "${found}" ]]; then
+    found="$(find "${extract_dir}" -type f -name "survive-it" | head -n 1 || true)"
+  fi
+  if [[ -n "${found}" ]]; then
+    echo "${found}"
+    return 0
+  fi
+  return 1
+}
+
+resolve_binary_for_arch() {
+  local arch="$1"
+  local found
+  found="$(find_binary_for_arch "${arch}" || true)"
+  if [[ -n "${found}" ]]; then
+    echo "${found}"
+    return 0
+  fi
+  found="$(extract_binary_for_arch "${arch}" || true)"
+  if [[ -n "${found}" ]]; then
+    echo "${found}"
+    return 0
+  fi
+  return 1
+}
+
 make_info_plist() {
   local plist_path="$1"
   local short_version="$2"
@@ -77,9 +150,9 @@ mkdir -p "${DIST_DIR}/macos-app-build"
 declare -a ARTIFACTS=()
 
 for arch in amd64 arm64; do
-  binary_path="$(find_binary_for_arch "${arch}" || true)"
+  binary_path="$(resolve_binary_for_arch "${arch}" || true)"
   if [[ -z "${binary_path}" ]]; then
-    echo "Missing darwin binary for ${arch} under ${DIST_DIR}" >&2
+    echo "Missing darwin binary/archive for ${arch} under ${DIST_DIR}" >&2
     exit 1
   fi
 
