@@ -16,6 +16,7 @@ func (s *RunState) AdvanceDay() {
 		p := &s.Players[i]
 
 		playerWeatherImpact := adjustWeatherImpactForPlayer(weatherImpact, *p, s.Weather.Type)
+		playerWeatherImpact = s.applyCraftedWeatherModifiersForPlayer(playerWeatherImpact, *p, s.Weather.Type, s.Weather.TemperatureC)
 		p.Energy += playerWeatherImpact.Energy
 		p.Hydration += playerWeatherImpact.Hydration
 		p.Morale += playerWeatherImpact.Morale
@@ -29,6 +30,7 @@ func (s *RunState) AdvanceDay() {
 		refreshEffectBars(p)
 	}
 	s.progressCampState()
+	s.advanceFoodDegradation()
 }
 
 func applyDailyAilmentPenalties(playerState *PlayerState) {

@@ -10,17 +10,22 @@ type RunState struct {
 	Scenario    Scenario
 	SeasonSetID SeasonSetID
 	Day         int
+	ClockHours  float64
 	Players     []PlayerState
 	Weather     WeatherState
 
-	MetabolismProgress float64         `json:"metabolism_progress"`
-	WoodStock          []WoodStock     `json:"wood_stock,omitempty"`
-	ResourceStock      []ResourceStock `json:"resource_stock,omitempty"`
-	Fire               FireState       `json:"fire"`
-	FirePrep           FirePrepState   `json:"fire_prep"`
-	Shelter            ShelterState    `json:"shelter"`
-	CraftedItems       []string        `json:"crafted_items,omitempty"`
-	FireAttemptCount   int             `json:"fire_attempt_count"`
+	MetabolismProgress  float64         `json:"metabolism_progress"`
+	WoodStock           []WoodStock     `json:"wood_stock,omitempty"`
+	ResourceStock       []ResourceStock `json:"resource_stock,omitempty"`
+	CampInventory       []InventoryItem `json:"camp_inventory,omitempty"`
+	Travel              TravelState     `json:"travel"`
+	Fire                FireState       `json:"fire"`
+	FirePrep            FirePrepState   `json:"fire_prep"`
+	Shelter             ShelterState    `json:"shelter"`
+	CraftedItems        []string        `json:"crafted_items,omitempty"`
+	PlacedTraps         []PlacedTrap    `json:"placed_traps,omitempty"`
+	FireAttemptCount    int             `json:"fire_attempt_count"`
+	ProcessAttemptCount int             `json:"process_attempt_count"`
 }
 
 func NewRunState(config RunConfig) (RunState, error) {
@@ -52,6 +57,7 @@ func NewRunState(config RunConfig) (RunState, error) {
 		Scenario:    scenario,
 		SeasonSetID: scenario.DefaultSeasonSetID,
 		Day:         1,
+		ClockHours:  7,
 		Players:     CreatePlayers(resolvedConfig),
 	}
 	state.EnsureWeather()

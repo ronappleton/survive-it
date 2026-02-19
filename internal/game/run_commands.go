@@ -9,8 +9,9 @@ import (
 )
 
 type RunCommandResult struct {
-	Handled bool
-	Message string
+	Handled       bool
+	Message       string
+	HoursAdvanced float64
 }
 
 type equipmentAction struct {
@@ -43,18 +44,38 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [raw] [liver] [p#] [grams], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
 		}
 	case "forage":
 		return s.executeForageCommand(fields[1:])
 	case "trees":
 		return s.executeTreesCommand()
+	case "plants":
+		return s.executePlantsCommand()
 	case "resources":
 		return s.executeResourcesCommand()
 	case "collect":
 		return s.executeCollectCommand(fields[1:])
+	case "bark":
+		return s.executeBarkCommand(fields[1:])
+	case "inventory":
+		return s.executeInventoryCommand(fields[1:])
 	case "wood":
 		return s.executeWoodCommand(fields[1:])
+	case "trap":
+		return s.executeTrapCommand(fields[1:])
+	case "gut":
+		return s.executeGutCommand(fields[1:])
+	case "cook":
+		return s.executeCookCommand(fields[1:])
+	case "preserve":
+		return s.executePreserveCommand(fields[1:])
+	case "smoke", "dry", "salt":
+		return s.executePreserveCommand(fields)
+	case "eat":
+		return s.executeEatCommand(fields[1:])
+	case "go":
+		return s.executeGoCommand(fields[1:])
 	case "fire":
 		return s.executeFireCommand(fields[1:])
 	case "shelter":
@@ -230,6 +251,24 @@ func (s *RunState) executeTreesCommand() RunCommandResult {
 	return RunCommandResult{Handled: true, Message: "Trees -> " + strings.Join(parts, ", ")}
 }
 
+func (s *RunState) executePlantsCommand() RunCommandResult {
+	available := ResourcesForBiome(s.Scenario.Biome)
+	if len(available) == 0 {
+		return RunCommandResult{Handled: true, Message: "No utility plant resources available."}
+	}
+	parts := make([]string, 0, len(available))
+	for _, resource := range available {
+		if len(resource.Uses) == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s[%s]", resource.ID, strings.Join(resource.Uses, "/")))
+	}
+	if len(parts) == 0 {
+		return RunCommandResult{Handled: true, Message: "No utility plant resources available."}
+	}
+	return RunCommandResult{Handled: true, Message: "Utility plants/materials -> " + strings.Join(parts, ", ")}
+}
+
 func (s *RunState) executeResourcesCommand() RunCommandResult {
 	available := ResourcesForBiome(s.Scenario.Biome)
 	if len(available) == 0 {
@@ -237,11 +276,317 @@ func (s *RunState) executeResourcesCommand() RunCommandResult {
 	}
 	parts := make([]string, 0, len(available))
 	for _, resource := range available {
-		parts = append(parts, resource.ID)
+		if len(resource.Uses) == 0 {
+			parts = append(parts, resource.ID)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s{%s}", resource.ID, strings.Join(resource.Uses, "/")))
 	}
 	return RunCommandResult{
 		Handled: true,
-		Message: fmt.Sprintf("Resources -> %s | Stock: %s", strings.Join(parts, ", "), formatResourceStock(s.ResourceStock)),
+		Message: fmt.Sprintf("Resources -> %s | Stock: %s", strings.Join(parts, ", "), s.CampInventorySummary()),
+	}
+}
+
+func (s *RunState) executeBarkCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 || fields[0] != "strip" {
+		return RunCommandResult{Handled: true, Message: "Usage: bark strip [tree|any] [qty] [p#]"}
+	}
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+	if !hasAmount {
+		amount = 1
+	}
+	treeID := "any"
+	if len(rest) > 0 {
+		treeID = rest[0]
+	}
+	result, err := s.StripBark(playerID, treeID, amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Bark stripping failed: %v", err)}
+	}
+	s.AdvanceActionClock(result.HoursSpent)
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d stripped %s: +%.0f %s +%.0f inner_bark_fiber (%s quality, %.1fh). Stock: %s",
+			playerID, result.Tree.Name, result.PrimaryQty, result.Primary.ID, result.FiberQty, result.Quality, result.HoursSpent, s.CampInventorySummary()),
+	}
+}
+
+func (s *RunState) executeInventoryCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 || fields[0] == "status" {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("%s | %s", s.CampInventorySummary(), s.PersonalInventorySummary(1))}
+	}
+	switch fields[0] {
+	case "camp":
+		return RunCommandResult{Handled: true, Message: s.CampInventorySummary()}
+	case "personal":
+		playerID := 1
+		if len(fields) > 1 {
+			if parsed := parsePlayerToken(fields[1]); parsed > 0 {
+				playerID = parsed
+			}
+		}
+		return RunCommandResult{Handled: true, Message: s.PersonalInventorySummary(playerID)}
+	case "stash":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory stash <item_id> [qty] [p#]"}
+		}
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if len(rest) == 0 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory stash <item_id> [qty] [p#]"}
+		}
+		if !hasAmount {
+			amount = 1
+		}
+		item, err := s.StashPersonalItem(playerID, rest[0], amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Inventory stash failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d stashed %s %s. %s", playerID, item.ID, formatInventoryQty(item.Unit, item.Qty), s.CampInventorySummary())}
+	case "take":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory take <item_id> [qty] [p#]"}
+		}
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if len(rest) == 0 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory take <item_id> [qty] [p#]"}
+		}
+		if !hasAmount {
+			amount = 1
+		}
+		item, err := s.TakeCampItem(playerID, rest[0], amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Inventory take failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d took %s %s. %s", playerID, item.ID, formatInventoryQty(item.Unit, item.Qty), s.PersonalInventorySummary(playerID))}
+	case "add":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory add <item_id> [qty] [p#]"}
+		}
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if len(rest) == 0 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory add <item_id> [qty] [p#]"}
+		}
+		if !hasAmount {
+			amount = 1
+		}
+		itemID := strings.ToLower(strings.TrimSpace(rest[0]))
+		unit := "piece"
+		weight := defaultUnitWeightKg(unit)
+		if spec, ok := s.findResourceForBiome(itemID); ok {
+			unit = spec.Unit
+			weight = defaultUnitWeightKg(spec.Unit)
+		}
+		item := InventoryItem{
+			ID:       itemID,
+			Name:     strings.ReplaceAll(itemID, "_", " "),
+			Unit:     unit,
+			Qty:      amount,
+			WeightKg: weight,
+			Category: "field",
+		}
+		if err := s.AddPersonalInventoryItem(playerID, item); err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Inventory add failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d added %s %s to personal inventory. %s", playerID, item.ID, formatInventoryQty(item.Unit, item.Qty), s.PersonalInventorySummary(playerID))}
+	case "drop":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory drop <item_id> [qty] [p#]"}
+		}
+		playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+		if len(rest) == 0 {
+			return RunCommandResult{Handled: true, Message: "Usage: inventory drop <item_id> [qty] [p#]"}
+		}
+		if !hasAmount {
+			amount = 1
+		}
+		item, err := s.removePersonalInventoryItem(playerID, rest[0], amount)
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Inventory drop failed: %v", err)}
+		}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d dropped %s %s. %s", playerID, item.ID, formatInventoryQty(item.Unit, item.Qty), s.PersonalInventorySummary(playerID))}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: inventory camp|personal [p#] | inventory stash <item_id> [qty] [p#] | inventory take <item_id> [qty] [p#] | inventory add <item_id> [qty] [p#] | inventory drop <item_id> [qty] [p#]"}
+	}
+}
+
+func (s *RunState) executeTrapCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 || fields[0] == "status" {
+		return RunCommandResult{Handled: true, Message: "Traps: " + formatTrapStatus(s.PlacedTraps)}
+	}
+	switch fields[0] {
+	case "list":
+		options := TrapsForBiome(s.Scenario.Biome)
+		parts := make([]string, 0, len(options))
+		for _, trap := range options {
+			parts = append(parts, fmt.Sprintf("%s(%s %.0f%%)", trap.Name, trap.ID, trap.BaseChance*100))
+		}
+		return RunCommandResult{Handled: true, Message: "Trap options -> " + strings.Join(parts, ", ")}
+	case "set":
+		if len(fields) < 2 {
+			return RunCommandResult{Handled: true, Message: "Usage: trap set <id> [p#]"}
+		}
+		playerID := 1
+		for _, token := range fields[2:] {
+			if parsed := parsePlayerToken(token); parsed > 0 {
+				playerID = parsed
+			}
+		}
+		setResult, err := s.SetTrap(playerID, fields[1])
+		if err != nil {
+			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Trap set failed: %v", err)}
+		}
+		s.AdvanceActionClock(setResult.Hours)
+		return RunCommandResult{
+			Handled:       true,
+			HoursAdvanced: setResult.Hours,
+			Message: fmt.Sprintf("P%d set %s (%s quality). Base catch %.0f%%, setup %.1fh. Status: %s",
+				playerID, setResult.Trap.Name, setResult.Quality, setResult.Chance*100, setResult.Hours, formatTrapStatus(s.PlacedTraps)),
+		}
+	case "check":
+		check := s.CheckTraps()
+		msg := fmt.Sprintf("Checked %d traps, collected %.1fkg, rearmed %d, broken %d.", check.Checked, check.CollectedKg, check.Rearmed, check.Broken)
+		if check.CampOverflow > 0 {
+			msg += fmt.Sprintf(" %d catches lost: camp storage full.", check.CampOverflow)
+		}
+		msg += " " + s.CampInventorySummary()
+		return RunCommandResult{Handled: true, Message: msg}
+	default:
+		return RunCommandResult{Handled: true, Message: "Usage: trap list | trap set <id> [p#] | trap status | trap check"}
+	}
+}
+
+func (s *RunState) executeGutCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: gut <small_game_carcass|bird_carcass|fish_carcass> [kg] [p#]"}
+	}
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
+	if len(rest) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: gut <small_game_carcass|bird_carcass|fish_carcass> [kg] [p#]"}
+	}
+	if !hasAmount {
+		amount = 0
+	}
+	result, err := s.GutCarcass(playerID, rest[0], amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Gutting failed: %v", err)}
+	}
+	msg := fmt.Sprintf("P%d gutted %.2fkg %s -> %.2fkg %s, %.2fkg spoiled, %.2fkg inedible (%.1fh).",
+		playerID, result.ProcessedKg, result.CarcassID, result.MeatKg, result.MeatID, result.SpoiledKg, result.InedibleKg, result.HoursSpent)
+	if result.PiercedGut {
+		msg += " Intestines pierced: contamination increased and some meat became inedible."
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message:       msg + " " + s.CampInventorySummary(),
+	}
+}
+
+func (s *RunState) executeCookCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: cook <raw_small_game_meat|raw_bird_meat|raw_fish_meat> [kg] [p#]"}
+	}
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
+	if len(rest) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: cook <raw_small_game_meat|raw_bird_meat|raw_fish_meat> [kg] [p#]"}
+	}
+	if !hasAmount {
+		amount = 0
+	}
+	result, err := s.CookFood(playerID, rest[0], amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Cook failed: %v", err)}
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d cooked %.2fkg %s -> %.2fkg %s (%.1fh). %s",
+			playerID, result.InputKg, result.RawID, result.OutputKg, result.CookedID, result.HoursSpent, s.CampInventorySummary()),
+	}
+}
+
+func (s *RunState) executePreserveCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: preserve <smoke|dry|salt> <raw_small_game_meat|raw_bird_meat|raw_fish_meat|cooked_...> [kg] [p#]"}
+	}
+	method := fields[0]
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields[1:])
+	if len(rest) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: preserve <smoke|dry|salt> <raw_small_game_meat|raw_bird_meat|raw_fish_meat|cooked_...> [kg] [p#]"}
+	}
+	if !hasAmount {
+		amount = 0
+	}
+	result, err := s.PreserveFood(playerID, method, rest[0], amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Preserve failed: %v", err)}
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d preserved %.2fkg %s via %s -> %.2fkg %s (%.1fh, shelf-life ~%d days). %s",
+			playerID, result.InputKg, result.SourceID, result.Method, result.OutputKg, result.PreservedID, result.HoursSpent, result.ShelfLifeDays, s.CampInventorySummary()),
+	}
+}
+
+func (s *RunState) executeEatCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: eat <food_item> [grams|kg] [p#]"}
+	}
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
+	if len(rest) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: eat <food_item> [grams|kg] [p#]"}
+	}
+	if !hasAmount {
+		amount = 0
+	}
+	result, err := s.EatFood(playerID, rest[0], amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Eat failed: %v", err)}
+	}
+	msg := fmt.Sprintf("P%d ate %dg %s: %dkcal %dgP %dgF %dgS | %+dE %+dH2O %+dM",
+		playerID,
+		result.ConsumedGrams,
+		result.ItemID,
+		result.Nutrition.CaloriesKcal, result.Nutrition.ProteinG, result.Nutrition.FatG, result.Nutrition.SugarG,
+		result.EnergyDelta, result.HydrationDelta, result.MoraleDelta,
+	)
+	if result.GotIll {
+		msg += " | illness triggered (food poisoning)"
+	}
+	return RunCommandResult{Handled: true, Message: msg}
+}
+
+func (s *RunState) executeGoCommand(fields []string) RunCommandResult {
+	if len(fields) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: go <north|south|east|west|n|s|e|w> [km] [p#]"}
+	}
+	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
+	if len(rest) == 0 {
+		return RunCommandResult{Handled: true, Message: "Usage: go <north|south|east|west|n|s|e|w> [km] [p#]"}
+	}
+	direction := normalizeDirection(rest[0])
+	if direction == "" {
+		return RunCommandResult{Handled: true, Message: "Direction must be north/south/east/west."}
+	}
+	if !hasAmount {
+		amount = 2.0
+	}
+	result, err := s.TravelMove(playerID, direction, amount)
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Travel failed: %v", err)}
+	}
+	craftText := "on foot"
+	if result.WatercraftUsed != "" {
+		craftText = "using " + result.WatercraftUsed
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d traveled %.1fkm %s %s at %.1fkm/h (%.1fh). Cost: -%dE -%dH2O %+dM. Total travel %.1fkm.",
+			playerID, result.DistanceKm, result.Direction, craftText, result.TravelSpeedKmph, result.HoursSpent, result.EnergyCost, result.HydrationCost, result.MoraleDelta, s.Travel.TotalKm),
 	}
 }
 
@@ -265,9 +610,9 @@ func (s *RunState) executeCollectCommand(fields []string) RunCommandResult {
 	}
 	unit := resource.Unit
 	if unit == "kg" {
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.1f %s of %s. Stock: %s", playerID, qty, unit, resource.Name, formatResourceStock(s.ResourceStock))}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.1f %s of %s. %s", playerID, qty, unit, resource.Name, s.CampInventorySummary())}
 	}
-	return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.0f %s of %s. Stock: %s", playerID, qty, unit, resource.Name, formatResourceStock(s.ResourceStock))}
+	return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d collected %.0f %s of %s. %s", playerID, qty, unit, resource.Name, s.CampInventorySummary())}
 }
 
 func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
@@ -277,7 +622,7 @@ func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
 
 	switch fields[0] {
 	case "stock", "status":
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Wood stock: %s", formatWoodStock(s.WoodStock))}
+		return RunCommandResult{Handled: true, Message: s.CampInventorySummary()}
 	case "gather":
 		playerID, amount, hasAmount, _ := parseOptionalPlayerAndNumber(fields[1:])
 		if !hasAmount {
@@ -289,8 +634,8 @@ func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
 		}
 		return RunCommandResult{
 			Handled: true,
-			Message: fmt.Sprintf("P%d gathered %.1fkg from %s (%s). Stock: %s",
-				playerID, kg, tree.Name, tree.WoodType, formatWoodStock(s.WoodStock)),
+			Message: fmt.Sprintf("P%d gathered %.1fkg from %s (%s). %s",
+				playerID, kg, tree.Name, tree.WoodType, s.CampInventorySummary()),
 		}
 	case "dry":
 		playerID, amount, hasAmount, _ := parseOptionalPlayerAndNumber(fields[1:])
@@ -301,7 +646,7 @@ func (s *RunState) executeWoodCommand(fields []string) RunCommandResult {
 		if err != nil {
 			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Wood dry failed: %v", err)}
 		}
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d dried %.1fkg wood. Stock: %s", playerID, dried, formatWoodStock(s.WoodStock))}
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d dried %.1fkg wood. %s", playerID, dried, s.CampInventorySummary())}
 	default:
 		return RunCommandResult{Handled: true, Message: "Usage: wood gather [kg] [p#] | wood dry [kg] [p#] | wood stock"}
 	}
@@ -511,11 +856,16 @@ func (s *RunState) executeCraftCommand(fields []string) RunCommandResult {
 				playerID = parsed
 			}
 		}
-		item, err := s.CraftItem(playerID, fields[1])
+		outcome, err := s.CraftItem(playerID, fields[1])
 		if err != nil {
 			return RunCommandResult{Handled: true, Message: fmt.Sprintf("Craft failed: %v", err)}
 		}
-		return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d crafted %s.", playerID, item.Name)}
+		return RunCommandResult{
+			Handled:       true,
+			HoursAdvanced: outcome.HoursSpent,
+			Message: fmt.Sprintf("P%d crafted %s (%s, %.1fh, stored %s).",
+				playerID, outcome.Spec.Name, outcome.Quality, outcome.HoursSpent, outcome.StoredAt),
+		}
 	default:
 		return RunCommandResult{Handled: true, Message: "Usage: craft list | craft make <id> [p#] | craft inventory"}
 	}

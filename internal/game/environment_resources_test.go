@@ -281,3 +281,282 @@ func TestCraftableCatalogExpandedForTreeProducts(t *testing.T) {
 		}
 	}
 }
+
+func TestCraftItemReturnsQualityAndAdvancesClock(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 14},
+		Seed:        1201,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	run.Players[0].Bushcraft = 3
+	if _, _, err := run.CollectResource(1, "inner_bark_fiber", 2); err != nil {
+		t.Fatalf("collect inner_bark_fiber: %v", err)
+	}
+
+	beforeClock := run.ClockHours
+	outcome, err := run.CraftItem(1, "natural_twine")
+	if err != nil {
+		t.Fatalf("craft natural_twine: %v", err)
+	}
+	if outcome.Quality == "" {
+		t.Fatalf("expected craft quality")
+	}
+	if outcome.HoursSpent <= 0 {
+		t.Fatalf("expected positive craft time")
+	}
+	if run.ClockHours <= beforeClock && run.Day == 1 {
+		t.Fatalf("expected clock to advance after craft")
+	}
+	if !strings.Contains(strings.ToLower(run.PersonalInventorySummary(1)), "natural_twine") && !strings.Contains(strings.ToLower(run.CampInventorySummary()), "natural_twine") {
+		t.Fatalf("expected natural_twine to be stored in inventory")
+	}
+}
+
+func TestInventoryStashAndTakeFlow(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 14},
+		Seed:        1202,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+
+	if err := run.AddPersonalInventoryItem(1, InventoryItem{ID: "field_stick", Name: "Field Stick", Unit: "piece", Qty: 3, WeightKg: 0.2, Category: "field"}); err != nil {
+		t.Fatalf("add personal item: %v", err)
+	}
+	if _, err := run.StashPersonalItem(1, "field_stick", 2); err != nil {
+		t.Fatalf("stash personal item: %v", err)
+	}
+	if _, err := run.TakeCampItem(1, "field_stick", 1); err != nil {
+		t.Fatalf("take camp item: %v", err)
+	}
+
+	player, ok := run.playerByID(1)
+	if !ok {
+		t.Fatalf("player not found")
+	}
+	item, ok := inventoryItemByID(player.PersonalItems, "field_stick")
+	if !ok {
+		t.Fatalf("expected field_stick in personal inventory")
+	}
+	if item.Qty != 2 {
+		t.Fatalf("expected personal qty=2, got %.0f", item.Qty)
+	}
+}
+
+func TestTrapCheckCollectsPendingCatch(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1203,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	run.Players[0].Bushcraft = 3
+
+	if _, _, err := run.CollectResource(1, "inner_bark_fiber", 2); err != nil {
+		t.Fatalf("collect inner_bark_fiber: %v", err)
+	}
+	if _, err := run.CraftItem(1, "natural_twine"); err != nil {
+		t.Fatalf("craft natural_twine: %v", err)
+	}
+	if _, err := run.SetTrap(1, "peg_snare"); err != nil {
+		t.Fatalf("set trap: %v", err)
+	}
+	if len(run.PlacedTraps) == 0 {
+		t.Fatalf("expected placed trap")
+	}
+	run.PlacedTraps[0].PendingCatchKg = 0.6
+	run.PlacedTraps[0].PendingCatchType = "small_game"
+	run.PlacedTraps[0].Armed = false
+
+	check := run.CheckTraps()
+	if check.CollectedKg <= 0 {
+		t.Fatalf("expected trap check to collect catch, got %+v", check)
+	}
+	if !strings.Contains(strings.ToLower(run.CampInventorySummary()), "small_game_carcass") {
+		t.Fatalf("expected small_game_carcass in camp inventory after check")
+	}
+}
+
+func TestGutCookEatFlowFromTrappedCatch(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1301,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	run.Players[0].Bushcraft = 2
+	run.Players[0].Crafting = 25
+	run.Players[0].Kit = []KitItem{KitSixInchKnife}
+
+	if err := run.addCampInventoryItem(InventoryItem{ID: "small_game_carcass", Name: "Small Game Carcass", Unit: "kg", Qty: 1.2, WeightKg: 1.2, Category: "carcass"}); err != nil {
+		t.Fatalf("add carcass: %v", err)
+	}
+
+	gut := run.ExecuteRunCommand("gut small_game_carcass 1 p1")
+	if !gut.Handled {
+		t.Fatalf("expected gut command handled")
+	}
+	if !strings.Contains(strings.ToLower(gut.Message), "gutted") {
+		t.Fatalf("expected gut result message, got: %s", gut.Message)
+	}
+
+	if res := run.ExecuteRunCommand("wood gather 4 p1"); !res.Handled {
+		t.Fatalf("expected wood gather handled")
+	}
+	if res := run.ExecuteRunCommand("fire build 1 p1"); !res.Handled {
+		t.Fatalf("expected fire build handled")
+	}
+
+	cook := run.ExecuteRunCommand("cook raw_small_game_meat 0.3 p1")
+	if !cook.Handled {
+		t.Fatalf("expected cook command handled, got: %+v", cook)
+	}
+	eat := run.ExecuteRunCommand("eat cooked_small_game_meat 220 p1")
+	if !eat.Handled {
+		t.Fatalf("expected eat command handled, got: %+v", eat)
+	}
+	if !strings.Contains(strings.ToLower(eat.Message), "ate") {
+		t.Fatalf("expected eat message, got: %s", eat.Message)
+	}
+}
+
+func TestGoTravelUsesWatercraftWhenAvailable(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1302,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	run.Players[0].Agility = 1
+	run.Players[0].Endurance = 1
+
+	without, err := run.TravelMove(1, "north", 3)
+	if err != nil {
+		t.Fatalf("travel without watercraft: %v", err)
+	}
+
+	run.CraftedItems = append(run.CraftedItems, "brush_raft")
+	with, err := run.TravelMove(1, "north", 3)
+	if err != nil {
+		t.Fatalf("travel with watercraft: %v", err)
+	}
+	if with.WatercraftUsed == "" {
+		t.Fatalf("expected watercraft to be used in water biome")
+	}
+	if with.TravelSpeedKmph <= without.TravelSpeedKmph {
+		t.Fatalf("expected watercraft travel speed boost, without=%.2f with=%.2f", without.TravelSpeedKmph, with.TravelSpeedKmph)
+	}
+}
+
+func TestCraftedClothingModifiesWeatherImpact(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioArcticID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 10},
+		Seed:        1303,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	player := run.Players[0]
+	base := statDelta{Energy: -2, Hydration: -1, Morale: -2}
+	noGear := run.applyCraftedWeatherModifiersForPlayer(base, player, WeatherSnow, -10)
+	player.PersonalItems = append(player.PersonalItems, InventoryItem{ID: "hide_jacket", Name: "Hide Jacket", Unit: "set", Qty: 1, WeightKg: 2})
+	withGear := run.applyCraftedWeatherModifiersForPlayer(base, player, WeatherSnow, -10)
+	if withGear.Energy <= noGear.Energy {
+		t.Fatalf("expected clothing to reduce cold energy penalty, noGear=%+v withGear=%+v", noGear, withGear)
+	}
+	if withGear.Morale <= noGear.Morale {
+		t.Fatalf("expected clothing to improve morale in cold weather, noGear=%+v withGear=%+v", noGear, withGear)
+	}
+}
+
+func TestPreserveSmokeCommandCreatesSmokedMeat(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioVancouverIslandID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1401,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	run.Players[0].Crafting = 30
+	if err := run.addCampInventoryItem(InventoryItem{ID: "raw_fish_meat", Name: "Raw Fish Meat", Unit: "kg", Qty: 1.1, WeightKg: 1, Category: "food"}); err != nil {
+		t.Fatalf("add raw fish: %v", err)
+	}
+	if res := run.ExecuteRunCommand("wood gather 3 p1"); !res.Handled {
+		t.Fatalf("expected wood gather handled")
+	}
+	if res := run.ExecuteRunCommand("fire build 1 p1"); !res.Handled {
+		t.Fatalf("expected fire build handled")
+	}
+
+	preserve := run.ExecuteRunCommand("preserve smoke raw_fish_meat 0.8 p1")
+	if !preserve.Handled {
+		t.Fatalf("expected preserve command handled")
+	}
+	if !strings.Contains(strings.ToLower(preserve.Message), "smoked_fish_meat") {
+		t.Fatalf("expected smoked output in message, got: %s", preserve.Message)
+	}
+	if inventoryTotalQtyByID(run.CampInventory, "smoked_fish_meat") <= 0 {
+		t.Fatalf("expected smoked fish meat in inventory")
+	}
+}
+
+func TestAdvanceDayFoodDegradationRawVsPreserved(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeAlone,
+		ScenarioID:  ScenarioJungleID,
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 20},
+		Seed:        1402,
+	})
+	if err != nil {
+		t.Fatalf("new run state: %v", err)
+	}
+	if err := run.addCampInventoryItem(InventoryItem{ID: "raw_small_game_meat", Name: "Raw Small Game Meat", Unit: "kg", Qty: 1.0, WeightKg: 1, Category: "food"}); err != nil {
+		t.Fatalf("add raw meat: %v", err)
+	}
+	if err := run.addCampInventoryItem(InventoryItem{ID: "smoked_small_game_meat", Name: "Smoked Small Game Meat", Unit: "kg", Qty: 1.0, WeightKg: 1, Category: "food"}); err != nil {
+		t.Fatalf("add smoked meat: %v", err)
+	}
+
+	for i := 0; i < 4; i++ {
+		run.AdvanceDay()
+	}
+
+	rawRemaining := inventoryTotalQtyByID(run.CampInventory, "raw_small_game_meat")
+	smokedRemaining := inventoryTotalQtyByID(run.CampInventory, "smoked_small_game_meat")
+	spoiled := inventoryTotalQtyByID(run.CampInventory, "spoiled_meat")
+
+	if rawRemaining >= smokedRemaining {
+		t.Fatalf("expected raw meat to degrade faster than smoked meat, raw=%.2f smoked=%.2f", rawRemaining, smokedRemaining)
+	}
+	if spoiled <= 0 {
+		t.Fatalf("expected spoiled meat to accumulate from degradation")
+	}
+}

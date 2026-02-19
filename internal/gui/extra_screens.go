@@ -38,16 +38,17 @@ type kitPickerState struct {
 }
 
 type scenarioBuilderState struct {
-	Cursor       int
-	ModeIndex    int
-	ListCursor   int
-	EditingRow   int
-	EditBuffer   string
-	Scenario     game.Scenario
-	Status       string
-	SourceID     game.ScenarioID
-	SourceName   string
-	SourceCustom bool
+	Cursor          int
+	ModeIndex       int
+	ListCursor      int
+	PickingScenario bool
+	EditingRow      int
+	EditBuffer      string
+	Scenario        game.Scenario
+	Status          string
+	SourceID        game.ScenarioID
+	SourceName      string
+	SourceCustom    bool
 }
 
 type scenarioBuilderEntry struct {
@@ -403,10 +404,12 @@ func (ui *gameUI) drawKitPicker() {
 	}
 	if ui.kit.Target == kitTargetIssued {
 		selectedLines = append(selectedLines, "", "R resets to recommendation")
+	} else {
+		selectedLines = append(selectedLines, "", "R resets personal kit")
 	}
 	drawLines(right, 44, 18, selectedLines, colorText)
 
-	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  Esc back"
+	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  R reset  Esc back"
 	rl.DrawText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30, 17, colorDim)
 	if strings.TrimSpace(ui.status) != "" {
 		rl.DrawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, 17, colorWarn)
@@ -455,16 +458,59 @@ func kitItemFlavorText(item game.KitItem) string {
 	}
 }
 
+type locationBiomeOption struct {
+	Location string
+	Biomes   []string
+}
+
+func scenarioLocationBiomeOptions() []locationBiomeOption {
+	return []locationBiomeOption{
+		{Location: "North America", Biomes: []string{"temperate_rainforest", "boreal_coast", "subarctic_lake", "mountain_forest", "arctic_delta"}},
+		{Location: "South America", Biomes: []string{"tropical_jungle", "wetlands", "river_delta_wetlands", "montane_steppe", "coast"}},
+		{Location: "Africa", Biomes: []string{"savanna", "desert", "swamp", "badlands_jungle_edge", "coast"}},
+		{Location: "Asia-Pacific", Biomes: []string{"tropical_island", "tropical_jungle", "subarctic", "cold_mountain", "coast"}},
+		{Location: "Wilderness", Biomes: []string{"temperate_forest", "mountain", "coast", "jungle", "desert"}},
+	}
+}
+
+func biomeOptionsForLocation(location string) []string {
+	options := scenarioLocationBiomeOptions()
+	for _, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Location), strings.TrimSpace(location)) {
+			return append([]string(nil), option.Biomes...)
+		}
+	}
+	return append([]string(nil), options[len(options)-1].Biomes...)
+}
+
+func currentLocationBiomeIndex(location string) int {
+	options := scenarioLocationBiomeOptions()
+	for i, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Location), strings.TrimSpace(location)) {
+			return i
+		}
+	}
+	return len(options) - 1
+}
+
 func (ui *gameUI) openScenarioBuilder() {
 	ui.sb = scenarioBuilderState{
-		Cursor:       0,
-		ModeIndex:    ui.setup.ModeIndex,
-		ListCursor:   0,
-		EditingRow:   -1,
-		Scenario:     newScenarioTemplate(modeOptions()[clampInt(ui.setup.ModeIndex, 0, len(modeOptions())-1)]),
-		SourceID:     "",
-		SourceName:   "",
-		SourceCustom: false,
+		Cursor:          0,
+		ModeIndex:       ui.setup.ModeIndex,
+		ListCursor:      0,
+		PickingScenario: false,
+		EditingRow:      -1,
+		Scenario:        newScenarioTemplate(modeOptions()[clampInt(ui.setup.ModeIndex, 0, len(modeOptions())-1)]),
+		SourceID:        "",
+		SourceName:      "",
+		SourceCustom:    false,
+	}
+	if strings.TrimSpace(ui.sb.Scenario.Location) == "" {
+		ui.sb.Scenario.Location = "Wilderness"
+	}
+	biomes := biomeOptionsForLocation(ui.sb.Scenario.Location)
+	if len(biomes) > 0 {
+		ui.sb.Scenario.Biome = biomes[0]
 	}
 	ui.ensureScenarioSeasonSet()
 	ui.screen = screenScenarioBuilder
@@ -481,16 +527,38 @@ func (ui *gameUI) updateScenarioBuilder() {
 		}
 		return
 	}
+	if ui.sb.PickingScenario {
+		mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
+		list := ui.scenarioBuilderEntriesForMode(mode)
+		if len(list) == 0 {
+			ui.sb.PickingScenario = false
+			ui.sb.Status = "No scenarios available for this mode."
+			return
+		}
+		if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) {
+			ui.sb.PickingScenario = false
+			return
+		}
+		if rl.IsKeyPressed(rl.KeyDown) {
+			ui.sb.ListCursor = wrapIndex(ui.sb.ListCursor+1, len(list))
+			ui.loadSelectedScenario()
+		}
+		if rl.IsKeyPressed(rl.KeyUp) {
+			ui.sb.ListCursor = wrapIndex(ui.sb.ListCursor-1, len(list))
+			ui.loadSelectedScenario()
+		}
+		return
+	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		ui.enterMenu()
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 16)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 17)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 16)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 17)
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		ui.adjustScenarioBuilder(-1)
@@ -500,27 +568,28 @@ func (ui *gameUI) updateScenarioBuilder() {
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		switch ui.sb.Cursor {
-		case 3, 4, 5, 6, 7:
+		case 3, 6, 7, 8:
 			ui.startScenarioEdit(ui.sb.Cursor)
-		case 9:
-			ui.openPhaseEditor()
 		case 10:
+			ui.openPhaseEditor()
+		case 11:
 			ui.setup.ModeIndex = ui.sb.ModeIndex
 			ui.ensureSetupPlayers()
 			ui.openStatsBuilder(screenScenarioBuilder)
-		case 11:
+		case 12:
 			ui.setup.ModeIndex = ui.sb.ModeIndex
 			ui.ensureSetupPlayers()
 			ui.preparePlayerConfig()
 			ui.pcfg.ReturnTo = screenScenarioBuilder
 			ui.screen = screenPlayerConfig
-		case 12:
-			ui.loadSelectedScenario()
 		case 13:
-			ui.saveScenarioFromBuilder()
+			ui.sb.PickingScenario = true
+			ui.loadSelectedScenario()
 		case 14:
-			ui.deleteSelectedCustomScenario()
+			ui.saveScenarioFromBuilder()
 		case 15:
+			ui.deleteSelectedCustomScenario()
+		case 16:
 			ui.enterMenu()
 		}
 	}
@@ -533,6 +602,9 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 		ui.sb.ModeIndex = wrapIndex(ui.sb.ModeIndex+delta, len(modes))
 		ui.setup.ModeIndex = ui.sb.ModeIndex
 		ui.sb.Scenario = newScenarioTemplate(modes[ui.sb.ModeIndex])
+		if strings.TrimSpace(ui.sb.Scenario.Location) == "" {
+			ui.sb.Scenario.Location = "Wilderness"
+		}
 		ui.sb.SourceID = ""
 		ui.sb.SourceName = ""
 		ui.sb.SourceCustom = false
@@ -541,13 +613,32 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 		ui.sb.ListCursor = 0
 	case 1:
 		ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount+delta, 1, 8)
-	case 8:
-		ui.sb.Scenario.DefaultDays = clampInt(ui.sb.Scenario.DefaultDays+delta*3, 1, 365)
-	case 12, 14:
-		list := ui.scenarioBuilderEntriesForMode(modes[ui.sb.ModeIndex])
-		if len(list) > 0 {
-			ui.sb.ListCursor = wrapIndex(ui.sb.ListCursor+delta, len(list))
+	case 4:
+		locations := scenarioLocationBiomeOptions()
+		locIdx := currentLocationBiomeIndex(ui.sb.Scenario.Location)
+		locIdx = wrapIndex(locIdx+delta, len(locations))
+		ui.sb.Scenario.Location = locations[locIdx].Location
+		biomes := biomeOptionsForLocation(ui.sb.Scenario.Location)
+		if len(biomes) > 0 {
+			ui.sb.Scenario.Biome = biomes[0]
+			ui.sb.Scenario.Wildlife = game.WildlifeForBiome(ui.sb.Scenario.Biome)
 		}
+	case 5:
+		biomes := biomeOptionsForLocation(ui.sb.Scenario.Location)
+		if len(biomes) > 0 {
+			current := 0
+			for i, biome := range biomes {
+				if strings.EqualFold(biome, ui.sb.Scenario.Biome) {
+					current = i
+					break
+				}
+			}
+			current = wrapIndex(current+delta, len(biomes))
+			ui.sb.Scenario.Biome = biomes[current]
+			ui.sb.Scenario.Wildlife = game.WildlifeForBiome(ui.sb.Scenario.Biome)
+		}
+	case 9:
+		ui.sb.Scenario.DefaultDays = clampInt(ui.sb.Scenario.DefaultDays+delta*3, 1, 365)
 	}
 	ui.setup.ModeIndex = ui.sb.ModeIndex
 	ui.ensureScenarioSeasonSet()
@@ -555,10 +646,14 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 }
 
 func (ui *gameUI) drawScenarioBuilder() {
-	left := rl.NewRectangle(20, 20, float32(ui.width)*0.46, float32(ui.height-40))
+	left := rl.NewRectangle(20, 20, float32(ui.width)*0.56, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
 	drawPanel(left, "Scenario Builder")
-	drawPanel(right, "Scenarios")
+	if ui.sb.PickingScenario {
+		drawPanel(right, "Scenario Browser (ACTIVE)")
+	} else {
+		drawPanel(right, "Scenarios")
+	}
 
 	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
 	loadedLabel := "New Scenario"
@@ -578,6 +673,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 		{"Player Count", fmt.Sprintf("%d", ui.setup.PlayerCount)},
 		{"Loaded", loadedLabel},
 		{"Name", ui.sb.Scenario.Name},
+		{"Location", ui.sb.Scenario.Location},
 		{"Biome", ui.sb.Scenario.Biome},
 		{"Description", ui.sb.Scenario.Description},
 		{"Daunting", ui.sb.Scenario.Daunting},
@@ -586,27 +682,28 @@ func (ui *gameUI) drawScenarioBuilder() {
 		{"Phase Builder", fmt.Sprintf("%d phase(s)", ui.scenarioPhaseCount())},
 		{"Player Stats Builder", "Enter"},
 		{"Player Editor", "Enter"},
-		{"Load Selected", "Enter"},
+		{"Load Scenario", "Enter"},
 		{"Save Scenario", "Enter"},
 		{"Delete Selected", "Enter"},
 		{"Back", "Enter"},
 	}
 
+	labelX := int32(left.X) + 16
+	valueX := int32(left.X) + int32(left.Width*0.58)
+	maxValueChars := maxInt(6, int((left.Width*0.40)/8))
 	y := int32(left.Y) + 54
 	for i, row := range rows {
 		if i == ui.sb.Cursor {
 			rl.DrawRectangle(int32(left.X)+10, y-5, int32(left.Width)-20, 30, rl.Fade(colorAccent, 0.2))
 		}
 		value := row.value
-		if len(value) > 34 {
-			value = value[:34] + "..."
-		}
-		rl.DrawText(row.label, int32(left.X)+16, y, 19, colorText)
-		rl.DrawText(value, int32(left.X)+188, y, 19, colorAccent)
+		value = truncateForUI(value, maxValueChars)
+		rl.DrawText(row.label, labelX, y, 19, colorText)
+		rl.DrawText(value, valueX, y, 19, colorAccent)
 		y += 34
 	}
-	rl.DrawText("Left/Right change mode/playercount/days/list or selected row", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
-	rl.DrawText("Built-in edits must be saved with a new name", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
+	rl.DrawText("Left/Right change mode/player count/location/biome/days", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
+	rl.DrawText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
 
 	list := ui.scenarioBuilderEntriesForMode(mode)
 	ly := int32(right.Y) + 52
@@ -625,13 +722,28 @@ func (ui *gameUI) drawScenarioBuilder() {
 				source = "Custom"
 			}
 			s := entry.Scenario
-			line := fmt.Sprintf("%s [%s]  (%s, %dd)", s.Name, source, s.Biome, s.DefaultDays)
-			rl.DrawText(line, int32(right.X)+16, ly, 19, colorText)
+			line := fmt.Sprintf("%s [%s]  (%s, %s, %dd)", s.Name, source, s.Location, s.Biome, s.DefaultDays)
+			clr := colorText
+			if ui.sb.PickingScenario && i == ui.sb.ListCursor {
+				clr = colorAccent
+			}
+			rl.DrawText(truncateForUI(line, int((right.Width-36)/8)), int32(right.X)+16, ly, 19, clr)
 			ly += 34
 		}
 		sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)].Scenario
-		drawWrappedText("Selected Description: "+safeText(sel.Description), right, int32(right.Height)-220, 19, colorDim)
-		drawWrappedText("Daunting: "+safeText(sel.Daunting), right, int32(right.Height)-150, 19, colorWarn)
+		land := animalsPreviewForBiome(sel.Biome, game.AnimalDomainLand)
+		fish := animalsPreviewForBiome(sel.Biome, game.AnimalDomainWater)
+		birds := animalsPreviewForBiome(sel.Biome, game.AnimalDomainAir)
+		drawWrappedText("Selected Name: "+sel.Name, right, int32(right.Height)-258, 19, colorAccent)
+		drawWrappedText("Location: "+safeText(sel.Location), right, int32(right.Height)-230, 19, colorText)
+		drawWrappedText("Biome: "+sel.Biome, right, int32(right.Height)-202, 19, colorText)
+		drawWrappedText("Animals: "+land, right, int32(right.Height)-174, 19, colorDim)
+		drawWrappedText("Fish: "+fish, right, int32(right.Height)-146, 19, colorDim)
+		drawWrappedText("Birds: "+birds, right, int32(right.Height)-118, 19, colorDim)
+		drawWrappedText("Description: "+safeText(sel.Description), right, int32(right.Height)-90, 18, colorDim)
+	}
+	if ui.sb.PickingScenario {
+		rl.DrawText("Right pane browse active: Up/Down scroll, Enter confirm, Esc cancel", int32(right.X)+14, int32(right.Y+right.Height)-20, 17, colorAccent)
 	}
 
 	if ui.sb.EditingRow >= 0 {
@@ -651,13 +763,11 @@ func (ui *gameUI) startScenarioEdit(row int) {
 	switch row {
 	case 3:
 		ui.sb.EditBuffer = ui.sb.Scenario.Name
-	case 4:
-		ui.sb.EditBuffer = ui.sb.Scenario.Biome
-	case 5:
-		ui.sb.EditBuffer = ui.sb.Scenario.Description
 	case 6:
-		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+		ui.sb.EditBuffer = ui.sb.Scenario.Description
 	case 7:
+		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+	case 8:
 		ui.sb.EditBuffer = ui.sb.Scenario.Motivation
 	}
 }
@@ -669,19 +779,30 @@ func (ui *gameUI) commitScenarioEdit() {
 		if value != "" {
 			ui.sb.Scenario.Name = value
 		}
-	case 4:
-		if value != "" {
-			ui.sb.Scenario.Biome = value
-			ui.sb.Scenario.Wildlife = game.WildlifeForBiome(value)
-		}
-	case 5:
-		ui.sb.Scenario.Description = value
 	case 6:
-		ui.sb.Scenario.Daunting = value
+		ui.sb.Scenario.Description = value
 	case 7:
+		ui.sb.Scenario.Daunting = value
+	case 8:
 		ui.sb.Scenario.Motivation = value
 	}
 	ui.sb.EditingRow = -1
+}
+
+func animalsPreviewForBiome(biome string, domain game.AnimalDomain) string {
+	specs := game.AnimalsForBiome(biome, domain)
+	if len(specs) == 0 {
+		return "none"
+	}
+	maxItems := 5
+	parts := make([]string, 0, min(len(specs), maxItems))
+	for i := 0; i < len(specs) && i < maxItems; i++ {
+		parts = append(parts, specs[i].Name)
+	}
+	if len(specs) > maxItems {
+		parts = append(parts, fmt.Sprintf("+%d more", len(specs)-maxItems))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (ui *gameUI) customScenariosForMode(mode game.GameMode) []game.Scenario {
@@ -747,6 +868,22 @@ func (ui *gameUI) loadSelectedScenario() {
 	}
 	sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)]
 	ui.sb.Scenario = sel.Scenario
+	if strings.TrimSpace(ui.sb.Scenario.Location) == "" {
+		ui.sb.Scenario.Location = "Wilderness"
+	}
+	biomes := biomeOptionsForLocation(ui.sb.Scenario.Location)
+	if len(biomes) > 0 {
+		found := false
+		for _, biome := range biomes {
+			if strings.EqualFold(strings.TrimSpace(ui.sb.Scenario.Biome), strings.TrimSpace(biome)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ui.sb.Scenario.Biome = biomes[0]
+		}
+	}
 	ui.sb.SourceID = sel.Scenario.ID
 	ui.sb.SourceName = sel.Scenario.Name
 	ui.sb.SourceCustom = sel.Custom
@@ -767,8 +904,16 @@ func (ui *gameUI) saveScenarioFromBuilder() {
 		ui.sb.Status = "Name is required"
 		return
 	}
+	if strings.TrimSpace(scenario.Location) == "" {
+		scenario.Location = "Wilderness"
+	}
 	if strings.TrimSpace(scenario.Biome) == "" {
-		scenario.Biome = "temperate_forest"
+		biomes := biomeOptionsForLocation(scenario.Location)
+		if len(biomes) > 0 {
+			scenario.Biome = biomes[0]
+		} else {
+			scenario.Biome = "temperate_forest"
+		}
 	}
 	if scenario.DefaultDays <= 0 {
 		scenario.DefaultDays = 30

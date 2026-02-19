@@ -109,6 +109,9 @@ func normalizeScenarioForMode(s *game.Scenario, mode game.GameMode) {
 	if strings.TrimSpace(s.Name) == "" {
 		s.Name = "Custom Scenario"
 	}
+	if strings.TrimSpace(s.Location) == "" {
+		s.Location = "Wilderness"
+	}
 	if strings.TrimSpace(s.Biome) == "" {
 		s.Biome = "temperate_forest"
 	}
@@ -163,6 +166,7 @@ func normalizeScenarioForMode(s *game.Scenario, mode game.GameMode) {
 func newScenarioTemplate(mode game.GameMode) game.Scenario {
 	s := game.Scenario{
 		Name:        "Custom Scenario",
+		Location:    "Wilderness",
 		Biome:       "temperate_forest",
 		Description: "A custom survival scenario.",
 		Daunting:    "Unknown risk profile until tested in run.",
@@ -177,7 +181,7 @@ func newScenarioTemplate(mode game.GameMode) game.Scenario {
 func defaultRunDaysForMode(mode game.GameMode) int {
 	switch mode {
 	case game.ModeAlone:
-		return 60
+		return 365
 	case game.ModeNakedAndAfraid:
 		return 21
 	case game.ModeNakedAndAfraidXL:

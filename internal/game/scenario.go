@@ -3,6 +3,7 @@ package game
 type Scenario struct {
 	ID                 ScenarioID
 	Name               string
+	Location           string
 	Biome              string
 	Wildlife           []string
 	Description        string

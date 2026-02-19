@@ -23,7 +23,32 @@ func (s *RunState) CatchAndConsume(playerID int, domain AnimalDomain, choice Mea
 		return CatchResult{}, MealOutcome{}, err
 	}
 
-	outcome := ConsumeCatch(s.Config.Seed, s.Day, &s.Players[playerIndex], catch, choice)
+	player := &s.Players[playerIndex]
+	switch domain {
+	case AnimalDomainLand:
+		applySkillEffort(&player.Hunting, 18, true)
+	case AnimalDomainWater:
+		applySkillEffort(&player.Fishing, 18, true)
+	default:
+		applySkillEffort(&player.Hunting, 12, true)
+	}
+
+	// Skill and trait bonuses increase effective usable catch.
+	bonusPct := 0
+	switch domain {
+	case AnimalDomainLand:
+		bonusPct = player.Hunting/8 + player.Strength + player.Agility + positiveTraitModifier(player.Traits)/2
+	case AnimalDomainWater:
+		bonusPct = player.Fishing/8 + player.Agility + positiveTraitModifier(player.Traits)/2
+	default:
+		bonusPct = player.Hunting/10 + player.Agility + positiveTraitModifier(player.Traits)/2
+	}
+	if bonusPct != 0 {
+		adjusted := catch.WeightGrams + (catch.WeightGrams*bonusPct)/100
+		catch.WeightGrams = max(80, adjusted)
+	}
+
+	outcome := ConsumeCatch(s.Config.Seed, s.Day, player, catch, choice)
 	return catch, outcome, nil
 }
 

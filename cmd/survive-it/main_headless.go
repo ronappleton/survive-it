@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
-	"github.com/appengine-ltd/survive-it/internal/ui"
 )
 
 // version, commit, date are injected at build time (see .goreleaser.yaml).
@@ -33,15 +31,7 @@ func main() {
 		return
 	}
 
-	app := ui.NewApp(ui.AppConfig{
-		Version:   version,
-		Commit:    commit,
-		BuildDate: date,
-		NoUpdate:  noUpdate,
-	})
-
-	if err := app.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	_ = noUpdate
+	fmt.Fprintln(os.Stderr, "Survive It now requires the 3D client build (cgo/raylib enabled).")
+	os.Exit(1)
 }

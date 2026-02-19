@@ -22,6 +22,12 @@ const (
 	BodyTypeFemale  BodyType = "female"
 )
 
+type TraitModifier struct {
+	Name     string `json:"name"`
+	Modifier int    `json:"modifier"`
+	Positive bool   `json:"positive"`
+}
+
 var maleNames = []string{
 	"Jack", "Tom", "Ben", "Luke", "Sam",
 	"James", "Owen", "Ethan", "Noah", "Leo",
@@ -53,21 +59,32 @@ var romanNumerals = []string{
 }
 
 type PlayerState struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	Sex       Sex       `json:"sex"`
-	BodyType  BodyType  `json:"body_type"`
-	WeightKg  int       `json:"weight_kg"`
-	HeightFt  int       `json:"height_ft"`
-	HeightIn  int       `json:"height_in"`
-	Endurance int       `json:"endurance"`
-	Bushcraft int       `json:"bushcraft"`
-	Mental    int       `json:"mental"`
-	KitLimit  int       `json:"kit_limit"`
-	Kit       []KitItem `json:"kit"`
-	Energy    int       `json:"energy"`
-	Hydration int       `json:"hydration"`
-	Morale    int       `json:"morale"`
+	ID             int             `json:"id"`
+	Name           string          `json:"name"`
+	Sex            Sex             `json:"sex"`
+	BodyType       BodyType        `json:"body_type"`
+	WeightKg       int             `json:"weight_kg"`
+	HeightFt       int             `json:"height_ft"`
+	HeightIn       int             `json:"height_in"`
+	Endurance      int             `json:"endurance"`
+	Bushcraft      int             `json:"bushcraft"`
+	Mental         int             `json:"mental"`
+	Strength       int             `json:"strength"`
+	MentalStrength int             `json:"mental_strength"`
+	Agility        int             `json:"agility"`
+	Hunting        int             `json:"hunting"`
+	Fishing        int             `json:"fishing"`
+	Foraging       int             `json:"foraging"`
+	Crafting       int             `json:"crafting"`
+	Gathering      int             `json:"gathering"`
+	Traits         []TraitModifier `json:"traits,omitempty"`
+	KitLimit       int             `json:"kit_limit"`
+	Kit            []KitItem       `json:"kit"`
+	CarryLimitKg   float64         `json:"carry_limit_kg"`
+	PersonalItems  []InventoryItem `json:"personal_items,omitempty"`
+	Energy         int             `json:"energy"`
+	Hydration      int             `json:"hydration"`
+	Morale         int             `json:"morale"`
 
 	// Runtime-only survival reserves and bars. These are not editable in setup.
 	CaloriesReserveKcal  int `json:"calories_reserve_kcal"`
@@ -96,17 +113,26 @@ type PlayerState struct {
 }
 
 type PlayerConfig struct {
-	Name      string
-	Sex       Sex
-	BodyType  BodyType
-	WeightKg  int
-	HeightFt  int
-	HeightIn  int
-	Endurance int
-	Bushcraft int
-	Mental    int
-	KitLimit  int
-	Kit       []KitItem
+	Name           string
+	Sex            Sex
+	BodyType       BodyType
+	WeightKg       int
+	HeightFt       int
+	HeightIn       int
+	Endurance      int
+	Bushcraft      int
+	Mental         int
+	Strength       int
+	MentalStrength int
+	Agility        int
+	Hunting        int
+	Fishing        int
+	Foraging       int
+	Crafting       int
+	Gathering      int
+	Traits         []TraitModifier
+	KitLimit       int
+	Kit            []KitItem
 }
 
 func CreatePlayers(cfg RunConfig) []PlayerState {
@@ -163,22 +189,33 @@ func CreatePlayers(cfg RunConfig) []PlayerState {
 		}
 
 		players[i] = PlayerState{
-			ID:        i + 1,
-			Name:      name,
-			Sex:       pc.Sex,
-			BodyType:  pc.BodyType,
-			WeightKg:  pc.WeightKg,
-			HeightFt:  pc.HeightFt,
-			HeightIn:  pc.HeightIn,
-			Endurance: clamp(pc.Endurance, -3, 3),
-			Bushcraft: clamp(pc.Bushcraft, -3, 3),
-			Mental:    clamp(pc.Mental, -3, 3),
-			KitLimit:  pc.KitLimit,
-			Kit:       append([]KitItem(nil), pc.Kit...),
-			Energy:    100,
-			Hydration: 100,
-			Morale:    100,
+			ID:             i + 1,
+			Name:           name,
+			Sex:            pc.Sex,
+			BodyType:       pc.BodyType,
+			WeightKg:       pc.WeightKg,
+			HeightFt:       pc.HeightFt,
+			HeightIn:       pc.HeightIn,
+			Endurance:      clamp(pc.Endurance, -3, 3),
+			Bushcraft:      clamp(pc.Bushcraft, -3, 3),
+			Mental:         clamp(pc.Mental, -3, 3),
+			Strength:       clamp(pc.Strength, -3, 3),
+			MentalStrength: clamp(pc.MentalStrength, -3, 3),
+			Agility:        clamp(pc.Agility, -3, 3),
+			Hunting:        clamp(pc.Hunting, 0, 100),
+			Fishing:        clamp(pc.Fishing, 0, 100),
+			Foraging:       clamp(pc.Foraging, 0, 100),
+			Crafting:       clamp(pc.Crafting, 0, 100),
+			Gathering:      clamp(pc.Gathering, 0, 100),
+			Traits:         append([]TraitModifier(nil), pc.Traits...),
+			KitLimit:       pc.KitLimit,
+			Kit:            append([]KitItem(nil), pc.Kit...),
+			CarryLimitKg:   0,
+			Energy:         100,
+			Hydration:      100,
+			Morale:         100,
 		}
+		players[i].CarryLimitKg = deriveCarryLimitKg(players[i], false)
 		initializeRuntimeBars(&players[i])
 	}
 

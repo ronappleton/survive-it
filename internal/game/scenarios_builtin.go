@@ -1,5 +1,7 @@
 package game
 
+import "strings"
+
 func BuiltInScenarios() []Scenario {
 	aloneSeasons := SeasonSet{
 		ID: SeasonSetAloneDefaultID,
@@ -31,6 +33,7 @@ func BuiltInScenarios() []Scenario {
 		return Scenario{
 			ID:                 id,
 			Name:               name,
+			Location:           inferScenarioLocation(name),
 			Biome:              biome,
 			Description:        desc,
 			Daunting:           daunting,
@@ -46,23 +49,25 @@ func BuiltInScenarios() []Scenario {
 	return []Scenario{
 		// Alone mode scenarios.
 		build(ScenarioVancouverIslandID, ModeAlone, "Vancouver Island", "temperate_rainforest",
-			"Cold Pacific rain, dense forest, and long isolation windows.", "Persistent rain and limited dry tinder punish poor shelter choices.", "Endure the storm cycles and become the last one standing.", 60, IssuedKit{}, aloneSeasons),
+			"Cold Pacific rain, dense forest, and long isolation windows.", "Persistent rain and limited dry tinder punish poor shelter choices.", "Endure the storm cycles and become the last one standing.", 365, IssuedKit{}, aloneSeasons),
 		build(ScenarioArcticID, ModeAlone, "Arctic", "subarctic",
-			"Open cold terrain with thin margins for heat and calories.", "Energy drains fast once wind and exposure stack up.", "Master fire discipline and cold-weather routine under pressure.", 60, IssuedKit{}, winterSeasons),
+			"Open cold terrain with thin margins for heat and calories.", "Energy drains fast once wind and exposure stack up.", "Master fire discipline and cold-weather routine under pressure.", 365, IssuedKit{}, winterSeasons),
 		build("patagonia_argentina", ModeAlone, "Patagonia (Argentina)", "cold_steppe",
-			"Dry, windy steppe with abrupt weather shifts and sparse cover.", "Gale-force winds can wreck shelter plans overnight.", "Adapt to volatility and keep momentum despite harsh swings.", 60, IssuedKit{}, aloneSeasons),
+			"Dry, windy steppe with abrupt weather shifts and sparse cover.", "Gale-force winds can wreck shelter plans overnight.", "Adapt to volatility and keep momentum despite harsh swings.", 365, IssuedKit{}, aloneSeasons),
 		build("mongolia_khentii", ModeAlone, "Khentii Mountains (Mongolia)", "montane_steppe",
-			"Highland terrain with cold nights and wide movement distances.", "Fuel and water logistics can dominate each day.", "Win through route planning and consistent resource systems.", 60, IssuedKit{}, drySeasons),
-		build("great_slave_lake", ModeAlone, "Great Slave Lake (Canada)", "subarctic_lake",
+			"Highland terrain with cold nights and wide movement distances.", "Fuel and water logistics can dominate each day.", "Win through route planning and consistent resource systems.", 365, IssuedKit{}, drySeasons),
+		build("great_slave_lake_100", ModeAlone, "Great Slave Lake (Canada) - 100 Days", "subarctic_lake",
 			"Large northern lake environment with prolonged cold exposure.", "Extended duration means every early mistake compounds.", "Play the long game and survive beyond normal limits.", 100, IssuedKit{}, winterSeasons),
+		build("great_slave_lake_365", ModeAlone, "Great Slave Lake (Canada) - 365 Days", "subarctic_lake",
+			"Large northern lake environment with prolonged cold exposure.", "Extended duration means every early mistake compounds.", "Play the long game and survive beyond normal limits.", 365, IssuedKit{}, winterSeasons),
 		build("chilko_lake_bc", ModeAlone, "Chilko Lake (British Columbia)", "mountain_forest",
-			"Mountain lake basin with rugged terrain and limited easy calories.", "Terrain and weather can isolate key supply zones.", "Stay methodical and turn terrain into strategic advantage.", 60, IssuedKit{}, aloneSeasons),
+			"Mountain lake basin with rugged terrain and limited easy calories.", "Terrain and weather can isolate key supply zones.", "Stay methodical and turn terrain into strategic advantage.", 365, IssuedKit{}, aloneSeasons),
 		build("labrador_coast", ModeAlone, "Labrador Coast (Canada)", "boreal_coast",
-			"Remote boreal coast with exposed shoreline and severe weather.", "Cold moisture and wind chill steadily erode resilience.", "Prove your discipline where comfort never lasts long.", 60, IssuedKit{}, winterSeasons),
+			"Remote boreal coast with exposed shoreline and severe weather.", "Cold moisture and wind chill steadily erode resilience.", "Prove your discipline where comfort never lasts long.", 365, IssuedKit{}, winterSeasons),
 		build("reindeer_lake", ModeAlone, "Reindeer Lake (Saskatchewan)", "boreal_lake",
-			"Northern boreal lake with mixed forest and seasonal turnover.", "Food acquisition can become highly inconsistent late-game.", "Build stable systems early and outlast the collapse curve.", 60, IssuedKit{}, winterSeasons),
+			"Northern boreal lake with mixed forest and seasonal turnover.", "Food acquisition can become highly inconsistent late-game.", "Build stable systems early and outlast the collapse curve.", 365, IssuedKit{}, winterSeasons),
 		build("mackenzie_delta", ModeAlone, "Mackenzie River Delta (NWT)", "arctic_delta",
-			"Delta channels, cold flats, and broad exposure to elements.", "Waterlogged ground and wind make shelter siting unforgiving.", "Think like an expedition leader and survive the logistics war.", 60, IssuedKit{}, winterSeasons),
+			"Delta channels, cold flats, and broad exposure to elements.", "Waterlogged ground and wind make shelter siting unforgiving.", "Think like an expedition leader and survive the logistics war.", 365, IssuedKit{}, winterSeasons),
 
 		// Naked and Afraid mode scenarios.
 		build(ScenarioJungleID, ModeNakedAndAfraid, "Jungle", "tropical_jungle",
@@ -105,5 +110,21 @@ func BuiltInScenarios() []Scenario {
 			"Ultra-long swamp campaign with severe environmental drag.", "Sixty days exposes every weakness in routine and planning.", "Outwork the conditions and write a legendary extraction.", 60, IssuedKit{}, wetSeasons),
 		build("naaxl_montana_frozen_14", ModeNakedAndAfraidXL, "NAA XL Frozen Montana (14)", "cold_mountain",
 			"Frozen-team variant emphasizing cold-weather survival execution.", "Cold stress compounds quickly when calories run thin.", "Operate cleanly under pressure and conquer the freeze.", 14, IssuedKit{}, winterSeasons),
+	}
+}
+
+func inferScenarioLocation(name string) string {
+	n := strings.ToLower(name)
+	switch {
+	case strings.Contains(n, "canada"), strings.Contains(n, "vancouver"), strings.Contains(n, "labrador"), strings.Contains(n, "saskatchewan"), strings.Contains(n, "louisiana"), strings.Contains(n, "alaska"):
+		return "North America"
+	case strings.Contains(n, "patagonia"), strings.Contains(n, "colombia"), strings.Contains(n, "ecuador"), strings.Contains(n, "panama"), strings.Contains(n, "nicaragua"), strings.Contains(n, "costa rica"), strings.Contains(n, "yucatan"):
+		return "South America"
+	case strings.Contains(n, "africa"), strings.Contains(n, "tanzania"), strings.Contains(n, "namib"):
+		return "Africa"
+	case strings.Contains(n, "mongolia"), strings.Contains(n, "philippines"):
+		return "Asia-Pacific"
+	default:
+		return "Wilderness"
 	}
 }
