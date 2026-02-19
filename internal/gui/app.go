@@ -38,12 +38,16 @@ const (
 	screenMenu screen = iota
 	screenSetup
 	screenScenarioPicker
+	screenStatsBuilder
 	screenPlayerConfig
 	screenKitPicker
 	screenScenarioBuilder
+	screenPhaseEditor
 	screenOptions
 	screenLoad
 	screenRun
+	screenRunPlayers
+	screenRunCommandLibrary
 )
 
 type menuAction int
@@ -69,6 +73,8 @@ type setupState struct {
 	ScenarioIndex int
 	PlayerCount   int
 	RunDays       int
+	IssuedKit     []game.KitItem
+	IssuedCustom  bool
 }
 
 type temperatureUnit int
@@ -89,6 +95,24 @@ type playerConfigState struct {
 	EditingName bool
 	NameBuffer  string
 	Players     []game.PlayerConfig
+	ReturnTo    screen
+}
+
+type statsBuilderState struct {
+	Cursor      int
+	PlayerIndex int
+	ReturnTo    screen
+}
+
+type phaseEditorState struct {
+	Cursor       int
+	Adding       bool
+	NewSeasonIdx int
+	NewDays      string
+}
+
+type runPlayersState struct {
+	Cursor int
 }
 
 type scenarioPickerState struct {
@@ -134,10 +158,13 @@ type gameUI struct {
 	setup           setupState
 	opts            optionsState
 	pick            scenarioPickerState
+	sbuild          statsBuilderState
 	pcfg            playerConfigState
 	kit             kitPickerState
 	sb              scenarioBuilderState
+	phase           phaseEditorState
 	load            loadState
+	rplay           runPlayersState
 	customScenarios []game.Scenario
 
 	run         *game.RunState
@@ -196,6 +223,7 @@ func newGameUI(cfg AppConfig) *gameUI {
 	ui.customScenarios = custom
 	game.SetExternalScenarios(custom)
 	ui.syncScenarioSelection()
+	ui.ensureSetupPlayers()
 	ui.lastTick = time.Now()
 	return ui
 }
@@ -255,18 +283,26 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updateSetup()
 	case screenScenarioPicker:
 		ui.updateScenarioPicker()
+	case screenStatsBuilder:
+		ui.updateStatsBuilder()
 	case screenPlayerConfig:
 		ui.updatePlayerConfig()
 	case screenKitPicker:
 		ui.updateKitPicker()
 	case screenScenarioBuilder:
 		ui.updateScenarioBuilder()
+	case screenPhaseEditor:
+		ui.updatePhaseEditor()
 	case screenOptions:
 		ui.updateOptions()
 	case screenLoad:
 		ui.updateLoad()
 	case screenRun:
 		ui.updateRun(delta)
+	case screenRunPlayers:
+		ui.updateRunPlayers()
+	case screenRunCommandLibrary:
+		ui.updateRunCommandLibrary()
 	}
 }
 
@@ -278,18 +314,26 @@ func (ui *gameUI) draw() {
 		ui.drawSetup()
 	case screenScenarioPicker:
 		ui.drawScenarioPicker()
+	case screenStatsBuilder:
+		ui.drawStatsBuilder()
 	case screenPlayerConfig:
 		ui.drawPlayerConfig()
 	case screenKitPicker:
 		ui.drawKitPicker()
 	case screenScenarioBuilder:
 		ui.drawScenarioBuilder()
+	case screenPhaseEditor:
+		ui.drawPhaseEditor()
 	case screenOptions:
 		ui.drawOptions()
 	case screenLoad:
 		ui.drawLoad()
 	case screenRun:
 		ui.drawRun()
+	case screenRunPlayers:
+		ui.drawRunPlayers()
+	case screenRunCommandLibrary:
+		ui.drawRunCommandLibrary()
 	}
 }
 
@@ -309,8 +353,15 @@ func (ui *gameUI) updateMenu() {
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		switch items[ui.menuCursor].Action {
 		case actionStart:
-			ui.setup = setupState{ModeIndex: ui.setup.ModeIndex, PlayerCount: defaultPlayerCountForMode(ui.selectedMode()), RunDays: 30}
+			ui.setup = setupState{
+				ModeIndex:    ui.setup.ModeIndex,
+				PlayerCount:  defaultPlayerCountForMode(ui.selectedMode()),
+				RunDays:      30,
+				IssuedKit:    nil,
+				IssuedCustom: false,
+			}
 			ui.syncScenarioSelection()
+			ui.ensureSetupPlayers()
 			ui.status = ""
 			ui.screen = screenSetup
 		case actionLoad:
@@ -381,7 +432,6 @@ func (ui *gameUI) menuItems() []menuItem {
 		{Label: "Load Run", Action: actionLoad},
 		{Label: "Scenario Builder", Action: actionScenarioBuilder},
 		{Label: "Options", Action: actionOptions},
-		{Label: "Classic UI (All Features)", Action: actionClassicUI},
 	}
 	if ui.updateAvailable && !ui.cfg.NoUpdate {
 		items = append(items, menuItem{Label: "Install Update", Action: actionInstallUpdate})
@@ -540,15 +590,16 @@ func (ui *gameUI) drawOptions() {
 }
 
 func (ui *gameUI) updateSetup() {
+	ui.ensureSetupPlayers()
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		ui.enterMenu()
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 7)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 10)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 7)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 10)
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeft) {
@@ -564,11 +615,18 @@ func (ui *gameUI) updateSetup() {
 			ui.pick.Cursor = ui.setup.ScenarioIndex
 			ui.screen = screenScenarioPicker
 		case 4:
-			ui.preparePlayerConfig()
-			ui.screen = screenPlayerConfig
+			ui.openStatsBuilder(screenSetup)
 		case 5:
-			ui.openScenarioBuilder()
+			ui.preparePlayerConfig()
+			ui.pcfg.ReturnTo = screenSetup
+			ui.screen = screenPlayerConfig
 		case 6:
+			ui.openIssuedKitPicker(screenSetup)
+		case 7:
+			ui.openScenarioBuilder()
+		case 8:
+			ui.startRunFromConfig()
+		case 9:
 			ui.enterMenu()
 		}
 	}
@@ -581,17 +639,22 @@ func (ui *gameUI) adjustSetup(delta int) {
 		modes := modeOptions()
 		ui.setup.ModeIndex = wrapIndex(ui.setup.ModeIndex+delta, len(modes))
 		ui.setup.PlayerCount = defaultPlayerCountForMode(ui.selectedMode())
+		ui.setup.IssuedCustom = false
 		ui.syncScenarioSelection()
 	case 1:
 		if len(scenarios) == 0 {
 			return
 		}
 		ui.setup.ScenarioIndex = wrapIndex(ui.setup.ScenarioIndex+delta, len(scenarios))
+		if !ui.setup.IssuedCustom {
+			ui.setup.IssuedKit = recommendedIssuedKitForScenario(ui.selectedMode(), ui.selectedScenario())
+		}
 	case 2:
 		ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount+delta, 1, 8)
 	case 3:
 		ui.setup.RunDays = clampInt(ui.setup.RunDays+delta*3, 1, 300)
 	}
+	ui.ensureSetupPlayers()
 }
 
 func (ui *gameUI) drawSetup() {
@@ -608,8 +671,11 @@ func (ui *gameUI) drawSetup() {
 		{"Scenario", ui.selectedScenario().Name},
 		{"Players", fmt.Sprintf("%d", ui.setup.PlayerCount)},
 		{"Run Length (days)", fmt.Sprintf("%d", ui.setup.RunDays)},
+		{"Configure Player Stats", "Enter"},
 		{"Configure Players", "Enter"},
+		{"Configure Issued Kit", kitSummary(ui.setup.IssuedKit, 0)},
 		{"Scenario Builder", "Enter"},
+		{"Start Run", "Enter"},
 		{"Back", "Enter"},
 	}
 
@@ -633,6 +699,7 @@ func (ui *gameUI) drawSetup() {
 	drawWrappedText("Temperature Range: "+ui.formatTemperatureRange(tr.MinC, tr.MaxC), right, 496, 20, colorText)
 	wildlife := game.WildlifeForBiome(s.Biome)
 	drawWrappedText("Wildlife: "+strings.Join(wildlife, ", "), right, 540, 20, colorDim)
+	drawWrappedText("Issued Kit: "+kitSummary(ui.setup.IssuedKit, 0), right, 584, 20, colorText)
 }
 
 func (ui *gameUI) updateScenarioPicker() {
@@ -653,6 +720,10 @@ func (ui *gameUI) updateScenarioPicker() {
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		ui.setup.ScenarioIndex = ui.pick.Cursor
+		if !ui.setup.IssuedCustom {
+			ui.setup.IssuedKit = recommendedIssuedKitForScenario(ui.selectedMode(), ui.selectedScenario())
+		}
+		ui.ensureSetupPlayers()
 		ui.screen = screenSetup
 	}
 }
@@ -686,7 +757,142 @@ func (ui *gameUI) drawScenarioPicker() {
 	drawWrappedText("Enter to select, Esc back", right, int32(right.Height)-38, 19, colorDim)
 }
 
+func (ui *gameUI) openStatsBuilder(returnTo screen) {
+	ui.preparePlayerConfig()
+	ui.sbuild = statsBuilderState{
+		Cursor:      0,
+		PlayerIndex: 0,
+		ReturnTo:    returnTo,
+	}
+	ui.screen = screenStatsBuilder
+}
+
+func (ui *gameUI) updateStatsBuilder() {
+	if len(ui.pcfg.Players) == 0 {
+		ui.preparePlayerConfig()
+	}
+	if ui.sbuild.PlayerIndex < 0 || ui.sbuild.PlayerIndex >= len(ui.pcfg.Players) {
+		ui.sbuild.PlayerIndex = 0
+	}
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		if ui.sbuild.ReturnTo == 0 {
+			ui.sbuild.ReturnTo = screenSetup
+		}
+		ui.screen = ui.sbuild.ReturnTo
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyDown) {
+		ui.sbuild.Cursor = wrapIndex(ui.sbuild.Cursor+1, 10)
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		ui.sbuild.Cursor = wrapIndex(ui.sbuild.Cursor-1, 10)
+	}
+	player := &ui.pcfg.Players[ui.sbuild.PlayerIndex]
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		ui.adjustStatsBuilder(player, -1)
+	}
+	if rl.IsKeyPressed(rl.KeyRight) {
+		ui.adjustStatsBuilder(player, 1)
+	}
+	if rl.IsKeyPressed(rl.KeyEnter) {
+		if ui.sbuild.Cursor == 9 {
+			if ui.sbuild.ReturnTo == 0 {
+				ui.sbuild.ReturnTo = screenSetup
+			}
+			ui.screen = ui.sbuild.ReturnTo
+			return
+		}
+		ui.adjustStatsBuilder(player, 1)
+	}
+}
+
+func (ui *gameUI) adjustStatsBuilder(p *game.PlayerConfig, delta int) {
+	switch ui.sbuild.Cursor {
+	case 0:
+		ui.sbuild.PlayerIndex = wrapIndex(ui.sbuild.PlayerIndex+delta, len(ui.pcfg.Players))
+	case 1:
+		sexes := []game.Sex{game.SexMale, game.SexFemale, game.SexNonBinary, game.SexOther}
+		i := indexOfSex(sexes, p.Sex)
+		p.Sex = sexes[wrapIndex(i+delta, len(sexes))]
+	case 2:
+		types := []game.BodyType{game.BodyTypeNeutral, game.BodyTypeMale, game.BodyTypeFemale}
+		i := indexOfBodyType(types, p.BodyType)
+		p.BodyType = types[wrapIndex(i+delta, len(types))]
+	case 3:
+		p.WeightKg = clampInt(p.WeightKg+delta, 35, 220)
+	case 4:
+		p.HeightFt = clampInt(p.HeightFt+delta, 4, 7)
+	case 5:
+		p.HeightIn = clampInt(p.HeightIn+delta, 0, 11)
+	case 6:
+		p.Endurance = clampInt(p.Endurance+delta, -3, 3)
+	case 7:
+		p.Bushcraft = clampInt(p.Bushcraft+delta, -3, 3)
+	case 8:
+		p.Mental = clampInt(p.Mental+delta, -3, 3)
+	}
+}
+
+func (ui *gameUI) drawStatsBuilder() {
+	if len(ui.pcfg.Players) == 0 {
+		drawWrappedText("No players configured.", rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40)), 50, 22, colorWarn)
+		return
+	}
+	if ui.sbuild.PlayerIndex < 0 || ui.sbuild.PlayerIndex >= len(ui.pcfg.Players) {
+		ui.sbuild.PlayerIndex = 0
+	}
+	p := ui.pcfg.Players[ui.sbuild.PlayerIndex]
+
+	left := rl.NewRectangle(20, 20, float32(ui.width)*0.38, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	drawPanel(left, "Stats Builder")
+	drawPanel(right, "Player Stats Preview")
+
+	rows := []struct {
+		label string
+		value string
+	}{
+		{"Player", fmt.Sprintf("%d / %d", ui.sbuild.PlayerIndex+1, len(ui.pcfg.Players))},
+		{"Sex", string(p.Sex)},
+		{"Body Type", string(p.BodyType)},
+		{"Weight (kg)", fmt.Sprintf("%d", p.WeightKg)},
+		{"Height (ft)", fmt.Sprintf("%d", p.HeightFt)},
+		{"Height (in)", fmt.Sprintf("%d", p.HeightIn)},
+		{"Endurance", fmt.Sprintf("%+d", p.Endurance)},
+		{"Bushcraft", fmt.Sprintf("%+d", p.Bushcraft)},
+		{"Mental", fmt.Sprintf("%+d", p.Mental)},
+		{"Back", "Enter"},
+	}
+	for i, row := range rows {
+		y := int32(left.Y) + 58 + int32(i*42)
+		if i == ui.sbuild.Cursor {
+			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 34, rl.Fade(colorAccent, 0.2))
+		}
+		rl.DrawText(row.label, int32(left.X)+20, y, 20, colorText)
+		rl.DrawText(row.value, int32(left.X)+220, y, 20, colorAccent)
+	}
+	rl.DrawText("Up/Down move  Left/Right change  Enter cycle/select", int32(left.X)+16, int32(left.Y+left.Height)-38, 18, colorDim)
+
+	detail := []string{
+		fmt.Sprintf("Mode: %s", modeLabel(ui.selectedMode())),
+		fmt.Sprintf("Scenario: %s", ui.selectedScenario().Name),
+		fmt.Sprintf("Player Slot: %d/%d", ui.sbuild.PlayerIndex+1, len(ui.pcfg.Players)),
+		"",
+		fmt.Sprintf("Sex: %s  |  Body: %s", p.Sex, p.BodyType),
+		fmt.Sprintf("Height: %d ft %d in  |  Weight: %d kg", p.HeightFt, p.HeightIn, p.WeightKg),
+		fmt.Sprintf("Modifiers  End:%+d  Bush:%+d  Ment:%+d", p.Endurance, p.Bushcraft, p.Mental),
+		"",
+		"Notes:",
+		"Use this for baseline stat tuning.",
+		"Player Editor handles names and kit details.",
+	}
+	drawLines(right, 44, 21, detail, colorText)
+	previewRect := rl.NewRectangle(right.X+right.Width*0.52, right.Y+140, right.Width*0.45, right.Height-170)
+	drawPlayerPreview(previewRect, p)
+}
+
 func (ui *gameUI) preparePlayerConfig() {
+	ui.ensureSetupPlayers()
 	if len(ui.pcfg.Players) != ui.setup.PlayerCount {
 		ui.pcfg.Players = make([]game.PlayerConfig, ui.setup.PlayerCount)
 		for i := range ui.pcfg.Players {
@@ -697,10 +903,12 @@ func (ui *gameUI) preparePlayerConfig() {
 	ui.pcfg.PlayerIndex = 0
 	ui.pcfg.EditingName = false
 	ui.pcfg.NameBuffer = ""
+	ui.pcfg.ReturnTo = screenSetup
 	ui.status = ""
 }
 
 func (ui *gameUI) updatePlayerConfig() {
+	ui.ensureSetupPlayers()
 	if len(ui.pcfg.Players) == 0 {
 		ui.preparePlayerConfig()
 	}
@@ -728,14 +936,17 @@ func (ui *gameUI) updatePlayerConfig() {
 	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.screen = screenSetup
+		if ui.pcfg.ReturnTo == 0 {
+			ui.pcfg.ReturnTo = screenSetup
+		}
+		ui.screen = ui.pcfg.ReturnTo
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor+1, 14)
+		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor+1, 18)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor-1, 14)
+		ui.pcfg.Cursor = wrapIndex(ui.pcfg.Cursor-1, 18)
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeft) {
@@ -750,14 +961,24 @@ func (ui *gameUI) updatePlayerConfig() {
 		case 1:
 			ui.pcfg.EditingName = true
 			ui.pcfg.NameBuffer = player.Name
-		case 10:
-			ui.openKitPicker()
 		case 11:
-			ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players))
+			ui.openPersonalKitPicker(screenPlayerConfig)
 		case 12:
-			ui.startRunFromConfig()
+			player.Kit = nil
+			ui.status = ""
 		case 13:
-			ui.screen = screenSetup
+			ui.openIssuedKitPicker(screenPlayerConfig)
+		case 14:
+			ui.resetIssuedKitRecommendations()
+		case 15:
+			ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players))
+		case 16:
+			ui.startRunFromConfig()
+		case 17:
+			if ui.pcfg.ReturnTo == 0 {
+				ui.pcfg.ReturnTo = screenSetup
+			}
+			ui.screen = ui.pcfg.ReturnTo
 		}
 	}
 }
@@ -786,6 +1007,11 @@ func (ui *gameUI) adjustPlayerConfig(p *game.PlayerConfig, delta int) {
 		p.Bushcraft = clampInt(p.Bushcraft+delta, -3, 3)
 	case 9:
 		p.Mental = clampInt(p.Mental+delta, -3, 3)
+	case 10:
+		p.KitLimit = clampInt(p.KitLimit+delta, 1, maxKitLimitForMode(ui.selectedMode()))
+		if len(p.Kit) > p.KitLimit {
+			p.Kit = append([]game.KitItem(nil), p.Kit[:p.KitLimit]...)
+		}
 	}
 }
 
@@ -817,18 +1043,22 @@ func (ui *gameUI) drawPlayerConfig() {
 		{"Endurance", fmt.Sprintf("%+d", p.Endurance)},
 		{"Bushcraft", fmt.Sprintf("%+d", p.Bushcraft)},
 		{"Mental", fmt.Sprintf("%+d", p.Mental)},
-		{"Kit Picker", "Enter"},
+		{"Kit Limit", fmt.Sprintf("%d", p.KitLimit)},
+		{"Open Personal Kit Picker", "Enter"},
+		{"Reset Personal Kit", "Enter"},
+		{"Open Issued Kit Picker", "Enter"},
+		{"Reset Issued Kit", "Enter"},
 		{"Next Player", "Enter"},
 		{"Start Run", "Enter"},
 		{"Back", "Enter"},
 	}
 	for i, row := range rows {
-		y := int32(left.Y) + 58 + int32(i*42)
+		y := int32(left.Y) + 52 + int32(i*34)
 		if i == ui.pcfg.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 34, rl.Fade(colorAccent, 0.2))
+			rl.DrawRectangle(int32(left.X)+10, y-5, int32(left.Width)-20, 28, rl.Fade(colorAccent, 0.2))
 		}
-		rl.DrawText(row.label, int32(left.X)+20, y, 20, colorText)
-		rl.DrawText(row.value, int32(left.X)+220, y, 20, colorAccent)
+		rl.DrawText(row.label, int32(left.X)+18, y, 18, colorText)
+		rl.DrawText(row.value, int32(left.X)+220, y, 18, colorAccent)
 	}
 
 	if ui.pcfg.EditingName {
@@ -840,6 +1070,8 @@ func (ui *gameUI) drawPlayerConfig() {
 	}
 
 	detailLines := []string{
+		fmt.Sprintf("Mode: %s", modeLabel(ui.selectedMode())),
+		fmt.Sprintf("Scenario: %s", ui.selectedScenario().Name),
 		fmt.Sprintf("Name: %s", p.Name),
 		fmt.Sprintf("Sex: %s", p.Sex),
 		fmt.Sprintf("Body Type: %s", p.BodyType),
@@ -850,6 +1082,14 @@ func (ui *gameUI) drawPlayerConfig() {
 		fmt.Sprintf("Bushcraft: %+d", p.Bushcraft),
 		fmt.Sprintf("Mental: %+d", p.Mental),
 		fmt.Sprintf("Kit: %d / %d selected", len(p.Kit), maxInt(1, p.KitLimit)),
+		fmt.Sprintf("Issued Kit: %s", kitSummary(ui.setup.IssuedKit, 0)),
+		"",
+		func() string {
+			if ui.pcfg.PlayerIndex == 0 {
+				return "You are editing yourself."
+			}
+			return "Editing teammate profile."
+		}(),
 		"",
 		"Controls:",
 		"Up/Down move rows",
@@ -863,11 +1103,13 @@ func (ui *gameUI) drawPlayerConfig() {
 }
 
 func (ui *gameUI) startRunFromConfig() {
+	ui.ensureSetupPlayers()
 	cfg := game.RunConfig{
 		Mode:        ui.selectedMode(),
 		ScenarioID:  ui.selectedScenario().ID,
 		PlayerCount: len(ui.pcfg.Players),
 		Players:     append([]game.PlayerConfig(nil), ui.pcfg.Players...),
+		IssuedKit:   append([]game.KitItem(nil), ui.setup.IssuedKit...),
 		RunLength:   game.RunLength{Days: ui.setup.RunDays},
 		Seed:        time.Now().UnixNano(),
 	}
@@ -972,6 +1214,16 @@ func (ui *gameUI) drawLoad() {
 func (ui *gameUI) updateRun(delta time.Duration) {
 	if ui.run == nil {
 		ui.enterMenu()
+		return
+	}
+	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	if shiftDown && rl.IsKeyPressed(rl.KeyP) {
+		ui.rplay.Cursor = ui.runFocus
+		ui.screen = screenRunPlayers
+		return
+	}
+	if shiftDown && rl.IsKeyPressed(rl.KeyH) {
+		ui.screen = screenRunCommandLibrary
 		return
 	}
 	if len(ui.run.Players) > 0 {
@@ -1139,7 +1391,7 @@ func (ui *gameUI) drawRun() {
 		}
 	}
 
-	cmdHint := "Commands: next | save | load | menu | hunt ... | fire ... | craft ...   Hotkeys: S save  L load  Esc menu"
+	cmdHint := "Commands: next | save | load | menu | hunt ... | fire ... | craft ...   Shift+P players  Shift+H command library  Esc menu"
 	rl.DrawText(cmdHint, int32(bottom.X)+14, int32(bottom.Y)+34, 17, colorDim)
 	in := strings.TrimSpace(ui.runInput)
 	if in == "" {
@@ -1151,6 +1403,178 @@ func (ui *gameUI) drawRun() {
 		statusX := int32(bottom.X + bottom.Width*0.45)
 		rl.DrawText(ui.status, statusX, int32(bottom.Y)+56, 20, colorWarn)
 	}
+}
+
+func (ui *gameUI) updateRunPlayers() {
+	if ui.run == nil || len(ui.run.Players) == 0 {
+		ui.screen = screenRun
+		return
+	}
+	if ui.rplay.Cursor < 0 || ui.rplay.Cursor >= len(ui.run.Players) {
+		ui.rplay.Cursor = 0
+	}
+	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		ui.screen = screenRun
+		return
+	}
+	if shiftDown && rl.IsKeyPressed(rl.KeyH) {
+		ui.screen = screenRunCommandLibrary
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyDown) {
+		ui.rplay.Cursor = wrapIndex(ui.rplay.Cursor+1, len(ui.run.Players))
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		ui.rplay.Cursor = wrapIndex(ui.rplay.Cursor-1, len(ui.run.Players))
+	}
+}
+
+func (ui *gameUI) drawRunPlayers() {
+	if ui.run == nil || len(ui.run.Players) == 0 {
+		area := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+		drawPanel(area, "Run Players")
+		drawWrappedText("No active players.", area, 60, 24, colorWarn)
+		return
+	}
+
+	left := rl.NewRectangle(20, 20, float32(ui.width)*0.37, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	drawPanel(left, "Run Players")
+	drawPanel(right, "Player Detail")
+
+	y := int32(left.Y) + 52
+	for i, p := range ui.run.Players {
+		if y > int32(left.Y+left.Height)-42 {
+			break
+		}
+		if i == ui.rplay.Cursor {
+			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 56, rl.Fade(colorAccent, 0.18))
+		}
+		rl.DrawText(fmt.Sprintf("%d. %s", p.ID, p.Name), int32(left.X)+18, y, 20, colorAccent)
+		y += 22
+		rl.DrawText(fmt.Sprintf("E:%d  H2O:%d  M:%d  Hu:%d  Th:%d  Fa:%d  Ail:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments)),
+			int32(left.X)+20, y, 17, colorText)
+		y += 34
+	}
+	rl.DrawText("Up/Down move  Shift+H command library  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+
+	sel := ui.run.Players[clampInt(ui.rplay.Cursor, 0, len(ui.run.Players)-1)]
+	needs := game.DailyNutritionNeedsForPlayer(sel)
+
+	lines := []string{
+		fmt.Sprintf("%s (Player %d/%d)", sel.Name, sel.ID, len(ui.run.Players)),
+		fmt.Sprintf("Sex: %s  Body: %s", sel.Sex, sel.BodyType),
+		fmt.Sprintf("Height: %d ft %d in  Weight: %d kg", sel.HeightFt, sel.HeightIn, sel.WeightKg),
+		fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", sel.Endurance, sel.Bushcraft, sel.Mental),
+		"",
+		fmt.Sprintf("Energy:%d  Hydration:%d  Morale:%d", sel.Energy, sel.Hydration, sel.Morale),
+		fmt.Sprintf("Reserves: %dkcal  %dgP  %dgF  %dgS", sel.CaloriesReserveKcal, sel.ProteinReserveG, sel.FatReserveG, sel.SugarReserveG),
+		fmt.Sprintf("Needs/day: %dkcal  %dgP  %dgF  %dgS", needs.CaloriesKcal, needs.ProteinG, needs.FatG, needs.SugarG),
+		fmt.Sprintf("Nutrition: %dkcal  %dgP  %dgF  %dgS", sel.Nutrition.CaloriesKcal, sel.Nutrition.ProteinG, sel.Nutrition.FatG, sel.Nutrition.SugarG),
+		fmt.Sprintf("Deficit Streaks  Nutrition:%d  Dehydration:%d", sel.NutritionDeficitDays, sel.DehydrationDays),
+	}
+	drawLines(right, 42, 18, lines, colorText)
+
+	barY := right.Y + 250
+	barGap := float32(10)
+	barW := right.Width - 30
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY, barW, 16), "Hunger", sel.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY+26+barGap, barW, 16), "Thirst", sel.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(right.X+14, barY+52+barGap*2, barW, 16), "Fatigue", sel.Fatigue, true)
+
+	ailments := "None"
+	if len(sel.Ailments) > 0 {
+		parts := make([]string, 0, len(sel.Ailments))
+		for _, ail := range sel.Ailments {
+			name := ail.Name
+			if strings.TrimSpace(name) == "" {
+				name = string(ail.Type)
+			}
+			parts = append(parts, fmt.Sprintf("%s (%dd)", name, ail.DaysRemaining))
+		}
+		ailments = strings.Join(parts, ", ")
+	}
+	personalKit := "(none)"
+	if len(sel.Kit) > 0 {
+		parts := make([]string, 0, len(sel.Kit))
+		for _, item := range sel.Kit {
+			parts = append(parts, string(item))
+		}
+		personalKit = strings.Join(parts, ", ")
+	}
+	issuedKit := "(none)"
+	if len(ui.run.Config.IssuedKit) > 0 {
+		parts := make([]string, 0, len(ui.run.Config.IssuedKit))
+		for _, item := range ui.run.Config.IssuedKit {
+			parts = append(parts, string(item))
+		}
+		issuedKit = strings.Join(parts, ", ")
+	}
+	drawWrappedText("Ailments: "+ailments, right, 360, 18, colorWarn)
+	drawWrappedText("Personal Kit: "+personalKit, right, 430, 18, colorText)
+	drawWrappedText("Issued Kit: "+issuedKit, right, 500, 18, colorDim)
+	drawWrappedText(fmt.Sprintf("Try: actions p%d   |   hunt fish p%d 300", sel.ID, sel.ID), right, int32(right.Height)-44, 17, colorDim)
+}
+
+func (ui *gameUI) updateRunCommandLibrary() {
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		ui.screen = screenRun
+		return
+	}
+}
+
+func (ui *gameUI) drawRunCommandLibrary() {
+	panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+	left := rl.NewRectangle(panel.X+8, panel.Y+38, panel.Width*0.5-14, panel.Height-46)
+	right := rl.NewRectangle(left.X+left.Width+12, panel.Y+38, panel.Width-left.Width-26, panel.Height-46)
+	drawPanel(panel, "Command Library")
+	drawPanel(left, "Run Commands")
+	drawPanel(right, "Actions & Shortcuts")
+
+	leftLines := []string{
+		"Core:",
+		"next",
+		"save",
+		"load",
+		"menu",
+		"",
+		"Hunting:",
+		"hunt land [raw] [liver] [p#] [grams]",
+		"hunt fish [raw] [liver] [p#] [grams]",
+		"hunt air [raw] [liver] [p#] [grams]",
+		"forage [roots|berries|fruits|vegetables|any] [p#] [grams]",
+		"",
+		"Camp Systems:",
+		"trees",
+		"wood gather|dry|stock",
+		"resources",
+		"collect <resource|any> [qty] [p#]",
+		"fire status|methods|prep|ember|ignite|build|tend|out",
+		"shelter list|build|status",
+		"craft list|make|inventory",
+	}
+	rightLines := []string{
+		"Equipment Actions:",
+		"actions [p#]",
+		"use <item> <action> [p#]",
+		"Example: use paracord tie sticks together p1",
+		"Example: use first aid kit treat wound p1",
+		"Example: use rations eat p1",
+		"",
+		"Shortcuts:",
+		"Shift+P  open player UX",
+		"Shift+H  open command library",
+		"S         save",
+		"L         load",
+		"Esc       back/menu",
+		"",
+		"Tip:",
+		"Use 'help' or 'commands' in the run input",
+		"to print the full command reference to history.",
+	}
+	drawLines(left, 44, 17, leftLines, colorText)
+	drawLines(right, 44, 17, rightLines, colorText)
 }
 
 func (ui *gameUI) submitRunInput() {
@@ -1466,8 +1890,6 @@ func drawPlayerPreview(rect rl.Rectangle, p game.PlayerConfig) {
 	// Feet shadow
 	rl.DrawEllipse(int32(cx)-16, int32(groundY)+6, 22, 6, rl.Fade(colorBorder, 0.4))
 	rl.DrawEllipse(int32(cx)+16, int32(groundY)+6, 22, 6, rl.Fade(colorBorder, 0.4))
-
-	rl.DrawText("Preview reacts to height, weight, and body type", int32(rect.X)+20, int32(rect.Y+rect.Height)-44, 18, colorDim)
 }
 
 func captureTextInput(target *string, maxLen int) {
@@ -1556,6 +1978,190 @@ func defaultKitLimitForMode(mode game.GameMode) int {
 	}
 }
 
+func maxKitLimitForMode(mode game.GameMode) int {
+	return defaultKitLimitForMode(mode)
+}
+
+func issuedKitOptionsForMode(mode game.GameMode) []game.KitItem {
+	switch mode {
+	case game.ModeNakedAndAfraid:
+		return []game.KitItem{
+			game.KitSixInchKnife,
+			game.KitMachete,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitSnareWire,
+			game.KitTarp,
+			game.KitMosquitoNet,
+			game.KitInsectRepellent,
+		}
+	case game.ModeNakedAndAfraidXL:
+		return []game.KitItem{
+			game.KitSixInchKnife,
+			game.KitMachete,
+			game.KitHatchet,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitMetalCup,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitGillNet,
+			game.KitSnareWire,
+			game.KitBowArrows,
+			game.KitTarp,
+			game.KitMosquitoNet,
+			game.KitInsectRepellent,
+		}
+	default:
+		return []game.KitItem{
+			game.KitHatchet,
+			game.KitSixInchKnife,
+			game.KitFoldingSaw,
+			game.KitParacord50ft,
+			game.KitFerroRod,
+			game.KitFirePlunger,
+			game.KitMagnifyingLens,
+			game.KitCookingPot,
+			game.KitCanteen,
+			game.KitWaterFilter,
+			game.KitPurificationTablets,
+			game.KitFishingLineHooks,
+			game.KitGillNet,
+			game.KitSnareWire,
+			game.KitBowArrows,
+			game.KitTarp,
+			game.KitSleepingBag,
+			game.KitMosquitoNet,
+		}
+	}
+}
+
+func recommendedIssuedKitForScenario(mode game.GameMode, scenario game.Scenario) []game.KitItem {
+	biome := strings.ToLower(strings.TrimSpace(scenario.Biome))
+	kit := make([]game.KitItem, 0, 6)
+
+	switch {
+	case strings.Contains(biome, "winter"), strings.Contains(biome, "arctic"), strings.Contains(biome, "tundra"), strings.Contains(biome, "cold"):
+		kit = append(kit, game.KitFerroRod, game.KitThermalLayer, game.KitHatchet, game.KitCookingPot)
+	case strings.Contains(biome, "wet"), strings.Contains(biome, "swamp"), strings.Contains(biome, "jungle"), strings.Contains(biome, "rainforest"):
+		kit = append(kit, game.KitParacord50ft, game.KitTarp, game.KitFerroRod, game.KitMosquitoNet)
+	case strings.Contains(biome, "desert"), strings.Contains(biome, "savanna"), strings.Contains(biome, "dry"):
+		kit = append(kit, game.KitCanteen, game.KitWaterFilter, game.KitHatchet, game.KitParacord50ft)
+	default:
+		kit = append(kit, game.KitHatchet, game.KitParacord50ft, game.KitFerroRod, game.KitCookingPot)
+	}
+
+	targetCount := 4
+	if mode == game.ModeNakedAndAfraid {
+		targetCount = 2
+	}
+	if mode == game.ModeNakedAndAfraidXL {
+		targetCount = 3
+	}
+
+	allowed := issuedKitOptionsForMode(mode)
+	filtered := filterKitItemsToAllowed(kit, allowed)
+	if len(filtered) == 0 {
+		filtered = append([]game.KitItem(nil), allowed...)
+	}
+	return firstNKitItems(filtered, targetCount)
+}
+
+func firstNKitItems(items []game.KitItem, n int) []game.KitItem {
+	if n <= 0 || len(items) == 0 {
+		return nil
+	}
+	if len(items) <= n {
+		return append([]game.KitItem(nil), items...)
+	}
+	return append([]game.KitItem(nil), items[:n]...)
+}
+
+func filterKitItemsToAllowed(items []game.KitItem, allowed []game.KitItem) []game.KitItem {
+	if len(items) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := make(map[game.KitItem]struct{}, len(allowed))
+	for _, item := range allowed {
+		allowedSet[item] = struct{}{}
+	}
+
+	out := make([]game.KitItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowedSet[item]; !ok {
+			continue
+		}
+		if hasKitItem(out, item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (ui *gameUI) ensureSetupPlayers() {
+	mode := ui.selectedMode()
+	ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount, 1, 8)
+
+	if len(ui.pcfg.Players) < ui.setup.PlayerCount {
+		for len(ui.pcfg.Players) < ui.setup.PlayerCount {
+			ui.pcfg.Players = append(ui.pcfg.Players, defaultPlayerConfig(len(ui.pcfg.Players), mode))
+		}
+	}
+	if len(ui.pcfg.Players) > ui.setup.PlayerCount {
+		ui.pcfg.Players = append([]game.PlayerConfig(nil), ui.pcfg.Players[:ui.setup.PlayerCount]...)
+	}
+
+	defaultLimit := defaultKitLimitForMode(mode)
+	maxLimit := maxKitLimitForMode(mode)
+	for i := range ui.pcfg.Players {
+		player := &ui.pcfg.Players[i]
+		if strings.TrimSpace(player.Name) == "" {
+			player.Name = defaultPlayerConfig(i, mode).Name
+		}
+		if player.KitLimit <= 0 {
+			player.KitLimit = defaultLimit
+		}
+		if player.KitLimit > maxLimit {
+			player.KitLimit = maxLimit
+		}
+		if len(player.Kit) > player.KitLimit {
+			player.Kit = append([]game.KitItem(nil), player.Kit[:player.KitLimit]...)
+		}
+	}
+
+	if !ui.setup.IssuedCustom {
+		ui.setup.IssuedKit = recommendedIssuedKitForScenario(mode, ui.selectedScenario())
+	} else {
+		ui.setup.IssuedKit = filterKitItemsToAllowed(ui.setup.IssuedKit, issuedKitOptionsForMode(mode))
+	}
+
+	if len(ui.pcfg.Players) == 0 {
+		ui.pcfg.PlayerIndex = 0
+		ui.sbuild.PlayerIndex = 0
+		return
+	}
+	ui.pcfg.PlayerIndex = clampInt(ui.pcfg.PlayerIndex, 0, len(ui.pcfg.Players)-1)
+	ui.sbuild.PlayerIndex = clampInt(ui.sbuild.PlayerIndex, 0, len(ui.pcfg.Players)-1)
+}
+
+func (ui *gameUI) resetIssuedKitRecommendations() {
+	ui.setup.IssuedCustom = false
+	ui.setup.IssuedKit = recommendedIssuedKitForScenario(ui.selectedMode(), ui.selectedScenario())
+}
+
 func defaultPlayerConfig(i int, mode game.GameMode) game.PlayerConfig {
 	defaultNames := []string{"Sophia", "Daniel", "Mia", "Jack", "Luna", "Leo", "Avery", "Harper"}
 	name := fmt.Sprintf("Player %d", i+1)
@@ -1635,6 +2241,28 @@ func safeText(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func kitSummary(items []game.KitItem, limit int) string {
+	if len(items) == 0 {
+		if limit > 0 {
+			return fmt.Sprintf("0/%d (none)", limit)
+		}
+		return "none"
+	}
+
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, string(item))
+	}
+	preview := strings.Join(parts, ", ")
+	if len(parts) > 3 {
+		preview = strings.Join(parts[:3], ", ") + fmt.Sprintf(" (+%d more)", len(parts)-3)
+	}
+	if limit > 0 {
+		return fmt.Sprintf("%d/%d %s", len(items), limit, preview)
+	}
+	return fmt.Sprintf("%d %s", len(items), preview)
 }
 
 func temperatureUnitLabel(unit temperatureUnit) string {

@@ -123,9 +123,41 @@ func normalizeScenarioForMode(s *game.Scenario, mode game.GameMode) {
 	if len(s.Wildlife) == 0 {
 		s.Wildlife = game.WildlifeForBiome(s.Biome)
 	}
-	set := defaultSeasonSetForMode(mode)
-	s.SeasonSets = []game.SeasonSet{set}
-	s.DefaultSeasonSetID = set.ID
+	if len(s.SeasonSets) == 0 {
+		set := defaultSeasonSetForMode(mode)
+		s.SeasonSets = []game.SeasonSet{set}
+		s.DefaultSeasonSetID = set.ID
+		return
+	}
+
+	fallback := defaultSeasonSetForMode(mode)
+	for i := range s.SeasonSets {
+		set := &s.SeasonSets[i]
+		if strings.TrimSpace(string(set.ID)) == "" {
+			set.ID = game.SeasonSetID(fmt.Sprintf("custom_profile_%d", i+1))
+		}
+		if len(set.Phases) == 0 {
+			set.Phases = append([]game.SeasonPhase(nil), fallback.Phases...)
+		}
+		for j := range set.Phases {
+			if strings.TrimSpace(string(set.Phases[j].Season)) == "" {
+				set.Phases[j].Season = game.SeasonAutumn
+			}
+			if set.Phases[j].Days < 0 {
+				set.Phases[j].Days = 0
+			}
+		}
+	}
+	if strings.TrimSpace(string(s.DefaultSeasonSetID)) == "" {
+		s.DefaultSeasonSetID = s.SeasonSets[0].ID
+		return
+	}
+	for _, set := range s.SeasonSets {
+		if set.ID == s.DefaultSeasonSetID {
+			return
+		}
+	}
+	s.DefaultSeasonSetID = s.SeasonSets[0].ID
 }
 
 func newScenarioTemplate(mode game.GameMode) game.Scenario {

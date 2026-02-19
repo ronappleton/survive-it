@@ -3,14 +3,38 @@ package gui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/appengine-ltd/survive-it/internal/game"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+type kitPickerTarget int
+
+const (
+	kitTargetPersonal kitPickerTarget = iota
+	kitTargetIssued
+)
+
+type kitPickerFocus int
+
+const (
+	kitFocusCategories kitPickerFocus = iota
+	kitFocusItems
+)
+
+type kitCategory struct {
+	Label string
+	Items []game.KitItem
+}
+
 type kitPickerState struct {
-	Cursor int
+	Target      kitPickerTarget
+	Focus       kitPickerFocus
+	ReturnTo    screen
+	CategoryIdx int
+	ItemIdx     int
 }
 
 type scenarioBuilderState struct {
@@ -31,50 +55,221 @@ type scenarioBuilderEntry struct {
 	Custom   bool
 }
 
-func (ui *gameUI) openKitPicker() {
-	ui.kit.Cursor = 0
+func (ui *gameUI) openPersonalKitPicker(returnTo screen) {
+	ui.kit = kitPickerState{
+		Target:      kitTargetPersonal,
+		Focus:       kitFocusCategories,
+		ReturnTo:    returnTo,
+		CategoryIdx: 0,
+		ItemIdx:     0,
+	}
+	ui.ensureSetupPlayers()
 	ui.screen = screenKitPicker
 }
 
-func (ui *gameUI) updateKitPicker() {
-	if len(ui.pcfg.Players) == 0 {
-		ui.screen = screenPlayerConfig
+func (ui *gameUI) openIssuedKitPicker(returnTo screen) {
+	ui.kit = kitPickerState{
+		Target:      kitTargetIssued,
+		Focus:       kitFocusCategories,
+		ReturnTo:    returnTo,
+		CategoryIdx: 0,
+		ItemIdx:     0,
+	}
+	ui.ensureSetupPlayers()
+	ui.screen = screenKitPicker
+}
+
+func (ui *gameUI) kitPickerItems() []game.KitItem {
+	if ui.kit.Target == kitTargetIssued {
+		items := append([]game.KitItem(nil), issuedKitOptionsForMode(ui.selectedMode())...)
+		for _, selected := range ui.setup.IssuedKit {
+			if hasKitItem(items, selected) {
+				continue
+			}
+			items = append(items, selected)
+		}
+		return items
+	}
+	return game.AllKitItems()
+}
+
+func categorizeKitItems(items []game.KitItem) []kitCategory {
+	order := []string{
+		"Cutting / Tools",
+		"Fire",
+		"Water",
+		"Food / Hunting",
+		"Shelter / Warmth",
+		"Navigation / Signal",
+		"Protection / Medical",
+		"Utility",
+	}
+	buckets := make(map[string][]game.KitItem, len(order))
+	for _, item := range items {
+		label := kitCategoryLabel(item)
+		buckets[label] = append(buckets[label], item)
+	}
+	out := make([]kitCategory, 0, len(order))
+	for _, label := range order {
+		if len(buckets[label]) == 0 {
+			continue
+		}
+		out = append(out, kitCategory{Label: label, Items: buckets[label]})
+	}
+	return out
+}
+
+func kitCategoryLabel(item game.KitItem) string {
+	name := strings.ToLower(string(item))
+	switch {
+	case strings.Contains(name, "knife"),
+		strings.Contains(name, "hatchet"),
+		strings.Contains(name, "saw"),
+		strings.Contains(name, "machete"),
+		strings.Contains(name, "shovel"),
+		strings.Contains(name, "multi-tool"):
+		return "Cutting / Tools"
+	case strings.Contains(name, "ferro"),
+		strings.Contains(name, "fire"),
+		strings.Contains(name, "magnifying"):
+		return "Fire"
+	case strings.Contains(name, "water"),
+		strings.Contains(name, "canteen"),
+		strings.Contains(name, "cup"),
+		strings.Contains(name, "purification"):
+		return "Water"
+	case strings.Contains(name, "fishing"),
+		strings.Contains(name, "gill"),
+		strings.Contains(name, "snare"),
+		strings.Contains(name, "bow"),
+		strings.Contains(name, "spear"),
+		strings.Contains(name, "ration"):
+		return "Food / Hunting"
+	case strings.Contains(name, "tarp"),
+		strings.Contains(name, "sleep"),
+		strings.Contains(name, "blanket"),
+		strings.Contains(name, "thermal"),
+		strings.Contains(name, "rain"),
+		strings.Contains(name, "paracord"),
+		strings.Contains(name, "rope"),
+		strings.Contains(name, "dry bag"):
+		return "Shelter / Warmth"
+	case strings.Contains(name, "compass"),
+		strings.Contains(name, "map"),
+		strings.Contains(name, "headlamp"),
+		strings.Contains(name, "signal"),
+		strings.Contains(name, "whistle"):
+		return "Navigation / Signal"
+	case strings.Contains(name, "first aid"),
+		strings.Contains(name, "insect"),
+		strings.Contains(name, "net"),
+		strings.Contains(name, "salt"):
+		return "Protection / Medical"
+	default:
+		return "Utility"
+	}
+}
+
+func (ui *gameUI) normalizeKitPicker(categories []kitCategory) {
+	if len(categories) == 0 {
+		ui.kit.CategoryIdx = 0
+		ui.kit.ItemIdx = 0
+		ui.kit.Focus = kitFocusCategories
 		return
 	}
-	if ui.pcfg.PlayerIndex < 0 || ui.pcfg.PlayerIndex >= len(ui.pcfg.Players) {
-		ui.pcfg.PlayerIndex = 0
-	}
-	player := &ui.pcfg.Players[ui.pcfg.PlayerIndex]
-	items := game.AllKitItems()
+	ui.kit.CategoryIdx = clampInt(ui.kit.CategoryIdx, 0, len(categories)-1)
+	items := categories[ui.kit.CategoryIdx].Items
 	if len(items) == 0 {
-		ui.screen = screenPlayerConfig
+		ui.kit.ItemIdx = 0
+		ui.kit.Focus = kitFocusCategories
 		return
 	}
+	ui.kit.ItemIdx = clampInt(ui.kit.ItemIdx, 0, len(items)-1)
+	if ui.kit.Focus != kitFocusCategories && ui.kit.Focus != kitFocusItems {
+		ui.kit.Focus = kitFocusCategories
+	}
+}
+
+func (ui *gameUI) updateKitPicker() {
+	ui.ensureSetupPlayers()
+	categories := categorizeKitItems(ui.kitPickerItems())
+	if len(categories) == 0 {
+		ui.screen = ui.kit.ReturnTo
+		ui.status = "No kit items available."
+		return
+	}
+	ui.normalizeKitPicker(categories)
+	currentItems := categories[ui.kit.CategoryIdx].Items
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.screen = screenPlayerConfig
+		if ui.kit.ReturnTo == 0 {
+			ui.kit.ReturnTo = screenPlayerConfig
+		}
+		ui.screen = ui.kit.ReturnTo
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.kit.Cursor = wrapIndex(ui.kit.Cursor+1, len(items))
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		ui.kit.Focus = kitFocusCategories
+	}
+	if rl.IsKeyPressed(rl.KeyRight) && len(currentItems) > 0 {
+		ui.kit.Focus = kitFocusItems
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.kit.Cursor = wrapIndex(ui.kit.Cursor-1, len(items))
+		if ui.kit.Focus == kitFocusCategories {
+			ui.kit.CategoryIdx = wrapIndex(ui.kit.CategoryIdx-1, len(categories))
+			ui.normalizeKitPicker(categories)
+		} else if len(currentItems) > 0 {
+			ui.kit.ItemIdx = wrapIndex(ui.kit.ItemIdx-1, len(currentItems))
+		}
 	}
-	if rl.IsKeyPressed(rl.KeyLeft) {
-		ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex-1, len(ui.pcfg.Players))
-	}
-	if rl.IsKeyPressed(rl.KeyRight) {
-		ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players))
+	if rl.IsKeyPressed(rl.KeyDown) {
+		if ui.kit.Focus == kitFocusCategories {
+			ui.kit.CategoryIdx = wrapIndex(ui.kit.CategoryIdx+1, len(categories))
+			ui.normalizeKitPicker(categories)
+		} else if len(currentItems) > 0 {
+			ui.kit.ItemIdx = wrapIndex(ui.kit.ItemIdx+1, len(currentItems))
+		}
 	}
 	if rl.IsKeyPressed(rl.KeyR) {
-		player.Kit = nil
+		switch ui.kit.Target {
+		case kitTargetPersonal:
+			if len(ui.pcfg.Players) > 0 {
+				ui.pcfg.Players[ui.pcfg.PlayerIndex].Kit = nil
+			}
+		case kitTargetIssued:
+			ui.resetIssuedKitRecommendations()
+		}
 		ui.status = ""
 	}
+	if rl.IsKeyPressed(rl.KeySpace) {
+		if ui.kit.Focus == kitFocusItems && len(currentItems) > 0 {
+			ui.toggleKitPickerSelection(currentItems[ui.kit.ItemIdx])
+		}
+	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
-		selected := items[ui.kit.Cursor]
-		if hasKitItem(player.Kit, selected) {
-			player.Kit = removeKitItem(player.Kit, selected)
+		if ui.kit.Focus == kitFocusCategories {
+			if len(currentItems) == 0 {
+				ui.status = "No items in this category."
+				return
+			}
+			ui.kit.Focus = kitFocusItems
+			return
+		}
+		if len(currentItems) > 0 {
+			ui.toggleKitPickerSelection(currentItems[ui.kit.ItemIdx])
+		}
+	}
+}
+
+func (ui *gameUI) toggleKitPickerSelection(item game.KitItem) {
+	switch ui.kit.Target {
+	case kitTargetPersonal:
+		if len(ui.pcfg.Players) == 0 {
+			return
+		}
+		player := &ui.pcfg.Players[ui.pcfg.PlayerIndex]
+		if hasKitItem(player.Kit, item) {
+			player.Kit = removeKitItem(player.Kit, item)
 			ui.status = ""
 			return
 		}
@@ -83,83 +278,138 @@ func (ui *gameUI) updateKitPicker() {
 			ui.status = fmt.Sprintf("Kit limit reached (%d)", limit)
 			return
 		}
-		player.Kit = append(player.Kit, selected)
+		player.Kit = append(player.Kit, item)
+		ui.status = ""
+	case kitTargetIssued:
+		if hasKitItem(ui.setup.IssuedKit, item) {
+			ui.setup.IssuedKit = removeKitItem(ui.setup.IssuedKit, item)
+			ui.setup.IssuedCustom = true
+			ui.status = ""
+			return
+		}
+		if !hasKitItem(issuedKitOptionsForMode(ui.selectedMode()), item) {
+			ui.status = "Item not allowed for selected mode."
+			return
+		}
+		ui.setup.IssuedKit = append(ui.setup.IssuedKit, item)
+		ui.setup.IssuedCustom = true
 		ui.status = ""
 	}
 }
 
 func (ui *gameUI) drawKitPicker() {
-	left := rl.NewRectangle(20, 20, float32(ui.width)*0.52, float32(ui.height-40))
-	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
-	drawPanel(left, "Kit Picker")
-	drawPanel(right, "Selection")
-
-	if len(ui.pcfg.Players) == 0 {
-		drawWrappedText("No players configured.", left, 60, 22, colorWarn)
+	ui.ensureSetupPlayers()
+	categories := categorizeKitItems(ui.kitPickerItems())
+	if len(categories) == 0 {
+		panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+		drawPanel(panel, "Kit Picker")
+		drawWrappedText("No kit items available.", panel, 60, 22, colorWarn)
 		return
 	}
-	if ui.pcfg.PlayerIndex < 0 || ui.pcfg.PlayerIndex >= len(ui.pcfg.Players) {
-		ui.pcfg.PlayerIndex = 0
-	}
-	player := ui.pcfg.Players[ui.pcfg.PlayerIndex]
-	items := game.AllKitItems()
-	if ui.kit.Cursor < 0 || ui.kit.Cursor >= len(items) {
-		ui.kit.Cursor = 0
-	}
+	ui.normalizeKitPicker(categories)
 
-	rl.DrawText(
-		fmt.Sprintf("Player %d/%d: %s  |  Kit %d/%d", ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players), player.Name, len(player.Kit), maxInt(1, player.KitLimit)),
-		int32(left.X)+14,
-		int32(left.Y)+38,
-		20,
-		colorAccent,
-	)
+	outer := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+	left := rl.NewRectangle(outer.X, outer.Y, outer.Width*0.25, outer.Height)
+	mid := rl.NewRectangle(left.X+left.Width+10, outer.Y, outer.Width*0.34, outer.Height)
+	right := rl.NewRectangle(mid.X+mid.Width+10, outer.Y, outer.X+outer.Width-(mid.X+mid.Width+10), outer.Height)
+	drawPanel(left, "Categories")
+	drawPanel(mid, "Items")
+	drawPanel(right, "Selection")
 
-	y := int32(left.Y) + 70
-	for i, item := range items {
-		if y > int32(left.Y+left.Height)-42 {
+	selected := map[game.KitItem]bool{}
+	selectedCount := 0
+	limit := 0
+	subtitle := "Issued kit selection"
+	if ui.kit.Target == kitTargetPersonal && len(ui.pcfg.Players) > 0 {
+		player := ui.pcfg.Players[ui.pcfg.PlayerIndex]
+		for _, item := range player.Kit {
+			selected[item] = true
+		}
+		selectedCount = len(player.Kit)
+		limit = maxInt(1, player.KitLimit)
+		subtitle = fmt.Sprintf("Player %d/%d %s", ui.pcfg.PlayerIndex+1, len(ui.pcfg.Players), player.Name)
+	} else {
+		for _, item := range ui.setup.IssuedKit {
+			selected[item] = true
+		}
+		selectedCount = len(ui.setup.IssuedKit)
+		subtitle = fmt.Sprintf("Issued Kit (%s)", modeLabel(ui.selectedMode()))
+	}
+	rl.DrawText(subtitle, int32(outer.X)+14, int32(outer.Y)-2, 18, colorDim)
+
+	cy := int32(left.Y) + 48
+	for i, category := range categories {
+		if cy > int32(left.Y+left.Height)-34 {
 			break
 		}
-		checked := hasKitItem(player.Kit, item)
-		prefix := "[ ] "
-		if checked {
-			prefix = "[x] "
+		if i == ui.kit.CategoryIdx {
+			rl.DrawRectangle(int32(left.X)+10, cy-4, int32(left.Width)-20, 28, rl.Fade(colorAccent, 0.2))
 		}
-		if i == ui.kit.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-4, int32(left.Width)-20, 28, rl.Fade(colorAccent, 0.2))
-		}
+		label := fmt.Sprintf("%s (%d)", category.Label, len(category.Items))
 		clr := colorText
-		if checked {
+		if i == ui.kit.CategoryIdx && ui.kit.Focus == kitFocusCategories {
 			clr = colorAccent
 		}
-		rl.DrawText(prefix+string(item), int32(left.X)+18, y, 20, clr)
-		y += 30
+		rl.DrawText(label, int32(left.X)+16, cy, 18, clr)
+		cy += 30
 	}
 
-	selected := make([]string, 0, len(player.Kit))
-	for _, item := range player.Kit {
-		selected = append(selected, string(item))
+	current := categories[ui.kit.CategoryIdx]
+	iy := int32(mid.Y) + 48
+	for i, item := range current.Items {
+		if iy > int32(mid.Y+mid.Height)-34 {
+			break
+		}
+		if i == ui.kit.ItemIdx {
+			rl.DrawRectangle(int32(mid.X)+10, iy-4, int32(mid.Width)-20, 28, rl.Fade(colorAccent, 0.2))
+		}
+		prefix := "[ ] "
+		if selected[item] {
+			prefix = "[*] "
+		}
+		clr := colorText
+		if i == ui.kit.ItemIdx && ui.kit.Focus == kitFocusItems {
+			clr = colorAccent
+		}
+		rl.DrawText(prefix+string(item), int32(mid.X)+16, iy, 18, clr)
+		iy += 30
 	}
-	if len(selected) == 0 {
-		selected = append(selected, "(none)")
+
+	selectedLines := make([]string, 0, selectedCount+8)
+	selectedLines = append(selectedLines, fmt.Sprintf("Selected: %d", selectedCount))
+	if limit > 0 {
+		selectedLines[0] = fmt.Sprintf("Selected: %d/%d", selectedCount, limit)
 	}
-	detail := []string{
-		fmt.Sprintf("Player: %s", player.Name),
-		fmt.Sprintf("Limit: %d", maxInt(1, player.KitLimit)),
-		"",
-		"Selected Items:",
-		strings.Join(selected, ", "),
-		"",
-		"Controls:",
-		"Up/Down: move",
-		"Enter: toggle item",
-		"Left/Right: player",
-		"R: reset player kit",
-		"Esc: back",
+	selectedLines = append(selectedLines, "")
+	selectedLines = append(selectedLines, "Selected Items:")
+	if selectedCount == 0 {
+		selectedLines = append(selectedLines, "- none")
+	} else {
+		for _, category := range categories {
+			for _, item := range category.Items {
+				if selected[item] {
+					selectedLines = append(selectedLines, "- "+string(item))
+				}
+			}
+		}
 	}
-	drawLines(right, 46, 20, detail, colorText)
+	selectedLines = append(selectedLines, "", "Focused Category:")
+	selectedLines = append(selectedLines, current.Label)
+	selectedLines = append(selectedLines, "", "Focused Item:")
+	if len(current.Items) > 0 {
+		activeItem := current.Items[ui.kit.ItemIdx]
+		selectedLines = append(selectedLines, string(activeItem))
+		selectedLines = append(selectedLines, kitItemFlavorText(activeItem))
+	}
+	if ui.kit.Target == kitTargetIssued {
+		selectedLines = append(selectedLines, "", "R resets to recommendation")
+	}
+	drawLines(right, 44, 18, selectedLines, colorText)
+
+	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  Esc back"
+	rl.DrawText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30, 17, colorDim)
 	if strings.TrimSpace(ui.status) != "" {
-		rl.DrawText(ui.status, int32(right.X)+14, int32(right.Y+right.Height)-34, 18, colorWarn)
+		rl.DrawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, 17, colorWarn)
 	}
 }
 
@@ -185,6 +435,26 @@ func removeKitItem(items []game.KitItem, item game.KitItem) []game.KitItem {
 	return out
 }
 
+func kitItemFlavorText(item game.KitItem) string {
+	name := strings.ToLower(string(item))
+	switch {
+	case strings.Contains(name, "knife"), strings.Contains(name, "hatchet"), strings.Contains(name, "saw"), strings.Contains(name, "machete"):
+		return "Tool item for shelter build and wood prep."
+	case strings.Contains(name, "water"), strings.Contains(name, "canteen"), strings.Contains(name, "purification"):
+		return "Water item for hydration and treatment."
+	case strings.Contains(name, "ferro"), strings.Contains(name, "fire"), strings.Contains(name, "magnifying"):
+		return "Fire item for ignition reliability."
+	case strings.Contains(name, "tarp"), strings.Contains(name, "blanket"), strings.Contains(name, "sleep"), strings.Contains(name, "thermal"):
+		return "Shelter item for exposure management."
+	case strings.Contains(name, "fishing"), strings.Contains(name, "snare"), strings.Contains(name, "bow"):
+		return "Food item supporting catch strategy."
+	case strings.Contains(name, "first aid"), strings.Contains(name, "insect"), strings.Contains(name, "net"):
+		return "Protection item reducing risk load."
+	default:
+		return "General survival item."
+	}
+}
+
 func (ui *gameUI) openScenarioBuilder() {
 	ui.sb = scenarioBuilderState{
 		Cursor:       0,
@@ -196,6 +466,7 @@ func (ui *gameUI) openScenarioBuilder() {
 		SourceName:   "",
 		SourceCustom: false,
 	}
+	ui.ensureScenarioSeasonSet()
 	ui.screen = screenScenarioBuilder
 }
 
@@ -216,10 +487,10 @@ func (ui *gameUI) updateScenarioBuilder() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 12)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 16)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 12)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 16)
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		ui.adjustScenarioBuilder(-1)
@@ -229,15 +500,27 @@ func (ui *gameUI) updateScenarioBuilder() {
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		switch ui.sb.Cursor {
-		case 2, 3, 4, 5, 6:
+		case 3, 4, 5, 6, 7:
 			ui.startScenarioEdit(ui.sb.Cursor)
-		case 8:
-			ui.loadSelectedScenario()
 		case 9:
-			ui.saveScenarioFromBuilder()
+			ui.openPhaseEditor()
 		case 10:
-			ui.deleteSelectedCustomScenario()
+			ui.setup.ModeIndex = ui.sb.ModeIndex
+			ui.ensureSetupPlayers()
+			ui.openStatsBuilder(screenScenarioBuilder)
 		case 11:
+			ui.setup.ModeIndex = ui.sb.ModeIndex
+			ui.ensureSetupPlayers()
+			ui.preparePlayerConfig()
+			ui.pcfg.ReturnTo = screenScenarioBuilder
+			ui.screen = screenPlayerConfig
+		case 12:
+			ui.loadSelectedScenario()
+		case 13:
+			ui.saveScenarioFromBuilder()
+		case 14:
+			ui.deleteSelectedCustomScenario()
+		case 15:
 			ui.enterMenu()
 		}
 	}
@@ -248,19 +531,27 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 	switch ui.sb.Cursor {
 	case 0:
 		ui.sb.ModeIndex = wrapIndex(ui.sb.ModeIndex+delta, len(modes))
+		ui.setup.ModeIndex = ui.sb.ModeIndex
 		ui.sb.Scenario = newScenarioTemplate(modes[ui.sb.ModeIndex])
 		ui.sb.SourceID = ""
 		ui.sb.SourceName = ""
 		ui.sb.SourceCustom = false
+		ui.setup.PlayerCount = defaultPlayerCountForMode(modes[ui.sb.ModeIndex])
+		ui.setup.IssuedCustom = false
 		ui.sb.ListCursor = 0
-	case 7:
+	case 1:
+		ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount+delta, 1, 8)
+	case 8:
 		ui.sb.Scenario.DefaultDays = clampInt(ui.sb.Scenario.DefaultDays+delta*3, 1, 365)
-	case 8, 10:
+	case 12, 14:
 		list := ui.scenarioBuilderEntriesForMode(modes[ui.sb.ModeIndex])
 		if len(list) > 0 {
 			ui.sb.ListCursor = wrapIndex(ui.sb.ListCursor+delta, len(list))
 		}
 	}
+	ui.setup.ModeIndex = ui.sb.ModeIndex
+	ui.ensureScenarioSeasonSet()
+	ui.ensureSetupPlayers()
 }
 
 func (ui *gameUI) drawScenarioBuilder() {
@@ -284,6 +575,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 		value string
 	}{
 		{"Mode", modeLabel(mode)},
+		{"Player Count", fmt.Sprintf("%d", ui.setup.PlayerCount)},
 		{"Loaded", loadedLabel},
 		{"Name", ui.sb.Scenario.Name},
 		{"Biome", ui.sb.Scenario.Biome},
@@ -291,6 +583,9 @@ func (ui *gameUI) drawScenarioBuilder() {
 		{"Daunting", ui.sb.Scenario.Daunting},
 		{"Motivation", ui.sb.Scenario.Motivation},
 		{"Default Days", fmt.Sprintf("%d", ui.sb.Scenario.DefaultDays)},
+		{"Phase Builder", fmt.Sprintf("%d phase(s)", ui.scenarioPhaseCount())},
+		{"Player Stats Builder", "Enter"},
+		{"Player Editor", "Enter"},
 		{"Load Selected", "Enter"},
 		{"Save Scenario", "Enter"},
 		{"Delete Selected", "Enter"},
@@ -310,7 +605,7 @@ func (ui *gameUI) drawScenarioBuilder() {
 		rl.DrawText(value, int32(left.X)+188, y, 19, colorAccent)
 		y += 34
 	}
-	rl.DrawText("Left/Right change mode/days/list or selected row", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
+	rl.DrawText("Left/Right change mode/playercount/days/list or selected row", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
 	rl.DrawText("Built-in edits must be saved with a new name", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
 
 	list := ui.scenarioBuilderEntriesForMode(mode)
@@ -354,15 +649,15 @@ func (ui *gameUI) drawScenarioBuilder() {
 func (ui *gameUI) startScenarioEdit(row int) {
 	ui.sb.EditingRow = row
 	switch row {
-	case 2:
-		ui.sb.EditBuffer = ui.sb.Scenario.Name
 	case 3:
-		ui.sb.EditBuffer = ui.sb.Scenario.Biome
+		ui.sb.EditBuffer = ui.sb.Scenario.Name
 	case 4:
-		ui.sb.EditBuffer = ui.sb.Scenario.Description
+		ui.sb.EditBuffer = ui.sb.Scenario.Biome
 	case 5:
-		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+		ui.sb.EditBuffer = ui.sb.Scenario.Description
 	case 6:
+		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+	case 7:
 		ui.sb.EditBuffer = ui.sb.Scenario.Motivation
 	}
 }
@@ -370,20 +665,20 @@ func (ui *gameUI) startScenarioEdit(row int) {
 func (ui *gameUI) commitScenarioEdit() {
 	value := strings.TrimSpace(ui.sb.EditBuffer)
 	switch ui.sb.EditingRow {
-	case 2:
+	case 3:
 		if value != "" {
 			ui.sb.Scenario.Name = value
 		}
-	case 3:
+	case 4:
 		if value != "" {
 			ui.sb.Scenario.Biome = value
 			ui.sb.Scenario.Wildlife = game.WildlifeForBiome(value)
 		}
-	case 4:
-		ui.sb.Scenario.Description = value
 	case 5:
-		ui.sb.Scenario.Daunting = value
+		ui.sb.Scenario.Description = value
 	case 6:
+		ui.sb.Scenario.Daunting = value
+	case 7:
 		ui.sb.Scenario.Motivation = value
 	}
 	ui.sb.EditingRow = -1
@@ -455,6 +750,7 @@ func (ui *gameUI) loadSelectedScenario() {
 	ui.sb.SourceID = sel.Scenario.ID
 	ui.sb.SourceName = sel.Scenario.Name
 	ui.sb.SourceCustom = sel.Custom
+	ui.ensureScenarioSeasonSet()
 	if sel.Custom {
 		ui.sb.Status = "Loaded custom scenario into editor"
 	} else {
@@ -465,6 +761,8 @@ func (ui *gameUI) loadSelectedScenario() {
 func (ui *gameUI) saveScenarioFromBuilder() {
 	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
 	scenario := ui.sb.Scenario
+	ui.ensureScenarioSeasonSet()
+	scenario = ui.sb.Scenario
 	if strings.TrimSpace(scenario.Name) == "" {
 		ui.sb.Status = "Name is required"
 		return
@@ -549,4 +847,328 @@ func (ui *gameUI) deleteSelectedCustomScenario() {
 	ui.sb.ListCursor = 0
 	ui.syncScenarioSelection()
 	ui.sb.Status = "Scenario deleted"
+}
+
+const maxScenarioPhases = 24
+
+type phaseRowKind int
+
+const (
+	phaseRowNewSeason phaseRowKind = iota
+	phaseRowNewDays
+	phaseRowAddPhase
+	phaseRowRemoveLast
+	phaseRowBack
+)
+
+type phaseEditorRow struct {
+	Label  string
+	Value  string
+	Kind   phaseRowKind
+	Active bool
+}
+
+func builderSeasonOptions() []game.SeasonID {
+	return []game.SeasonID{
+		game.SeasonAutumn,
+		game.SeasonWinter,
+		game.SeasonWet,
+		game.SeasonDry,
+	}
+}
+
+func builderSeasonLabel(id game.SeasonID) string {
+	switch id {
+	case game.SeasonAutumn:
+		return "Autumn"
+	case game.SeasonWinter:
+		return "Winter"
+	case game.SeasonWet:
+		return "Wet"
+	case game.SeasonDry:
+		return "Dry"
+	default:
+		return string(id)
+	}
+}
+
+func (ui *gameUI) scenarioDefaultSeasonSetIndex() int {
+	if len(ui.sb.Scenario.SeasonSets) == 0 {
+		return -1
+	}
+	target := ui.sb.Scenario.DefaultSeasonSetID
+	if target == "" {
+		ui.sb.Scenario.DefaultSeasonSetID = ui.sb.Scenario.SeasonSets[0].ID
+		return 0
+	}
+	for i := range ui.sb.Scenario.SeasonSets {
+		if ui.sb.Scenario.SeasonSets[i].ID == target {
+			return i
+		}
+	}
+	ui.sb.Scenario.DefaultSeasonSetID = ui.sb.Scenario.SeasonSets[0].ID
+	return 0
+}
+
+func (ui *gameUI) ensureScenarioSeasonSet() {
+	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
+	fallback := defaultSeasonSetForMode(mode)
+
+	if len(ui.sb.Scenario.SeasonSets) == 0 {
+		ui.sb.Scenario.SeasonSets = []game.SeasonSet{fallback}
+		ui.sb.Scenario.DefaultSeasonSetID = fallback.ID
+	}
+
+	for i := range ui.sb.Scenario.SeasonSets {
+		set := &ui.sb.Scenario.SeasonSets[i]
+		if strings.TrimSpace(string(set.ID)) == "" {
+			set.ID = game.SeasonSetID(fmt.Sprintf("custom_profile_%d", i+1))
+		}
+		if len(set.Phases) == 0 {
+			set.Phases = append([]game.SeasonPhase(nil), fallback.Phases...)
+		}
+		for j := range set.Phases {
+			if strings.TrimSpace(string(set.Phases[j].Season)) == "" {
+				set.Phases[j].Season = game.SeasonAutumn
+			}
+			if set.Phases[j].Days < 0 {
+				set.Phases[j].Days = 0
+			}
+		}
+	}
+
+	if ui.sb.Scenario.DefaultSeasonSetID == "" {
+		ui.sb.Scenario.DefaultSeasonSetID = ui.sb.Scenario.SeasonSets[0].ID
+		return
+	}
+	if ui.scenarioDefaultSeasonSetIndex() < 0 {
+		ui.sb.Scenario.DefaultSeasonSetID = ui.sb.Scenario.SeasonSets[0].ID
+	}
+}
+
+func (ui *gameUI) scenarioPhaseCount() int {
+	ui.ensureScenarioSeasonSet()
+	idx := ui.scenarioDefaultSeasonSetIndex()
+	if idx < 0 {
+		return 0
+	}
+	return len(ui.sb.Scenario.SeasonSets[idx].Phases)
+}
+
+func (ui *gameUI) openPhaseEditor() {
+	ui.ensureScenarioSeasonSet()
+	ui.phase = phaseEditorState{
+		Cursor:       0,
+		Adding:       false,
+		NewSeasonIdx: 0,
+		NewDays:      "7",
+	}
+	ui.screen = screenPhaseEditor
+}
+
+func (ui *gameUI) phaseEditorRows() []phaseEditorRow {
+	seasons := builderSeasonOptions()
+	if len(seasons) == 0 {
+		return nil
+	}
+	ui.phase.NewSeasonIdx = clampInt(ui.phase.NewSeasonIdx, 0, len(seasons)-1)
+	rows := make([]phaseEditorRow, 0, 5)
+	if ui.phase.Adding {
+		rows = append(rows,
+			phaseEditorRow{
+				Label:  "New Phase Season",
+				Value:  builderSeasonLabel(seasons[ui.phase.NewSeasonIdx]),
+				Kind:   phaseRowNewSeason,
+				Active: true,
+			},
+			phaseEditorRow{
+				Label:  "New Phase Days",
+				Value:  ui.phase.NewDays,
+				Kind:   phaseRowNewDays,
+				Active: true,
+			},
+		)
+	}
+
+	addLabel := "Add Phase"
+	if ui.phase.Adding {
+		addLabel = "Confirm Add Phase"
+	}
+	rows = append(rows,
+		phaseEditorRow{Label: addLabel, Kind: phaseRowAddPhase, Active: true},
+		phaseEditorRow{Label: "Remove Last Phase", Kind: phaseRowRemoveLast, Active: ui.scenarioPhaseCount() > 1},
+		phaseEditorRow{Label: "Back", Kind: phaseRowBack, Active: true},
+	)
+	return rows
+}
+
+func (ui *gameUI) updatePhaseEditor() {
+	ui.ensureScenarioSeasonSet()
+	rows := ui.phaseEditorRows()
+	if len(rows) == 0 {
+		ui.screen = screenScenarioBuilder
+		return
+	}
+	ui.phase.Cursor = clampInt(ui.phase.Cursor, 0, len(rows)-1)
+	active := rows[ui.phase.Cursor]
+
+	if active.Kind == phaseRowNewDays {
+		for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
+			if ch >= '0' && ch <= '9' {
+				ui.phase.NewDays += string(rune(ch))
+			}
+		}
+		if rl.IsKeyPressed(rl.KeyBackspace) && len(ui.phase.NewDays) > 0 {
+			ui.phase.NewDays = ui.phase.NewDays[:len(ui.phase.NewDays)-1]
+		}
+	}
+
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		ui.screen = screenScenarioBuilder
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyDown) {
+		ui.phase.Cursor = wrapIndex(ui.phase.Cursor+1, len(rows))
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		ui.phase.Cursor = wrapIndex(ui.phase.Cursor-1, len(rows))
+	}
+
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		active = rows[ui.phase.Cursor]
+		if active.Kind == phaseRowNewSeason {
+			seasons := builderSeasonOptions()
+			ui.phase.NewSeasonIdx = wrapIndex(ui.phase.NewSeasonIdx-1, len(seasons))
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyRight) {
+		active = rows[ui.phase.Cursor]
+		if active.Kind == phaseRowNewSeason {
+			seasons := builderSeasonOptions()
+			ui.phase.NewSeasonIdx = wrapIndex(ui.phase.NewSeasonIdx+1, len(seasons))
+		}
+	}
+
+	if !rl.IsKeyPressed(rl.KeyEnter) {
+		return
+	}
+
+	rows = ui.phaseEditorRows()
+	ui.phase.Cursor = clampInt(ui.phase.Cursor, 0, len(rows)-1)
+	active = rows[ui.phase.Cursor]
+	if !active.Active {
+		return
+	}
+
+	setIdx := ui.scenarioDefaultSeasonSetIndex()
+	if setIdx < 0 {
+		ui.sb.Status = "No season set available."
+		ui.screen = screenScenarioBuilder
+		return
+	}
+	phases := &ui.sb.Scenario.SeasonSets[setIdx].Phases
+
+	switch active.Kind {
+	case phaseRowNewSeason:
+		seasons := builderSeasonOptions()
+		ui.phase.NewSeasonIdx = wrapIndex(ui.phase.NewSeasonIdx+1, len(seasons))
+	case phaseRowAddPhase:
+		if !ui.phase.Adding {
+			ui.phase.Adding = true
+			if strings.TrimSpace(ui.phase.NewDays) == "" {
+				ui.phase.NewDays = "7"
+			}
+			ui.phase.Cursor = 0
+			return
+		}
+		if len(*phases) >= maxScenarioPhases {
+			ui.sb.Status = fmt.Sprintf("Maximum phases reached (%d).", maxScenarioPhases)
+			return
+		}
+		if len(*phases) > 0 && (*phases)[len(*phases)-1].Days == 0 {
+			ui.sb.Status = "Current final phase has 0 days. Set it before adding another."
+			return
+		}
+		days, err := strconv.Atoi(strings.TrimSpace(ui.phase.NewDays))
+		if err != nil || days < 0 {
+			ui.sb.Status = "Days must be a number >= 0."
+			return
+		}
+		seasons := builderSeasonOptions()
+		*phases = append(*phases, game.SeasonPhase{
+			Season: seasons[ui.phase.NewSeasonIdx],
+			Days:   days,
+		})
+		ui.phase.Adding = false
+		ui.phase.NewDays = "7"
+		ui.phase.Cursor = 0
+		ui.sb.Status = "Added phase."
+	case phaseRowRemoveLast:
+		if len(*phases) <= 1 {
+			ui.sb.Status = "At least one phase is required."
+			return
+		}
+		*phases = append([]game.SeasonPhase(nil), (*phases)[:len(*phases)-1]...)
+		ui.sb.Status = "Removed last phase."
+	case phaseRowBack:
+		ui.screen = screenScenarioBuilder
+	}
+}
+
+func (ui *gameUI) drawPhaseEditor() {
+	ui.ensureScenarioSeasonSet()
+	rows := ui.phaseEditorRows()
+	if len(rows) == 0 {
+		panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
+		drawPanel(panel, "Phase Builder")
+		drawWrappedText("No phase rows available.", panel, 60, 22, colorWarn)
+		return
+	}
+	ui.phase.Cursor = clampInt(ui.phase.Cursor, 0, len(rows)-1)
+
+	left := rl.NewRectangle(20, 20, float32(ui.width)*0.34, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	drawPanel(left, "Phase Builder")
+	drawPanel(right, "Phase Timeline")
+
+	y := int32(left.Y) + 56
+	for i, row := range rows {
+		if i == ui.phase.Cursor {
+			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
+		}
+		clr := colorText
+		if !row.Active {
+			clr = colorDim
+		}
+		rl.DrawText(row.Label, int32(left.X)+18, y, 20, clr)
+		if strings.TrimSpace(row.Value) != "" {
+			rl.DrawText(row.Value, int32(left.X)+220, y, 20, colorAccent)
+		}
+		y += 40
+	}
+	rl.DrawText("Up/Down move  Left/Right season  Enter select  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+
+	setIdx := ui.scenarioDefaultSeasonSetIndex()
+	lines := []string{
+		fmt.Sprintf("Scenario: %s", ui.sb.Scenario.Name),
+		fmt.Sprintf("Season Profile: %s", ui.sb.Scenario.DefaultSeasonSetID),
+		"",
+		"Phases:",
+	}
+	if setIdx >= 0 {
+		for i, phase := range ui.sb.Scenario.SeasonSets[setIdx].Phases {
+			lines = append(lines, fmt.Sprintf("%d. %s (%d day(s))", i+1, builderSeasonLabel(phase.Season), phase.Days))
+		}
+	}
+	lines = append(lines,
+		"",
+		"Notes:",
+		"When adding a phase, season and days appear on the left.",
+		"Set days to 0 only for the final phase.",
+	)
+	drawLines(right, 44, 20, lines, colorText)
+
+	if strings.TrimSpace(ui.sb.Status) != "" {
+		rl.DrawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-52, 17, colorWarn)
+	}
 }
