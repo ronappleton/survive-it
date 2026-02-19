@@ -395,6 +395,7 @@ func (s *RunState) PreserveFood(playerID int, method string, itemID string, kg f
 
 	_ = s.AdvanceActionClock(hours)
 	applySkillEffort(&player.Crafting, int(math.Round(hours*18)), true)
+	applySkillEffort(&player.Cooking, int(math.Round(hours*12)), true)
 	if method == "smoke" || method == "dry" {
 		applySkillEffort(&player.Gathering, int(math.Round(hours*8)), true)
 	}
@@ -472,6 +473,7 @@ func (s *RunState) CookFood(playerID int, rawID string, kg float64) (CookResult,
 	hours := clampFloat(0.2+(kg*0.5)-float64(player.Crafting)/250.0, 0.12, 4)
 	_ = s.AdvanceActionClock(hours)
 	applySkillEffort(&player.Crafting, int(math.Round(hours*16)), true)
+	applySkillEffort(&player.Cooking, int(math.Round(hours*14)), true)
 	player.Energy = clamp(player.Energy-int(math.Ceil(hours*1.2)), 0, 100)
 	player.Hydration = clamp(player.Hydration-int(math.Ceil(hours*0.8)), 0, 100)
 	player.Morale = clamp(player.Morale+1, 0, 100)

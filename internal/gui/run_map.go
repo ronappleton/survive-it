@@ -11,6 +11,7 @@ import (
 const (
 	runLogSplitRatio = 0.66
 	runLayoutPadding = 16
+	runLayoutGap     = 10
 )
 
 type runLayout struct {
@@ -23,24 +24,27 @@ type runLayout struct {
 
 func runScreenLayout(width, height int32) runLayout {
 	outer := rl.NewRectangle(runLayoutPadding, runLayoutPadding, float32(width-runLayoutPadding*2), float32(height-runLayoutPadding*2))
-	topH := float32(194)
+	topH := float32(212)
 	inputH := float32(92)
 	if outer.Height < 520 {
-		topH = 168
+		topH = 186
 		inputH = 82
 	}
-	middleTop := outer.Y + topH
+	gap := float32(runLayoutGap)
+	middleTop := outer.Y + topH + gap
 	inputTop := outer.Y + outer.Height - inputH
-	if inputTop-middleTop < 160 {
-		inputTop = middleTop + 160
+	if inputTop-middleTop-gap < 160 {
+		inputTop = middleTop + gap + 160
 	}
-	middleH := inputTop - middleTop
+	middleH := inputTop - middleTop - gap
 	splitX := outer.X + outer.Width*runLogSplitRatio
+	logW := splitX - outer.X - gap/2
+	miniX := splitX + gap/2
 	return runLayout{
 		Outer:       outer,
 		TopRect:     rl.NewRectangle(outer.X, outer.Y, outer.Width, topH),
-		LogRect:     rl.NewRectangle(outer.X, middleTop, splitX-outer.X, middleH),
-		MiniMapRect: rl.NewRectangle(splitX, middleTop, outer.X+outer.Width-splitX, middleH),
+		LogRect:     rl.NewRectangle(outer.X, middleTop, logW, middleH),
+		MiniMapRect: rl.NewRectangle(miniX, middleTop, outer.X+outer.Width-miniX, middleH),
 		InputRect:   rl.NewRectangle(outer.X, inputTop, outer.Width, outer.Y+outer.Height-inputTop),
 	}
 }

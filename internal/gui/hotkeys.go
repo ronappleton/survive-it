@@ -7,7 +7,15 @@ import (
 )
 
 func ShiftPressedKey(key int32) bool {
-	return shiftDown() && rl.IsKeyPressed(key)
+	return ShiftKeyPressed(key)
+}
+
+func ShiftPressed() bool {
+	return shiftDown()
+}
+
+func ShiftKeyPressed(key int32) bool {
+	return ShiftPressed() && rl.IsKeyPressed(key)
 }
 
 func HotkeysEnabled(uiState *gameUI) bool {

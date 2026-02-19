@@ -217,6 +217,7 @@ func DefaultRegistry() *Registry {
 		{Canonical: "bark", MinArgs: 1, MaxArgs: 5, HandlerKey: "bark"},
 		{Canonical: "plants", MinArgs: 0, MaxArgs: 0, HandlerKey: "plants"},
 		{Canonical: "actions", MinArgs: 0, MaxArgs: 2, HandlerKey: "actions"},
+		{Canonical: "ask", MinArgs: 2, MaxArgs: 8, HandlerKey: "ask"},
 	}
 	for _, cmd := range commands {
 		r.RegisterCommand(cmd)

@@ -318,6 +318,7 @@ func (s *RunState) SetTrap(playerID int, trapID string) (TrapSetResult, error) {
 	} else {
 		applySkillEffort(&player.Hunting, int(math.Round(trap.BaseHours*14)), true)
 	}
+	applySkillEffort(&player.Trapping, int(math.Round(trap.BaseHours*18)), true)
 	player.Energy = clamp(player.Energy-int(math.Ceil(trap.BaseHours*3.2)), 0, 100)
 	player.Hydration = clamp(player.Hydration-int(math.Ceil(trap.BaseHours*1.6)), 0, 100)
 	player.Morale = clamp(player.Morale+1, 0, 100)
@@ -436,6 +437,13 @@ func (s *RunState) CheckTraps() TrapCheckResult {
 				result.CampOverflow++
 			} else {
 				result.CollectedKg += item.Qty
+				if player, ok := s.playerByID(trap.SetByPlayerID); ok {
+					effort := int(math.Round(item.Qty * 10))
+					if effort < 4 {
+						effort = 4
+					}
+					applySkillEffort(&player.Trapping, effort, true)
+				}
 			}
 			trap.PendingCatchKg = 0
 			trap.PendingCatchType = ""

@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"math/rand/v2"
+	"strings"
 )
 
 type Sex string
@@ -77,6 +78,12 @@ type PlayerState struct {
 	Foraging       int             `json:"foraging"`
 	Crafting       int             `json:"crafting"`
 	Gathering      int             `json:"gathering"`
+	Trapping       int             `json:"trapping"`
+	Firecraft      int             `json:"firecraft"`
+	Sheltercraft   int             `json:"sheltercraft"`
+	Cooking        int             `json:"cooking"`
+	Navigation     int             `json:"navigation"`
+	CurrentTask    string          `json:"current_task"`
 	Traits         []TraitModifier `json:"traits,omitempty"`
 	KitLimit       int             `json:"kit_limit"`
 	Kit            []KitItem       `json:"kit"`
@@ -130,6 +137,12 @@ type PlayerConfig struct {
 	Foraging       int
 	Crafting       int
 	Gathering      int
+	Trapping       int
+	Firecraft      int
+	Sheltercraft   int
+	Cooking        int
+	Navigation     int
+	CurrentTask    string
 	Traits         []TraitModifier
 	KitLimit       int
 	Kit            []KitItem
@@ -207,6 +220,12 @@ func CreatePlayers(cfg RunConfig) []PlayerState {
 			Foraging:       clamp(pc.Foraging, 0, 100),
 			Crafting:       clamp(pc.Crafting, 0, 100),
 			Gathering:      clamp(pc.Gathering, 0, 100),
+			Trapping:       clamp(pc.Trapping, 0, 100),
+			Firecraft:      clamp(pc.Firecraft, 0, 100),
+			Sheltercraft:   clamp(pc.Sheltercraft, 0, 100),
+			Cooking:        clamp(pc.Cooking, 0, 100),
+			Navigation:     clamp(pc.Navigation, 0, 100),
+			CurrentTask:    defaultTask(pc.CurrentTask),
 			Traits:         append([]TraitModifier(nil), pc.Traits...),
 			KitLimit:       pc.KitLimit,
 			Kit:            append([]KitItem(nil), pc.Kit...),
@@ -252,4 +271,11 @@ func romanSuffix(n int) string {
 		return romanNumerals[n]
 	}
 	return fmt.Sprintf("%d", n+1)
+}
+
+func defaultTask(task string) string {
+	if strings.TrimSpace(task) == "" {
+		return "Idle"
+	}
+	return task
 }

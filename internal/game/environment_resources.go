@@ -1383,6 +1383,11 @@ func (s *RunState) BuildShelter(playerID int, shelterID string) (ShelterSpec, er
 	player.Energy = clamp(player.Energy-energyCost, 0, 100)
 	player.Hydration = clamp(player.Hydration-hydrationCost, 0, 100)
 	player.Morale = clamp(player.Morale+moraleBonus, 0, 100)
+	effortHours := stage.BuildHours
+	if effortHours <= 0 {
+		effortHours = 1.2
+	}
+	applySkillEffort(&player.Sheltercraft, int(math.Round(effortHours*16)), true)
 	if stage.BuildHours > 0 {
 		_ = s.AdvanceActionClock(stage.BuildHours)
 	}
@@ -1655,6 +1660,7 @@ func (s *RunState) startFireWithMethod(playerID int, woodType WoodType, kg float
 	}
 	player.Morale = clamp(player.Morale+3, 0, 100)
 	player.Energy = clamp(player.Energy-1, 0, 100)
+	applySkillEffort(&player.Firecraft, 12, true)
 	refreshEffectBars(player)
 	return nil
 }
@@ -1692,6 +1698,7 @@ func (s *RunState) TendFire(playerID int, kg float64, woodType WoodType) error {
 	s.Fire.WoodType = woodType
 	s.Fire.LastTendedDay = s.Day
 	player.Morale = clamp(player.Morale+2, 0, 100)
+	applySkillEffort(&player.Firecraft, 8, true)
 	refreshEffectBars(player)
 	return nil
 }
@@ -1739,6 +1746,7 @@ func (s *RunState) PrepareFireMaterial(playerID int, material string, count int)
 		s.FirePrep.TinderBundles += created
 		s.FirePrep.TinderQuality = blendQuality(s.FirePrep.TinderQuality, s.FirePrep.TinderBundles-created, quality/float64(created), created)
 		player.Energy = clamp(player.Energy-created, 0, 100)
+		applySkillEffort(&player.Firecraft, created*3, true)
 		refreshEffectBars(player)
 		return created, nil
 	case "kindling":
@@ -1759,6 +1767,7 @@ func (s *RunState) PrepareFireMaterial(playerID int, material string, count int)
 		s.FirePrep.KindlingQuality = blendQuality(s.FirePrep.KindlingQuality, s.FirePrep.KindlingBundles-created, quality/float64(created), created)
 		player.Energy = clamp(player.Energy-created, 0, 100)
 		player.Hydration = clamp(player.Hydration-created/2, 0, 100)
+		applySkillEffort(&player.Firecraft, created*3, true)
 		refreshEffectBars(player)
 		return created, nil
 	case "feather", "feathersticks", "feather_sticks":
@@ -1778,6 +1787,7 @@ func (s *RunState) PrepareFireMaterial(playerID int, material string, count int)
 		s.FirePrep.FeatherSticks += created
 		s.FirePrep.FeatherQuality = blendQuality(s.FirePrep.FeatherQuality, s.FirePrep.FeatherSticks-created, quality/float64(created), created)
 		player.Energy = clamp(player.Energy-created, 0, 100)
+		applySkillEffort(&player.Firecraft, created*4, true)
 		refreshEffectBars(player)
 		return created, nil
 	default:
@@ -1860,6 +1870,7 @@ func (s *RunState) TryCreateEmber(playerID int, method FireMethod, preferredWood
 	} else {
 		player.Morale = clamp(player.Morale-1, 0, 100)
 	}
+	applySkillEffort(&player.Firecraft, 8, success)
 	refreshEffectBars(player)
 
 	return chance, success, nil
@@ -2024,6 +2035,7 @@ func (s *RunState) IgniteFromEmber(playerID int, woodType WoodType, kg float64) 
 
 	if !success {
 		player.Morale = clamp(player.Morale-1, 0, 100)
+		applySkillEffort(&player.Firecraft, 6, false)
 		refreshEffectBars(player)
 		return chance, false, nil
 	}
@@ -2031,6 +2043,7 @@ func (s *RunState) IgniteFromEmber(playerID int, woodType WoodType, kg float64) 
 	if err := s.startFireWithMethod(playerID, woodType, kg, FireMethodBowDrill); err != nil {
 		return chance, false, err
 	}
+	applySkillEffort(&player.Firecraft, 12, true)
 	refreshEffectBars(player)
 	return chance, true, nil
 }
@@ -2481,6 +2494,14 @@ func (s *RunState) CraftItem(playerID int, craftID string) (CraftOutcome, error)
 	}
 
 	applySkillEffort(&player.Crafting, int(math.Round(hours*18)), true)
+	switch strings.ToLower(strings.TrimSpace(chosen.Category)) {
+	case "shelter_upgrade", "structures":
+		applySkillEffort(&player.Sheltercraft, int(math.Round(hours*14)), true)
+	case "fire":
+		applySkillEffort(&player.Firecraft, int(math.Round(hours*14)), true)
+	case "fishing", "trapping":
+		applySkillEffort(&player.Trapping, int(math.Round(hours*12)), true)
+	}
 	player.Energy = clamp(player.Energy+chosen.Effects.Energy-int(math.Ceil(hours*2))+qualityCraftEffectBonus(quality), 0, 100)
 	player.Hydration = clamp(player.Hydration+chosen.Effects.Hydration-int(math.Ceil(hours*1.4)), 0, 100)
 	player.Morale = clamp(player.Morale+chosen.Effects.Morale+1+qualityCraftEffectBonus(quality), 0, 100)

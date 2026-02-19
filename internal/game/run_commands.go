@@ -48,7 +48,7 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [p#], fish [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [p#], fish [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], ask <player> <task>, next, save, load, menu.",
 		}
 	case "hunt", "catch":
 		return s.executeHuntCommand(fields[1:])
@@ -100,9 +100,29 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 		return s.listActionsForPlayer(playerID)
 	case "use":
 		return s.executeUseCommand(fields)
+	case "ask":
+		return s.executeAskCommand(fields[1:])
 	default:
 		return RunCommandResult{Handled: false}
 	}
+}
+
+func (s *RunState) executeAskCommand(args []string) RunCommandResult {
+	if len(args) < 2 {
+		return RunCommandResult{Handled: true, Message: "Usage: ask <player> <task>"}
+	}
+	target := strings.TrimSpace(args[0])
+	task := strings.TrimSpace(strings.Join(args[1:], " "))
+	if task == "" {
+		return RunCommandResult{Handled: true, Message: "Usage: ask <player> <task>"}
+	}
+	name := target
+	if pid := parsePlayerToken(target); pid > 0 {
+		if player, ok := s.playerByID(pid); ok {
+			name = player.Name
+		}
+	}
+	return RunCommandResult{Handled: true, Message: fmt.Sprintf("%s isn't ready for delegated tasks yet (%s).", name, task)}
 }
 
 func (s *RunState) listActionsForPlayer(playerID int) RunCommandResult {

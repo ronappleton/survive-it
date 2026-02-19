@@ -123,6 +123,17 @@ type runInventoryState struct {
 	PlayerIndex int
 }
 
+type runSkillSnapshot struct {
+	Hunting      int
+	Fishing      int
+	Foraging     int
+	Trapping     int
+	Firecraft    int
+	Sheltercraft int
+	Cooking      int
+	Navigation   int
+}
+
 type scenarioPickerState struct {
 	Cursor int
 }
@@ -182,6 +193,10 @@ type gameUI struct {
 	runFocus    int
 	lastEntity  string
 
+	skillBaseline      map[int]runSkillSnapshot
+	skillBaselineDay   int
+	skillBaselineBlock string
+
 	cmdParser      *parser.Parser
 	commandSink    CommandSink
 	intentQueue    *intentQueue
@@ -224,7 +239,8 @@ func newGameUI(cfg AppConfig) *gameUI {
 			TempUnit:   tempUnitC,
 			GameSounds: true,
 		},
-		updateResultCh: make(chan updateResult, 4),
+		skillBaselineDay: -1,
+		updateResultCh:   make(chan updateResult, 4),
 	}
 	if !cfg.NoUpdate {
 		ui.menuNeedsUpdateCheck = true
@@ -1134,6 +1150,9 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.runFocus = 0
 	ui.runInput = ""
 	ui.lastEntity = ""
+	ui.skillBaseline = nil
+	ui.skillBaselineDay = -1
+	ui.skillBaselineBlock = ""
 	ui.pendingClarify = nil
 	ui.pendingOptions = nil
 	ui.status = ""
@@ -1174,6 +1193,9 @@ func (ui *gameUI) updateLoad() {
 		ui.runPlayedFor = 0
 		ui.runFocus = 0
 		ui.lastEntity = ""
+		ui.skillBaseline = nil
+		ui.skillBaselineDay = -1
+		ui.skillBaselineBlock = ""
 		ui.pendingClarify = nil
 		ui.pendingOptions = nil
 		ui.status = ""
@@ -1234,8 +1256,9 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		return
 	}
 	ui.run.EnsureTopology()
+	ui.runFocus = 0
 	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyP) {
-		ui.rplay.Cursor = ui.runFocus
+		ui.rplay.Cursor = 0
 		ui.screen = screenRunPlayers
 		return
 	}
@@ -1244,7 +1267,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		return
 	}
 	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyI) {
-		ui.rinv.PlayerIndex = ui.runFocus
+		ui.rinv.PlayerIndex = 0
 		ui.screen = screenRunInventory
 		return
 	}
@@ -1256,16 +1279,6 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		return
 	}
 	ui.processIntentQueue()
-	if len(ui.run.Players) > 0 {
-		if HotkeysEnabled(ui) && (ShiftPressedKey(rl.KeyTab) || ShiftPressedKey(rl.KeyRightBracket)) {
-			ui.runFocus = wrapIndex(ui.runFocus+1, len(ui.run.Players))
-		}
-		if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyLeftBracket) {
-			ui.runFocus = wrapIndex(ui.runFocus-1, len(ui.run.Players))
-		}
-	} else {
-		ui.runFocus = 0
-	}
 	ui.runPlayedFor += delta
 	dayDuration := ui.autoDayDuration()
 	ui.run.ApplyRealtimeMetabolism(ui.runPlayedFor, dayDuration)
@@ -1319,41 +1332,106 @@ func (ui *gameUI) drawRun() {
 	drawPanel(layout.MiniMapRect, "Minimap")
 	drawPanel(layout.InputRect, "Command Input")
 
+	focus := game.PlayerState{}
+	if len(ui.run.Players) > 0 {
+		focus = ui.run.Players[0]
+	}
+
 	season := "unknown"
 	if s, ok := ui.run.CurrentSeason(); ok {
 		season = string(s)
 	}
 	weather := game.WeatherLabel(ui.run.Weather.Type)
-	header := fmt.Sprintf("Mode: %s | Scenario: %s | Day: %d | Season: %s | Weather: %s | Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
-	drawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, typeScale.Body, colorAccent)
 	nextIn := ui.autoDayDuration() - ui.runPlayedFor
 	if nextIn < 0 {
 		nextIn = 0
 	}
 	posX, posY := ui.run.CurrentMapPosition()
-	drawText(fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock()), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+66, typeScale.Small, colorText)
-
-	focus := game.PlayerState{}
-	if len(ui.run.Players) > 0 {
-		ui.runFocus = clampInt(ui.runFocus, 0, len(ui.run.Players)-1)
-		focus = ui.run.Players[ui.runFocus]
-		drawText(fmt.Sprintf("Focus Player: %s (%d/%d) | Shift+Tab / Shift+[ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+90, typeScale.Small, colorDim)
+	clockLine := fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock())
+	clockW := measureText(clockLine, typeScale.Small)
+	clockX := int32(layout.TopRect.X+layout.TopRect.Width) - int32(spaceM) - int32(clockW)
+	minClockX := int32(layout.TopRect.X) + 220
+	if clockX < minClockX {
+		clockX = minClockX
 	}
+	drawText(clockLine, clockX, int32(layout.TopRect.Y)+int32(spaceS), typeScale.Small, colorText)
+
+	header := fmt.Sprintf("Mode: %s | Scenario: %s | Day: %d | Season: %s | Weather: %s | Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
+	drawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, typeScale.Body, colorAccent)
 
 	barInset := float32(14)
-	barGap := float32(10)
-	row1Y := layout.TopRect.Y + 118
-	row2Y := row1Y + 44
-	row1W := clampFloat32(layout.TopRect.Width*0.18, 136, 220)
-	row2W := clampFloat32(layout.TopRect.Width*0.18, 136, 220)
+	barGap := float32(runLayoutGap)
+	row1Y := layout.TopRect.Y + 88
+	row2Y := row1Y + 36
+	barLeft := layout.TopRect.X + barInset
+	barRight := layout.TopRect.X + layout.TopRect.Width*0.58
+	if barRight > layout.TopRect.X+layout.TopRect.Width-spaceM {
+		barRight = layout.TopRect.X + layout.TopRect.Width - spaceM
+	}
+	if barRight < barLeft+300 {
+		barRight = barLeft + 300
+	}
+	row1W := max(float32(90), (barRight-barLeft-barGap*3)/4)
+	row2W := max(float32(90), (barRight-barLeft-barGap*2)/3)
 	condition := runConditionScore(focus)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row1Y, row1W, 8), "Condition", condition, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*1, row1Y, row1W, 8), "Energy", focus.Energy, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*2, row1Y, row1W, 8), "Hydration", focus.Hydration, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*3, row1Y, row1W, 8), "Morale", focus.Morale, false)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row2Y, row2W, 8), "Hunger", focus.Hunger, true)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*1, row2Y, row2W, 8), "Thirst", focus.Thirst, true)
-	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*2, row2Y, row2W, 8), "Fatigue", focus.Fatigue, true)
+	drawRunStatBar(rl.NewRectangle(barLeft, row1Y, row1W, 8), "Condition", condition, false)
+	drawRunStatBar(rl.NewRectangle(barLeft+(row1W+barGap)*1, row1Y, row1W, 8), "Energy", focus.Energy, false)
+	drawRunStatBar(rl.NewRectangle(barLeft+(row1W+barGap)*2, row1Y, row1W, 8), "Hydration", focus.Hydration, false)
+	drawRunStatBar(rl.NewRectangle(barLeft+(row1W+barGap)*3, row1Y, row1W, 8), "Morale", focus.Morale, false)
+	drawRunStatBar(rl.NewRectangle(barLeft, row2Y, row2W, 8), "Hunger", focus.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(barLeft+(row2W+barGap)*1, row2Y, row2W, 8), "Thirst", focus.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(barLeft+(row2W+barGap)*2, row2Y, row2W, 8), "Fatigue", focus.Fatigue, true)
+
+	ui.ensureRunSkillBaseline()
+	skillValues := skillSnapshotFromPlayer(focus)
+	skillDelta := ui.runSkillDelta(focus)
+	skillsX := barRight + barGap + 4
+	skillsY := row1Y - 2
+	drawText("Skills", int32(skillsX), int32(skillsY), typeScale.Small, colorAccent)
+	skillRows := []struct {
+		Name  string
+		Value int
+		Delta int
+	}{
+		{Name: "Hunting", Value: skillValues.Hunting, Delta: skillDelta.Hunting},
+		{Name: "Fishing", Value: skillValues.Fishing, Delta: skillDelta.Fishing},
+		{Name: "Foraging", Value: skillValues.Foraging, Delta: skillDelta.Foraging},
+		{Name: "Trapping", Value: skillValues.Trapping, Delta: skillDelta.Trapping},
+		{Name: "Firecraft", Value: skillValues.Firecraft, Delta: skillDelta.Firecraft},
+		{Name: "Shelter", Value: skillValues.Sheltercraft, Delta: skillDelta.Sheltercraft},
+		{Name: "Cooking", Value: skillValues.Cooking, Delta: skillDelta.Cooking},
+		{Name: "Navigation", Value: skillValues.Navigation, Delta: skillDelta.Navigation},
+	}
+	col1X := int32(skillsX)
+	col2X := int32(skillsX + max(float32(170), layout.TopRect.Width*0.18))
+	rowY := int32(skillsY) + 20
+	for i, row := range skillRows {
+		colX := col1X
+		if i%2 == 1 {
+			colX = col2X
+		}
+		if i%2 == 0 && i > 0 {
+			rowY += 20
+		}
+		clr := colorText
+		if row.Delta > 0 {
+			clr = colorAccent
+		}
+		drawText(fmt.Sprintf("%s %d (%s)", row.Name, row.Value, formatSignedDelta(row.Delta)), colX, rowY, typeScale.Small, clr)
+	}
+
+	if len(ui.run.Players) > 1 {
+		parts := make([]string, 0, len(ui.run.Players)-1)
+		for _, p := range ui.run.Players[1:] {
+			task := strings.TrimSpace(p.CurrentTask)
+			if task == "" {
+				task = "Idle"
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", p.Name, task))
+		}
+		team := strings.Join(parts, " | ")
+		drawText("Team "+truncateForUI(team, 95), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y+layout.TopRect.Height)-24, typeScale.Small, colorDim)
+	}
 
 	drawRunMessageLog(layout.LogRect, ui.runMessages)
 	ui.drawMiniMap(layout.MiniMapRect, false)
@@ -1380,6 +1458,67 @@ func (ui *gameUI) drawRun() {
 		statusX := int32(layout.InputRect.X + layout.InputRect.Width*0.5)
 		drawText(ui.status, statusX, inputY, 20, colorWarn)
 	}
+}
+
+func skillSnapshotFromPlayer(player game.PlayerState) runSkillSnapshot {
+	return runSkillSnapshot{
+		Hunting:      clampInt(player.Hunting, 0, 100),
+		Fishing:      clampInt(player.Fishing, 0, 100),
+		Foraging:     clampInt(player.Foraging, 0, 100),
+		Trapping:     clampInt(player.Trapping, 0, 100),
+		Firecraft:    clampInt(player.Firecraft, 0, 100),
+		Sheltercraft: clampInt(player.Sheltercraft, 0, 100),
+		Cooking:      clampInt(player.Cooking, 0, 100),
+		Navigation:   clampInt(player.Navigation, 0, 100),
+	}
+}
+
+func (ui *gameUI) ensureRunSkillBaseline() {
+	if ui == nil || ui.run == nil {
+		return
+	}
+	block := string(ui.run.CurrentTimeBlock())
+	if ui.skillBaseline != nil && ui.skillBaselineDay == ui.run.Day && ui.skillBaselineBlock == block {
+		return
+	}
+	ui.skillBaseline = make(map[int]runSkillSnapshot, len(ui.run.Players))
+	for _, player := range ui.run.Players {
+		ui.skillBaseline[player.ID] = skillSnapshotFromPlayer(player)
+	}
+	ui.skillBaselineDay = ui.run.Day
+	ui.skillBaselineBlock = block
+}
+
+func (ui *gameUI) runSkillDelta(player game.PlayerState) runSkillSnapshot {
+	current := skillSnapshotFromPlayer(player)
+	if ui == nil {
+		return runSkillSnapshot{}
+	}
+	if ui.skillBaseline == nil {
+		return runSkillSnapshot{}
+	}
+	base, ok := ui.skillBaseline[player.ID]
+	if !ok {
+		ui.skillBaseline[player.ID] = current
+		return runSkillSnapshot{}
+	}
+	return runSkillSnapshot{
+		Hunting:      current.Hunting - base.Hunting,
+		Fishing:      current.Fishing - base.Fishing,
+		Foraging:     current.Foraging - base.Foraging,
+		Trapping:     current.Trapping - base.Trapping,
+		Firecraft:    current.Firecraft - base.Firecraft,
+		Sheltercraft: current.Sheltercraft - base.Sheltercraft,
+		Cooking:      current.Cooking - base.Cooking,
+		Navigation:   current.Navigation - base.Navigation,
+	}
+}
+
+func formatSignedDelta(v int) string {
+	if v >= 0 {
+		return fmt.Sprintf("+%d", v)
+	}
+	return fmt.Sprintf("%d", v)
 }
 
 func (ui *gameUI) updateRunPlayers() {
@@ -1440,6 +1579,7 @@ func (ui *gameUI) drawRunPlayers() {
 
 	lines := []string{
 		fmt.Sprintf("%s (Player %d/%d)", sel.Name, sel.ID, len(ui.run.Players)),
+		fmt.Sprintf("Task: %s", safeText(sel.CurrentTask)),
 		fmt.Sprintf("Sex: %s  Body: %s", sel.Sex, sel.BodyType),
 		fmt.Sprintf("Height: %d ft %d in  Weight: %d kg", sel.HeightFt, sel.HeightIn, sel.WeightKg),
 		fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", sel.Endurance, sel.Bushcraft, sel.Mental),
@@ -1499,7 +1639,7 @@ func (ui *gameUI) updateRunCommandLibrary() {
 		return
 	}
 	if ShiftPressedKey(rl.KeyI) {
-		ui.rinv.PlayerIndex = ui.runFocus
+		ui.rinv.PlayerIndex = 0
 		ui.screen = screenRunInventory
 		return
 	}
@@ -1542,6 +1682,7 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"fire status|methods|prep|ember|ignite|build|tend|out",
 		"shelter list|build|status",
 		"craft list|make|inventory",
+		"ask <player> <task>",
 	}
 	rightLines := []string{
 		"Equipment Actions:",
@@ -1650,7 +1791,8 @@ func (ui *gameUI) drawRunInventory() {
 		crafted,
 		"",
 		fmt.Sprintf("Carry stats  Str:%+d End:%+d Agi:%+d", player.Strength, player.Endurance, player.Agility),
-		fmt.Sprintf("Skills  Craft:%d Gather:%d Hunt:%d Fish:%d Forage:%d", player.Crafting, player.Gathering, player.Hunting, player.Fishing, player.Foraging),
+		fmt.Sprintf("Skills  Hunt:%d Fish:%d Forage:%d Trap:%d Fire:%d", player.Hunting, player.Fishing, player.Foraging, player.Trapping, player.Firecraft),
+		fmt.Sprintf("         Build:%d Cook:%d Nav:%d Craft:%d Gather:%d", player.Sheltercraft, player.Cooking, player.Navigation, player.Crafting, player.Gathering),
 		"",
 		"Up/Down or Shift+Tab cycle players",
 		"Shift+P player detail",
@@ -1775,8 +1917,7 @@ func (ui *gameUI) buildParseContext() parser.ParseContext {
 	}
 
 	if len(ui.run.Players) > 0 {
-		idx := clampInt(ui.runFocus, 0, len(ui.run.Players)-1)
-		player := ui.run.Players[idx]
+		player := ui.run.Players[0]
 		for _, item := range player.PersonalItems {
 			addInv(item.ID)
 		}
@@ -2323,6 +2464,14 @@ func (ui *gameUI) ensureSetupPlayers() {
 		player.Foraging = clampInt(player.Foraging, 0, 100)
 		player.Crafting = clampInt(player.Crafting, 0, 100)
 		player.Gathering = clampInt(player.Gathering, 0, 100)
+		player.Trapping = clampInt(player.Trapping, 0, 100)
+		player.Firecraft = clampInt(player.Firecraft, 0, 100)
+		player.Sheltercraft = clampInt(player.Sheltercraft, 0, 100)
+		player.Cooking = clampInt(player.Cooking, 0, 100)
+		player.Navigation = clampInt(player.Navigation, 0, 100)
+		if strings.TrimSpace(player.CurrentTask) == "" {
+			player.CurrentTask = "Idle"
+		}
 		player.Endurance = player.Strength
 		player.Mental = player.MentalStrength
 		player.Bushcraft = player.Agility
@@ -2387,6 +2536,12 @@ func defaultPlayerConfig(i int, mode game.GameMode) game.PlayerConfig {
 		Foraging:       10,
 		Crafting:       10,
 		Gathering:      10,
+		Trapping:       10,
+		Firecraft:      10,
+		Sheltercraft:   10,
+		Cooking:        10,
+		Navigation:     10,
+		CurrentTask:    "Idle",
 		Traits:         nil,
 		KitLimit:       defaultKitLimitForMode(mode),
 	}

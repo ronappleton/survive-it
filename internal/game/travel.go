@@ -222,6 +222,7 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 	player.Hydration = clamp(player.Hydration-hydrationCost, 0, 100)
 	player.Morale = clamp(player.Morale+moraleDelta, 0, 100)
 	applySkillEffort(&player.Gathering, int(math.Round(hours*12)), true)
+	applySkillEffort(&player.Navigation, int(math.Round(hours*14)), true)
 	refreshEffectBars(player)
 
 	s.Travel.PosX = posX
