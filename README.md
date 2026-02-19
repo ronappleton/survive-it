@@ -1,29 +1,46 @@
-# Survive It (alpha1)
+# Survive It
 
-Retro green-screen survival sim.
+Survival simulation game implemented in Go with a Raylib-based desktop client.
 
-## Alpha1 scope
-- Bubble Tea UI
-- Simple setup menu with Quit
-- Update wiring stub (message only)
+## Build and Run
 
-## Run
+Requires a cgo-enabled build (Raylib client).
+
 ```bash
 go run ./cmd/survive-it
 ```
 
-## Version
+Print version:
+
 ```bash
 go run ./cmd/survive-it --version
 ```
 
-## Update (alpha1 stub)
-Set the repo once you publish it:
-```bash
-export SURVIVEIT_REPO="owner/name"
-```
-Then use the menu item "Check for updates".
+Disable update checks:
 
-## Roadmap
-- alpha2: real GitHub Releases update check + `survive-it update`
-- alpha3: scenario selection + HUD + raw command loop
+```bash
+go run ./cmd/survive-it --no-update
+```
+
+## Documentation
+
+Full docs live in [`docs/`](./docs/README.md).
+
+Quick links:
+
+- [Systems Overview](./docs/systems/overview.md)
+- [Commands and Input Parsing](./docs/systems/commands-and-input.md)
+- [World Topology, Map, Fog, and Encounters](./docs/systems/world-map-and-encounters.md)
+- [Inventory, Crafting, Trapping, and Food Processing](./docs/systems/inventory-crafting-trapping-and-food.md)
+- [Weather, Physiology, and Effects](./docs/systems/weather-physiology-and-effects.md)
+- [Commands Reference](./docs/reference/commands-reference.md)
+- [Source File Map](./docs/reference/source-map.md)
+- [Generated Data Catalogs](./docs/reference/catalogs/README.md)
+
+## Catalog Regeneration
+
+Data reference markdown files are generated from source catalogs:
+
+```bash
+go run ./cmd/docsgen
+```
