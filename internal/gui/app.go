@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/appengine-ltd/survive-it/internal/game"
+	legacyui "github.com/appengine-ltd/survive-it/internal/ui"
 	"github.com/appengine-ltd/survive-it/internal/update"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -52,6 +53,7 @@ const (
 	actionLoad
 	actionScenarioBuilder
 	actionOptions
+	actionClassicUI
 	actionInstallUpdate
 	actionQuit
 )
@@ -120,9 +122,10 @@ type updateResult struct {
 type gameUI struct {
 	cfg AppConfig
 
-	width  int32
-	height int32
-	quit   bool
+	width         int32
+	height        int32
+	quit          bool
+	launchClassic bool
 
 	screen screen
 
@@ -200,7 +203,6 @@ func newGameUI(cfg AppConfig) *gameUI {
 func (ui *gameUI) Run() error {
 	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
 	rl.InitWindow(ui.width, ui.height, "survive-it")
-	defer rl.CloseWindow()
 	rl.SetExitKey(0)
 	rl.SetTargetFPS(60)
 	// Slightly soften text edges on scaled/default font rendering.
@@ -219,11 +221,25 @@ func (ui *gameUI) Run() error {
 		ui.height = int32(rl.GetScreenHeight())
 
 		ui.update(delta)
+		if ui.launchClassic {
+			break
+		}
 
 		rl.BeginDrawing()
 		rl.ClearBackground(colorBG)
 		ui.draw()
 		rl.EndDrawing()
+	}
+
+	rl.CloseWindow()
+	if ui.launchClassic {
+		app := legacyui.NewApp(legacyui.AppConfig{
+			Version:   ui.cfg.Version,
+			Commit:    ui.cfg.Commit,
+			BuildDate: ui.cfg.BuildDate,
+			NoUpdate:  ui.cfg.NoUpdate,
+		})
+		return app.Run()
 	}
 
 	return nil
@@ -303,6 +319,8 @@ func (ui *gameUI) updateMenu() {
 			ui.openScenarioBuilder()
 		case actionOptions:
 			ui.screen = screenOptions
+		case actionClassicUI:
+			ui.launchClassic = true
 		case actionInstallUpdate:
 			ui.triggerApplyUpdate()
 		case actionQuit:
@@ -363,6 +381,7 @@ func (ui *gameUI) menuItems() []menuItem {
 		{Label: "Load Run", Action: actionLoad},
 		{Label: "Scenario Builder", Action: actionScenarioBuilder},
 		{Label: "Options", Action: actionOptions},
+		{Label: "Classic UI (All Features)", Action: actionClassicUI},
 	}
 	if ui.updateAvailable && !ui.cfg.NoUpdate {
 		items = append(items, menuItem{Label: "Install Update", Action: actionInstallUpdate})
