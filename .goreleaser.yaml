@@ -7,13 +7,28 @@ before:
     - go mod tidy
 
 builds:
-  - id: survive-it
+  - id: survive-it-gui-darwin
+    main: ./cmd/survive-it
+    binary: survive-it
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: survive-it-headless
     main: ./cmd/survive-it
     binary: survive-it
     env:
       - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
       - windows
     goarch:
