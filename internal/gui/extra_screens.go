@@ -14,13 +14,21 @@ type kitPickerState struct {
 }
 
 type scenarioBuilderState struct {
-	Cursor     int
-	ModeIndex  int
-	ListCursor int
-	EditingRow int
-	EditBuffer string
-	Scenario   game.Scenario
-	Status     string
+	Cursor       int
+	ModeIndex    int
+	ListCursor   int
+	EditingRow   int
+	EditBuffer   string
+	Scenario     game.Scenario
+	Status       string
+	SourceID     game.ScenarioID
+	SourceName   string
+	SourceCustom bool
+}
+
+type scenarioBuilderEntry struct {
+	Scenario game.Scenario
+	Custom   bool
 }
 
 func (ui *gameUI) openKitPicker() {
@@ -179,11 +187,14 @@ func removeKitItem(items []game.KitItem, item game.KitItem) []game.KitItem {
 
 func (ui *gameUI) openScenarioBuilder() {
 	ui.sb = scenarioBuilderState{
-		Cursor:     0,
-		ModeIndex:  ui.setup.ModeIndex,
-		ListCursor: 0,
-		EditingRow: -1,
-		Scenario:   newScenarioTemplate(modeOptions()[clampInt(ui.setup.ModeIndex, 0, len(modeOptions())-1)]),
+		Cursor:       0,
+		ModeIndex:    ui.setup.ModeIndex,
+		ListCursor:   0,
+		EditingRow:   -1,
+		Scenario:     newScenarioTemplate(modeOptions()[clampInt(ui.setup.ModeIndex, 0, len(modeOptions())-1)]),
+		SourceID:     "",
+		SourceName:   "",
+		SourceCustom: false,
 	}
 	ui.screen = screenScenarioBuilder
 }
@@ -205,10 +216,10 @@ func (ui *gameUI) updateScenarioBuilder() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 11)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor+1, 12)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 11)
+		ui.sb.Cursor = wrapIndex(ui.sb.Cursor-1, 12)
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		ui.adjustScenarioBuilder(-1)
@@ -218,15 +229,15 @@ func (ui *gameUI) updateScenarioBuilder() {
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		switch ui.sb.Cursor {
-		case 1, 2, 3, 4, 5:
+		case 2, 3, 4, 5, 6:
 			ui.startScenarioEdit(ui.sb.Cursor)
-		case 7:
-			ui.loadSelectedCustomScenario()
 		case 8:
-			ui.saveScenarioFromBuilder()
+			ui.loadSelectedScenario()
 		case 9:
-			ui.deleteSelectedCustomScenario()
+			ui.saveScenarioFromBuilder()
 		case 10:
+			ui.deleteSelectedCustomScenario()
+		case 11:
 			ui.enterMenu()
 		}
 	}
@@ -238,11 +249,14 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 	case 0:
 		ui.sb.ModeIndex = wrapIndex(ui.sb.ModeIndex+delta, len(modes))
 		ui.sb.Scenario = newScenarioTemplate(modes[ui.sb.ModeIndex])
+		ui.sb.SourceID = ""
+		ui.sb.SourceName = ""
+		ui.sb.SourceCustom = false
 		ui.sb.ListCursor = 0
-	case 6:
+	case 7:
 		ui.sb.Scenario.DefaultDays = clampInt(ui.sb.Scenario.DefaultDays+delta*3, 1, 365)
-	case 7, 9:
-		list := ui.customScenariosForMode(modes[ui.sb.ModeIndex])
+	case 8, 10:
+		list := ui.scenarioBuilderEntriesForMode(modes[ui.sb.ModeIndex])
 		if len(list) > 0 {
 			ui.sb.ListCursor = wrapIndex(ui.sb.ListCursor+delta, len(list))
 		}
@@ -253,14 +267,24 @@ func (ui *gameUI) drawScenarioBuilder() {
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.46, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
 	drawPanel(left, "Scenario Builder")
-	drawPanel(right, "Custom Scenarios")
+	drawPanel(right, "Scenarios")
 
 	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
+	loadedLabel := "New Scenario"
+	if strings.TrimSpace(ui.sb.SourceName) != "" {
+		loadedLabel = ui.sb.SourceName
+		if ui.sb.SourceCustom {
+			loadedLabel += " (Custom)"
+		} else {
+			loadedLabel += " (Built-in)"
+		}
+	}
 	rows := []struct {
 		label string
 		value string
 	}{
 		{"Mode", modeLabel(mode)},
+		{"Loaded", loadedLabel},
 		{"Name", ui.sb.Scenario.Name},
 		{"Biome", ui.sb.Scenario.Biome},
 		{"Description", ui.sb.Scenario.Description},
@@ -286,26 +310,31 @@ func (ui *gameUI) drawScenarioBuilder() {
 		rl.DrawText(value, int32(left.X)+188, y, 19, colorAccent)
 		y += 34
 	}
-	rl.DrawText("Left/Right change mode/days or selected row", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
-	rl.DrawText("Enter edit/save/load/delete", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
+	rl.DrawText("Left/Right change mode/days/list or selected row", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
+	rl.DrawText("Built-in edits must be saved with a new name", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
 
-	list := ui.customScenariosForMode(mode)
+	list := ui.scenarioBuilderEntriesForMode(mode)
 	ly := int32(right.Y) + 52
 	if len(list) == 0 {
-		rl.DrawText("No custom scenarios for this mode yet.", int32(right.X)+14, ly, 20, colorWarn)
+		rl.DrawText("No scenarios for this mode yet.", int32(right.X)+14, ly, 20, colorWarn)
 	} else {
-		for i, s := range list {
+		for i, entry := range list {
 			if ly > int32(right.Y+right.Height)-48 {
 				break
 			}
 			if i == ui.sb.ListCursor {
 				rl.DrawRectangle(int32(right.X)+10, ly-5, int32(right.Width)-20, 30, rl.Fade(colorAccent, 0.2))
 			}
-			line := fmt.Sprintf("%s  (%s, %dd)", s.Name, s.Biome, s.DefaultDays)
+			source := "Built-in"
+			if entry.Custom {
+				source = "Custom"
+			}
+			s := entry.Scenario
+			line := fmt.Sprintf("%s [%s]  (%s, %dd)", s.Name, source, s.Biome, s.DefaultDays)
 			rl.DrawText(line, int32(right.X)+16, ly, 19, colorText)
 			ly += 34
 		}
-		sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)]
+		sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)].Scenario
 		drawWrappedText("Selected Description: "+safeText(sel.Description), right, int32(right.Height)-220, 19, colorDim)
 		drawWrappedText("Daunting: "+safeText(sel.Daunting), right, int32(right.Height)-150, 19, colorWarn)
 	}
@@ -325,15 +354,15 @@ func (ui *gameUI) drawScenarioBuilder() {
 func (ui *gameUI) startScenarioEdit(row int) {
 	ui.sb.EditingRow = row
 	switch row {
-	case 1:
-		ui.sb.EditBuffer = ui.sb.Scenario.Name
 	case 2:
-		ui.sb.EditBuffer = ui.sb.Scenario.Biome
+		ui.sb.EditBuffer = ui.sb.Scenario.Name
 	case 3:
-		ui.sb.EditBuffer = ui.sb.Scenario.Description
+		ui.sb.EditBuffer = ui.sb.Scenario.Biome
 	case 4:
-		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+		ui.sb.EditBuffer = ui.sb.Scenario.Description
 	case 5:
+		ui.sb.EditBuffer = ui.sb.Scenario.Daunting
+	case 6:
 		ui.sb.EditBuffer = ui.sb.Scenario.Motivation
 	}
 }
@@ -341,20 +370,20 @@ func (ui *gameUI) startScenarioEdit(row int) {
 func (ui *gameUI) commitScenarioEdit() {
 	value := strings.TrimSpace(ui.sb.EditBuffer)
 	switch ui.sb.EditingRow {
-	case 1:
+	case 2:
 		if value != "" {
 			ui.sb.Scenario.Name = value
 		}
-	case 2:
+	case 3:
 		if value != "" {
 			ui.sb.Scenario.Biome = value
 			ui.sb.Scenario.Wildlife = game.WildlifeForBiome(value)
 		}
-	case 3:
-		ui.sb.Scenario.Description = value
 	case 4:
-		ui.sb.Scenario.Daunting = value
+		ui.sb.Scenario.Description = value
 	case 5:
+		ui.sb.Scenario.Daunting = value
+	case 6:
 		ui.sb.Scenario.Motivation = value
 	}
 	ui.sb.EditingRow = -1
@@ -374,16 +403,63 @@ func (ui *gameUI) customScenariosForMode(mode game.GameMode) []game.Scenario {
 	return out
 }
 
-func (ui *gameUI) loadSelectedCustomScenario() {
+func supportsMode(s game.Scenario, mode game.GameMode) bool {
+	for _, supported := range s.SupportedModes {
+		if supported == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func (ui *gameUI) scenarioBuilderEntriesForMode(mode game.GameMode) []scenarioBuilderEntry {
+	entries := make([]scenarioBuilderEntry, 0, len(game.BuiltInScenarios())+len(ui.customScenarios))
+	for _, scenario := range game.BuiltInScenarios() {
+		if supportsMode(scenario, mode) {
+			entries = append(entries, scenarioBuilderEntry{
+				Scenario: scenario,
+				Custom:   false,
+			})
+		}
+	}
+	for _, scenario := range ui.customScenarios {
+		if supportsMode(scenario, mode) {
+			entries = append(entries, scenarioBuilderEntry{
+				Scenario: scenario,
+				Custom:   true,
+			})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if strings.EqualFold(entries[i].Scenario.Name, entries[j].Scenario.Name) {
+			if entries[i].Custom == entries[j].Custom {
+				return entries[i].Scenario.ID < entries[j].Scenario.ID
+			}
+			// Built-in entries first when names collide.
+			return !entries[i].Custom
+		}
+		return entries[i].Scenario.Name < entries[j].Scenario.Name
+	})
+	return entries
+}
+
+func (ui *gameUI) loadSelectedScenario() {
 	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
-	list := ui.customScenariosForMode(mode)
+	list := ui.scenarioBuilderEntriesForMode(mode)
 	if len(list) == 0 {
-		ui.sb.Status = "No custom scenarios to load"
+		ui.sb.Status = "No scenarios to load"
 		return
 	}
 	sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)]
-	ui.sb.Scenario = sel
-	ui.sb.Status = "Loaded selected scenario into editor"
+	ui.sb.Scenario = sel.Scenario
+	ui.sb.SourceID = sel.Scenario.ID
+	ui.sb.SourceName = sel.Scenario.Name
+	ui.sb.SourceCustom = sel.Custom
+	if sel.Custom {
+		ui.sb.Status = "Loaded custom scenario into editor"
+	} else {
+		ui.sb.Status = "Loaded built-in scenario template. Save as a new name."
+	}
 }
 
 func (ui *gameUI) saveScenarioFromBuilder() {
@@ -401,16 +477,30 @@ func (ui *gameUI) saveScenarioFromBuilder() {
 	}
 	normalizeScenarioForMode(&scenario, mode)
 
-	if scenario.ID == "" {
-		scenario.ID = game.ScenarioID(generateScenarioID(scenario.Name, mode, ui.customScenarios))
+	editingBuiltIn := ui.sb.SourceID != "" && !ui.sb.SourceCustom
+	if editingBuiltIn && strings.EqualFold(strings.TrimSpace(scenario.Name), strings.TrimSpace(ui.sb.SourceName)) {
+		ui.sb.Status = "Built-in edits must be saved with a new scenario name"
+		return
+	}
+
+	editingCustom := ui.sb.SourceCustom && ui.sb.SourceID != ""
+	if editingCustom {
+		scenario.ID = ui.sb.SourceID
+	} else {
+		// New scenarios and built-in edits always create a custom copy.
+		existing := append([]game.Scenario{}, game.BuiltInScenarios()...)
+		existing = append(existing, ui.customScenarios...)
+		scenario.ID = game.ScenarioID(generateScenarioID(scenario.Name, mode, existing))
 	}
 
 	replaced := false
-	for i := range ui.customScenarios {
-		if ui.customScenarios[i].ID == scenario.ID {
-			ui.customScenarios[i] = scenario
-			replaced = true
-			break
+	if editingCustom {
+		for i := range ui.customScenarios {
+			if ui.customScenarios[i].ID == scenario.ID {
+				ui.customScenarios[i] = scenario
+				replaced = true
+				break
+			}
 		}
 	}
 	if !replaced {
@@ -425,19 +515,27 @@ func (ui *gameUI) saveScenarioFromBuilder() {
 	ui.syncScenarioSelection()
 	ui.sb.Status = "Scenario saved"
 	ui.sb.Scenario = scenario
+	ui.sb.SourceID = scenario.ID
+	ui.sb.SourceName = scenario.Name
+	ui.sb.SourceCustom = true
 }
 
 func (ui *gameUI) deleteSelectedCustomScenario() {
 	mode := modeOptions()[clampInt(ui.sb.ModeIndex, 0, len(modeOptions())-1)]
-	list := ui.customScenariosForMode(mode)
+	list := ui.scenarioBuilderEntriesForMode(mode)
 	if len(list) == 0 {
-		ui.sb.Status = "No custom scenarios to delete"
+		ui.sb.Status = "No scenarios to delete"
 		return
 	}
 	sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)]
+	if !sel.Custom {
+		ui.sb.Status = "Only custom scenarios can be deleted"
+		return
+	}
+
 	next := make([]game.Scenario, 0, len(ui.customScenarios)-1)
 	for _, scenario := range ui.customScenarios {
-		if scenario.ID == sel.ID {
+		if scenario.ID == sel.Scenario.ID {
 			continue
 		}
 		next = append(next, scenario)
