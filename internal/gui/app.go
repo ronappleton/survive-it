@@ -245,6 +245,9 @@ func newGameUI(cfg AppConfig) *gameUI {
 			TempUnit:   tempUnitC,
 			GameSounds: true,
 		},
+		sb: scenarioBuilderState{
+			EditingRow: -1,
+		},
 		skillBaselineDay: -1,
 		updateResultCh:   make(chan updateResult, 4),
 	}

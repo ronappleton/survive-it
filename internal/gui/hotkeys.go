@@ -29,7 +29,12 @@ func HotkeysEnabled(uiState *gameUI) bool {
 	if uiState == nil {
 		return true
 	}
-	if uiState.sbuild.Editing || uiState.pcfg.EditingName || uiState.sb.EditingRow >= 0 {
+	if uiState.sbuild.Editing || uiState.pcfg.EditingName {
+		return false
+	}
+	// Scenario builder inline-edit mode should only block hotkeys while that
+	// screen is active; otherwise a zero-value EditingRow can disable hotkeys.
+	if uiState.screen == screenScenarioBuilder && uiState.sb.EditingRow >= 0 {
 		return false
 	}
 	if uiState.screen == screenRun {
