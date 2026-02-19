@@ -13,6 +13,7 @@ const (
 	runLayoutPadding = 16
 	runLayoutGap     = 10
 	miniMapViewCells = 31
+	topoRenderDetail = 4
 )
 
 type runLayout struct {
@@ -116,6 +117,67 @@ func shadeByElevation(clr rl.Color, elevation int8) rl.Color {
 	)
 }
 
+func colorScale(clr rl.Color, factor float64) rl.Color {
+	if factor < 0.45 {
+		factor = 0.45
+	}
+	if factor > 1.55 {
+		factor = 1.55
+	}
+	return rl.NewColor(
+		uint8(clampInt(int(float64(clr.R)*factor), 0, 255)),
+		uint8(clampInt(int(float64(clr.G)*factor), 0, 255)),
+		uint8(clampInt(int(float64(clr.B)*factor), 0, 255)),
+		clr.A,
+	)
+}
+
+func topoCellClamp(topology game.WorldTopology, x, y int) game.TopoCell {
+	if topology.Width <= 0 || topology.Height <= 0 || len(topology.Cells) == 0 {
+		return game.TopoCell{}
+	}
+	x = clampInt(x, 0, topology.Width-1)
+	y = clampInt(y, 0, topology.Height-1)
+	return topology.Cells[y*topology.Width+x]
+}
+
+func topoElevationSample(topology game.WorldTopology, xf, yf float64) float64 {
+	if topology.Width <= 0 || topology.Height <= 0 || len(topology.Cells) == 0 {
+		return 0
+	}
+	x0 := int(math.Floor(xf))
+	y0 := int(math.Floor(yf))
+	tx := xf - float64(x0)
+	ty := yf - float64(y0)
+	x1 := x0 + 1
+	y1 := y0 + 1
+
+	e00 := float64(topoCellClamp(topology, x0, y0).Elevation)
+	e10 := float64(topoCellClamp(topology, x1, y0).Elevation)
+	e01 := float64(topoCellClamp(topology, x0, y1).Elevation)
+	e11 := float64(topoCellClamp(topology, x1, y1).Elevation)
+
+	e0 := e00 + (e10-e00)*tx
+	e1 := e01 + (e11-e01)*tx
+	return e0 + (e1-e0)*ty
+}
+
+func topoContourBand(elevation int8) int {
+	// ~10m buckets (given the game's compact elevation scale) for visible contouring.
+	return (int(elevation) + 128) / 10
+}
+
+func terrainReliefShade(topology game.WorldTopology, xf, yf float64, base rl.Color) rl.Color {
+	e := topoElevationSample(topology, xf, yf)
+	gx := topoElevationSample(topology, xf+0.5, yf) - topoElevationSample(topology, xf-0.5, yf)
+	gy := topoElevationSample(topology, xf, yf+0.5) - topoElevationSample(topology, xf, yf-0.5)
+
+	// Elevation brightening + directional hillshade to make relief obvious.
+	elevFactor := 1.0 + e/170.0
+	hillshade := 1.0 + ((-gx * 0.028) + (-gy * 0.018))
+	return colorScale(base, elevFactor*hillshade)
+}
+
 type squareGridGeometry struct {
 	OriginX  float32
 	OriginY  float32
@@ -166,17 +228,21 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 		return
 	}
 	topology := ui.run.Topology
-	geo, ok := computeSquareGridGeometry(area, cols, rows)
+	renderCols := cols * topoRenderDetail
+	renderRows := rows * topoRenderDetail
+	geo, ok := computeSquareGridGeometry(area, renderCols, renderRows)
 	if !ok {
 		return
 	}
-	for y := 0; y < rows; y++ {
-		worldY := startY + y
-		for x := 0; x < cols; x++ {
-			worldX := startX + x
+	for y := 0; y < renderRows; y++ {
+		worldYf := float64(startY) + (float64(y)+0.5)/float64(topoRenderDetail)
+		worldY := clampInt(int(worldYf), 0, topology.Height-1)
+		for x := 0; x < renderCols; x++ {
+			worldXf := float64(startX) + (float64(x)+0.5)/float64(topoRenderDetail)
+			worldX := clampInt(int(worldXf), 0, topology.Width-1)
 			idx := worldY*topology.Width + worldX
 			cell := topology.Cells[idx]
-			clr := shadeByElevation(topoBiomeColor(cell.Biome), cell.Elevation)
+			clr := topoBiomeColor(cell.Biome)
 			if cell.Flags&game.TopoFlagWater != 0 {
 				clr = rl.NewColor(76, 116, 156, 255)
 			}
@@ -196,6 +262,10 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 			}
 			if ui.run.Config.Mode == game.ModeAlone && !ui.run.IsRevealed(worldX, worldY) {
 				clr = rl.NewColor(20, 24, 30, 255)
+			} else if cell.Flags&game.TopoFlagWater == 0 {
+				clr = terrainReliefShade(topology, worldXf, worldYf, clr)
+			} else {
+				clr = shadeByElevation(clr, cell.Elevation)
 			}
 			x0 := int32(geo.OriginX + float32(x)*geo.CellSize)
 			y0 := int32(geo.OriginY + float32(y)*geo.CellSize)
@@ -206,17 +276,64 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 			rl.DrawRectangle(x0, y0, int32(w), int32(h), clr)
 		}
 	}
+
+	baseStep := geo.CellSize * float32(topoRenderDetail)
+	for y := 0; y < rows; y++ {
+		worldY := startY + y
+		for x := 0; x < cols; x++ {
+			worldX := startX + x
+			cell := topoCellClamp(topology, worldX, worldY)
+			if ui.run.Config.Mode == game.ModeAlone && !ui.run.IsRevealed(worldX, worldY) {
+				continue
+			}
+			thisBand := topoContourBand(cell.Elevation)
+			lineX := geo.OriginX + float32((x+1)*topoRenderDetail)*geo.CellSize
+			lineY := geo.OriginY + float32(y*topoRenderDetail)*geo.CellSize
+			if x+1 < cols {
+				rightX := worldX + 1
+				if ui.run.Config.Mode != game.ModeAlone || ui.run.IsRevealed(rightX, worldY) {
+					rightBand := topoContourBand(topoCellClamp(topology, rightX, worldY).Elevation)
+					if rightBand != thisBand {
+						rl.DrawLineEx(
+							rl.NewVector2(lineX, lineY),
+							rl.NewVector2(lineX, lineY+baseStep),
+							1.1,
+							rl.Fade(AppTheme.BorderStrong, 0.5),
+						)
+					}
+				}
+			}
+			if y+1 < rows {
+				downY := worldY + 1
+				if ui.run.Config.Mode != game.ModeAlone || ui.run.IsRevealed(worldX, downY) {
+					downBand := topoContourBand(topoCellClamp(topology, worldX, downY).Elevation)
+					if downBand != thisBand {
+						hy := geo.OriginY + float32((y+1)*topoRenderDetail)*geo.CellSize
+						hx := geo.OriginX + float32(x*topoRenderDetail)*geo.CellSize
+						rl.DrawLineEx(
+							rl.NewVector2(hx, hy),
+							rl.NewVector2(hx+baseStep, hy),
+							1.1,
+							rl.Fade(AppTheme.BorderStrong, 0.5),
+						)
+					}
+				}
+			}
+		}
+	}
+
 	rl.DrawRectangleLinesEx(geo.DrawRect, 1.0, rl.Fade(colorBorder, 0.8))
 
 	px, py := ui.run.CurrentMapPosition()
 	if px >= startX && px < startX+cols && py >= startY && py < startY+rows {
 		localX := px - startX
 		localY := py - startY
-		cx := geo.OriginX + (float32(localX)+0.5)*geo.CellSize
-		cy := geo.OriginY + (float32(localY)+0.5)*geo.CellSize
+		cellStep := geo.CellSize * float32(topoRenderDetail)
+		cx := geo.OriginX + (float32(localX)+0.5)*cellStep
+		cy := geo.OriginY + (float32(localY)+0.5)*cellStep
 		r := float32(3)
-		if geo.CellSize > 6 {
-			r = geo.CellSize * 0.35
+		if cellStep > 6 {
+			r = cellStep * 0.35
 		}
 		if r < 2 {
 			r = 2
@@ -275,6 +392,8 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 		drawText(modeLine, legendX, legendY, typeScale.Small-1, colorDim)
 		legendY += 18
 		drawText(fmt.Sprintf("Grid: %dx%d", topology.Width, topology.Height), legendX, legendY, typeScale.Small-1, colorDim)
+		legendY += 18
+		drawText("Render: 4x detail + contours", legendX, legendY, typeScale.Small-1, colorDim)
 	}
 }
 
