@@ -13,7 +13,7 @@ const (
 	runLayoutPadding = 16
 	runLayoutGap     = 10
 	miniMapViewCells = 31
-	topoRenderDetail = 4
+	topoRenderDetail = 16
 )
 
 type runLayout struct {
@@ -228,17 +228,30 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 		return
 	}
 	topology := ui.run.Topology
-	renderCols := cols * topoRenderDetail
-	renderRows := rows * topoRenderDetail
+	detail := topoRenderDetail
+	maxDetailX := int(math.Floor(float64(area.Width) / float64(cols)))
+	maxDetailY := int(math.Floor(float64(area.Height) / float64(rows)))
+	if maxDetailX < detail {
+		detail = maxDetailX
+	}
+	if maxDetailY < detail {
+		detail = maxDetailY
+	}
+	if detail < 1 {
+		detail = 1
+	}
+
+	renderCols := cols * detail
+	renderRows := rows * detail
 	geo, ok := computeSquareGridGeometry(area, renderCols, renderRows)
 	if !ok {
 		return
 	}
 	for y := 0; y < renderRows; y++ {
-		worldYf := float64(startY) + (float64(y)+0.5)/float64(topoRenderDetail)
+		worldYf := float64(startY) + (float64(y)+0.5)/float64(detail)
 		worldY := clampInt(int(worldYf), 0, topology.Height-1)
 		for x := 0; x < renderCols; x++ {
-			worldXf := float64(startX) + (float64(x)+0.5)/float64(topoRenderDetail)
+			worldXf := float64(startX) + (float64(x)+0.5)/float64(detail)
 			worldX := clampInt(int(worldXf), 0, topology.Width-1)
 			idx := worldY*topology.Width + worldX
 			cell := topology.Cells[idx]
@@ -277,7 +290,7 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 		}
 	}
 
-	baseStep := geo.CellSize * float32(topoRenderDetail)
+	baseStep := geo.CellSize * float32(detail)
 	for y := 0; y < rows; y++ {
 		worldY := startY + y
 		for x := 0; x < cols; x++ {
@@ -287,8 +300,8 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 				continue
 			}
 			thisBand := topoContourBand(cell.Elevation)
-			lineX := geo.OriginX + float32((x+1)*topoRenderDetail)*geo.CellSize
-			lineY := geo.OriginY + float32(y*topoRenderDetail)*geo.CellSize
+			lineX := geo.OriginX + float32((x+1)*detail)*geo.CellSize
+			lineY := geo.OriginY + float32(y*detail)*geo.CellSize
 			if x+1 < cols {
 				rightX := worldX + 1
 				if ui.run.Config.Mode != game.ModeAlone || ui.run.IsRevealed(rightX, worldY) {
@@ -308,8 +321,8 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 				if ui.run.Config.Mode != game.ModeAlone || ui.run.IsRevealed(worldX, downY) {
 					downBand := topoContourBand(topoCellClamp(topology, worldX, downY).Elevation)
 					if downBand != thisBand {
-						hy := geo.OriginY + float32((y+1)*topoRenderDetail)*geo.CellSize
-						hx := geo.OriginX + float32(x*topoRenderDetail)*geo.CellSize
+						hy := geo.OriginY + float32((y+1)*detail)*geo.CellSize
+						hx := geo.OriginX + float32(x*detail)*geo.CellSize
 						rl.DrawLineEx(
 							rl.NewVector2(hx, hy),
 							rl.NewVector2(hx+baseStep, hy),
@@ -328,7 +341,7 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 	if px >= startX && px < startX+cols && py >= startY && py < startY+rows {
 		localX := px - startX
 		localY := py - startY
-		cellStep := geo.CellSize * float32(topoRenderDetail)
+		cellStep := geo.CellSize * float32(detail)
 		cx := geo.OriginX + (float32(localX)+0.5)*cellStep
 		cy := geo.OriginY + (float32(localY)+0.5)*cellStep
 		r := float32(3)
