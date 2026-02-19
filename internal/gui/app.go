@@ -46,6 +46,7 @@ const (
 	screenOptions
 	screenLoad
 	screenRun
+	screenRunMap
 	screenRunPlayers
 	screenRunCommandLibrary
 	screenRunInventory
@@ -305,6 +306,8 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updateLoad()
 	case screenRun:
 		ui.updateRun(delta)
+	case screenRunMap:
+		ui.updateRunMap()
 	case screenRunPlayers:
 		ui.updateRunPlayers()
 	case screenRunCommandLibrary:
@@ -338,6 +341,8 @@ func (ui *gameUI) draw() {
 		ui.drawLoad()
 	case screenRun:
 		ui.drawRun()
+	case screenRunMap:
+		ui.drawRunMap()
 	case screenRunPlayers:
 		ui.drawRunPlayers()
 	case screenRunCommandLibrary:
@@ -1239,6 +1244,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.enterMenu()
 		return
 	}
+	ui.run.EnsureTopology()
 	shiftDown := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	if shiftDown && rl.IsKeyPressed(rl.KeyP) {
 		ui.rplay.Cursor = ui.runFocus
@@ -1252,6 +1258,10 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 	if shiftDown && rl.IsKeyPressed(rl.KeyI) {
 		ui.rinv.PlayerIndex = ui.runFocus
 		ui.screen = screenRunInventory
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyM) {
+		ui.screen = screenRunMap
 		return
 	}
 	if ui.handleClarifyHotkeys() {
@@ -1314,135 +1324,72 @@ func (ui *gameUI) drawRun() {
 	if ui.run == nil {
 		return
 	}
-	outer := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
-	topH := float32(194)
-	bottomH := float32(86)
-	if outer.Height < 470 {
-		topH = 164
-		bottomH = 76
-	}
-	middleTop := outer.Y + topH
-	bottomTop := outer.Y + outer.Height - bottomH
-	if bottomTop-middleTop < 180 {
-		bottomTop = middleTop + 180
-	}
-	splitX := outer.X + outer.Width*0.66
-	top := rl.NewRectangle(outer.X, outer.Y, outer.Width, topH)
-	left := rl.NewRectangle(outer.X, middleTop, splitX-outer.X, bottomTop-middleTop)
-	right := rl.NewRectangle(splitX, middleTop, outer.X+outer.Width-splitX, bottomTop-middleTop)
-	bottom := rl.NewRectangle(outer.X, bottomTop, outer.Width, outer.Y+outer.Height-bottomTop)
-
-	rl.DrawRectangleRec(outer, rl.Fade(colorPanel, 0.92))
-	rl.DrawRectangleRec(top, rl.Fade(colorPanel, 0.98))
-	rl.DrawRectangleRec(left, rl.Fade(colorPanel, 0.92))
-	rl.DrawRectangleRec(right, rl.Fade(colorPanel, 0.9))
-	rl.DrawRectangleRec(bottom, rl.Fade(colorPanel, 0.98))
-
-	drawUILine(outer.X, outer.Y, outer.X+outer.Width, outer.Y, 2, colorBorder)
-	drawUILine(outer.X, outer.Y+outer.Height, outer.X+outer.Width, outer.Y+outer.Height, 2, colorBorder)
-	drawUILine(outer.X, outer.Y, outer.X, outer.Y+outer.Height, 2, colorBorder)
-	drawUILine(outer.X+outer.Width, outer.Y, outer.X+outer.Width, outer.Y+outer.Height, 2, colorBorder)
-	drawUILine(outer.X, middleTop, outer.X+outer.Width, middleTop, 2, rl.Fade(colorBorder, 0.85))
-	drawUILine(outer.X, bottomTop, outer.X+outer.Width, bottomTop, 2, rl.Fade(colorBorder, 0.85))
-	drawUILine(splitX, middleTop, splitX, bottomTop, 2, rl.Fade(colorBorder, 0.8))
-
-	rl.DrawText("RUN STATUS", int32(top.X)+12, int32(top.Y)+8, 20, colorAccent)
-	rl.DrawText("MESSAGE HISTORY", int32(left.X)+12, int32(left.Y)+8, 18, colorAccent)
-	rl.DrawText("PLAYERS", int32(right.X)+12, int32(right.Y)+8, 18, colorAccent)
-	rl.DrawText("COMMAND INPUT", int32(bottom.X)+12, int32(bottom.Y)+8, 18, colorAccent)
+	ui.run.EnsureTopology()
+	layout := runScreenLayout(ui.width, ui.height)
+	drawPanel(layout.TopRect, "Run Status")
+	drawPanel(layout.LogRect, "Message Log")
+	drawPanel(layout.MiniMapRect, "Minimap")
+	drawPanel(layout.InputRect, "Command Input")
 
 	season := "unknown"
 	if s, ok := ui.run.CurrentSeason(); ok {
 		season = string(s)
 	}
 	weather := game.WeatherLabel(ui.run.Weather.Type)
-	header := fmt.Sprintf("SURVIVE IT!   Mode: %s   Scenario: %s   Day: %d   Season: %s   Weather: %s   Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
-	rl.DrawText(header, int32(top.X)+14, int32(top.Y)+38, 21, colorAccent)
+	header := fmt.Sprintf("Mode: %s | Scenario: %s | Day: %d | Season: %s | Weather: %s | Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
+	rl.DrawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, 20, colorAccent)
 	nextIn := ui.autoDayDuration() - ui.runPlayedFor
 	if nextIn < 0 {
 		nextIn = 0
 	}
-	rl.DrawText(fmt.Sprintf("Game Time: Day %d  Clock %s  Auto-Next: %s", ui.run.Day, formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn)), int32(top.X)+14, int32(top.Y)+66, 19, colorText)
+	posX, posY := ui.run.CurrentMapPosition()
+	rl.DrawText(fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock()), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+66, 18, colorText)
 
 	focus := game.PlayerState{}
 	if len(ui.run.Players) > 0 {
 		ui.runFocus = clampInt(ui.runFocus, 0, len(ui.run.Players)-1)
 		focus = ui.run.Players[ui.runFocus]
-		rl.DrawText(fmt.Sprintf("Focus Player: %s (%d/%d)   TAB or [ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(top.X)+14, int32(top.Y)+90, 18, colorDim)
+		rl.DrawText(fmt.Sprintf("Focus Player: %s (%d/%d) | TAB / [ ] switch", focus.Name, ui.runFocus+1, len(ui.run.Players)), int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+90, 18, colorDim)
 	}
 
 	barInset := float32(14)
 	barGap := float32(12)
-	row1Y := top.Y + 124
+	row1Y := layout.TopRect.Y + 124
 	row2Y := row1Y + 34
-	row1W := (top.Width - barInset*2 - barGap*3) / 4
-	row2W := (top.Width - barInset*2 - barGap*2) / 3
+	row1W := (layout.TopRect.Width - barInset*2 - barGap*3) / 4
+	row2W := (layout.TopRect.Width - barInset*2 - barGap*2) / 3
 	condition := runConditionScore(focus)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset, row1Y, row1W, 18), "Condition", condition, false)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*1, row1Y, row1W, 18), "Energy", focus.Energy, false)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*2, row1Y, row1W, 18), "Hydration", focus.Hydration, false)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row1W+barGap)*3, row1Y, row1W, 18), "Morale", focus.Morale, false)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset, row2Y, row2W, 18), "Hunger", focus.Hunger, true)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row2W+barGap)*1, row2Y, row2W, 18), "Thirst", focus.Thirst, true)
-	drawRunStatBar(rl.NewRectangle(top.X+barInset+(row2W+barGap)*2, row2Y, row2W, 18), "Fatigue", focus.Fatigue, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row1Y, row1W, 18), "Condition", condition, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*1, row1Y, row1W, 18), "Energy", focus.Energy, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*2, row1Y, row1W, 18), "Hydration", focus.Hydration, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row1W+barGap)*3, row1Y, row1W, 18), "Morale", focus.Morale, false)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset, row2Y, row2W, 18), "Hunger", focus.Hunger, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*1, row2Y, row2W, 18), "Thirst", focus.Thirst, true)
+	drawRunStatBar(rl.NewRectangle(layout.TopRect.X+barInset+(row2W+barGap)*2, row2Y, row2W, 18), "Fatigue", focus.Fatigue, true)
 
-	lineY := int32(left.Y) + 38
-	maxMessageLines := int((left.Height - 50) / 23)
-	if maxMessageLines < 4 {
-		maxMessageLines = 4
-	}
-	start := len(ui.runMessages) - maxMessageLines
-	if start < 0 {
-		start = 0
-	}
-	for i := start; i < len(ui.runMessages); i++ {
-		if lineY > int32(left.Y+left.Height)-26 {
-			break
-		}
-		rl.DrawText(ui.runMessages[i], int32(left.X)+12, lineY, 18, colorText)
-		lineY += 23
-	}
+	drawRunMessageLog(layout.LogRect, ui.runMessages)
+	ui.drawMiniMap(layout.MiniMapRect, false)
 
-	py := int32(right.Y) + 36
-	for i := range ui.run.Players {
-		p := ui.run.Players[i]
-		if i == ui.runFocus {
-			rl.DrawRectangle(int32(right.X)+6, py-4, int32(right.Width)-12, 54, rl.Fade(colorAccent, 0.16))
-		}
-		name := fmt.Sprintf("P%d %s", p.ID, p.Name)
-		rl.DrawText(name, int32(right.X)+12, py, 19, colorAccent)
-		py += 22
-		overview := fmt.Sprintf("Cond:%d  E:%d  H2O:%d  M:%d", runConditionScore(p), p.Energy, p.Hydration, p.Morale)
-		rl.DrawText(overview, int32(right.X)+16, py, 17, colorText)
-		py += 20
-		effects := fmt.Sprintf("Hu:%d  Th:%d  Fa:%d  Ailments:%d", p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments))
-		rl.DrawText(effects, int32(right.X)+16, py, 17, colorDim)
-		py += 22
-		if py > int32(right.Y+right.Height)-44 {
-			break
-		}
-	}
-
-	cmdHint := "Commands: next | save | load | menu | hunt ... | trap ... | gut ... | cook ... | eat ... | go ...   Shift+P players  Shift+H help  Shift+I inventory  Esc menu"
-	textY := int32(bottom.Y) + 18
+	cmdHint := "Commands: next | save | load | menu | hunt/fish | forage | trap | gut | cook | preserve | eat | go   M map  Shift+P players  Shift+H help  Shift+I inventory  Esc menu"
+	textY := int32(layout.InputRect.Y) + 18
 	if ui.pendingClarify != nil {
 		clarify := ui.formatClarifyLine()
-		lines := wrapText(clarify, 16, int32(bottom.Width)-28)
+		lines := wrapText(clarify, 16, int32(layout.InputRect.Width)-28)
 		for _, line := range lines {
-			rl.DrawText(line, int32(bottom.X)+14, textY, 16, colorWarn)
+			rl.DrawText(line, int32(layout.InputRect.X)+14, textY, 16, colorWarn)
 			textY += 18
 		}
 	}
-	rl.DrawText(cmdHint, int32(bottom.X)+14, textY, 17, colorDim)
+	rl.DrawText(cmdHint, int32(layout.InputRect.X)+14, textY, 17, colorDim)
 	inputY := textY + 22
 	in := strings.TrimSpace(ui.runInput)
 	if in == "" {
-		rl.DrawText("> ", int32(bottom.X)+14, inputY, 24, colorText)
+		rl.DrawText("> ", int32(layout.InputRect.X)+14, inputY, 24, colorText)
 	} else {
-		rl.DrawText("> "+ui.runInput+"_", int32(bottom.X)+14, inputY, 24, colorAccent)
+		rl.DrawText("> "+ui.runInput+"_", int32(layout.InputRect.X)+14, inputY, 24, colorAccent)
 	}
 	if strings.TrimSpace(ui.status) != "" {
-		statusX := int32(bottom.X + bottom.Width*0.45)
+		statusX := int32(layout.InputRect.X + layout.InputRect.Width*0.5)
 		rl.DrawText(ui.status, statusX, inputY, 20, colorWarn)
 	}
 }
@@ -1589,6 +1536,7 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"",
 		"Hunting:",
 		"hunt land|fish|air [p#]",
+		"fish [p#]",
 		"forage [roots|berries|fruits|vegetables|any] [p#] [grams]",
 		"",
 		"Camp Systems:",

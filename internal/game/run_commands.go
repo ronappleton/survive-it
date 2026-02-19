@@ -44,10 +44,12 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
+			Message: "Commands: hunt land|fish|air [p#], fish [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], next, save, load, menu.",
 		}
 	case "hunt", "catch":
 		return s.executeHuntCommand(fields[1:])
+	case "fish":
+		return s.executeFishCommand(fields[1:])
 	case "forage":
 		return s.executeForageCommand(fields[1:])
 	case "trees":
@@ -240,15 +242,46 @@ func (s *RunState) executeHuntCommand(fields []string) RunCommandResult {
 	if !foundDomain {
 		return RunCommandResult{Handled: true, Message: "Usage: hunt <land|fish|air> [p#]"}
 	}
-	result, err := s.HuntAndCollectCarcass(playerID, domain)
+	actionType := "hunt"
+	if domain == AnimalDomainWater {
+		actionType = "fish"
+	}
+	result, err := s.HuntAndCollectCarcass(playerID, domain, actionType)
 	if err != nil {
 		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Hunt failed: %v", err)}
+	}
+	encounterText := ""
+	if len(result.EncounterLogs) > 0 {
+		encounterText = " | " + strings.Join(result.EncounterLogs, " ")
 	}
 	return RunCommandResult{
 		Handled:       true,
 		HoursAdvanced: result.HoursSpent,
 		Message: fmt.Sprintf("P%d hunted %s (%.1fkg) -> %.1fkg %s stored in %s. Process with: gut %s [kg] p%d",
-			playerID, result.AnimalName, float64(result.WeightGrams)/1000.0, result.CarcassKg, result.CarcassID, result.StoredAt, result.CarcassID, playerID),
+			playerID, result.AnimalName, float64(result.WeightGrams)/1000.0, result.CarcassKg, result.CarcassID, result.StoredAt, result.CarcassID, playerID) + encounterText,
+	}
+}
+
+func (s *RunState) executeFishCommand(fields []string) RunCommandResult {
+	playerID := 1
+	for _, field := range fields {
+		if parsed := parsePlayerToken(field); parsed > 0 {
+			playerID = parsed
+		}
+	}
+	result, err := s.HuntAndCollectCarcass(playerID, AnimalDomainWater, "fish")
+	if err != nil {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Fish failed: %v", err)}
+	}
+	encounterText := ""
+	if len(result.EncounterLogs) > 0 {
+		encounterText = " | " + strings.Join(result.EncounterLogs, " ")
+	}
+	return RunCommandResult{
+		Handled:       true,
+		HoursAdvanced: result.HoursSpent,
+		Message: fmt.Sprintf("P%d fished %s (%.1fkg) -> %.1fkg %s stored in %s. Process with: gut %s [kg] p%d",
+			playerID, result.AnimalName, float64(result.WeightGrams)/1000.0, result.CarcassKg, result.CarcassID, result.StoredAt, result.CarcassID, playerID) + encounterText,
 	}
 }
 
@@ -273,6 +306,18 @@ func (s *RunState) executeForageCommand(fields []string) RunCommandResult {
 	if err != nil {
 		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Forage failed: %v", err)}
 	}
+	x, y := s.CurrentMapPosition()
+	s.applyCellStateAction(x, y, "forage")
+	encounterMsg := ""
+	if event, ok := s.RollWildlifeEncounter(playerID, x, y, "forage", 0); ok {
+		if player, ok := s.playerByID(playerID); ok {
+			player.Energy = clamp(player.Energy+event.EnergyDelta, 0, 100)
+			player.Hydration = clamp(player.Hydration+event.HydrationDelta, 0, 100)
+			player.Morale = clamp(player.Morale+event.MoraleDelta, 0, 100)
+			refreshEffectBars(player)
+		}
+		encounterMsg = " | " + event.Message
+	}
 
 	return RunCommandResult{
 		Handled: true,
@@ -284,7 +329,7 @@ func (s *RunState) executeForageCommand(fields []string) RunCommandResult {
 			result.Nutrition.ProteinG,
 			result.Nutrition.FatG,
 			result.Nutrition.SugarG,
-		),
+		) + encounterMsg,
 	}
 }
 
@@ -631,11 +676,15 @@ func (s *RunState) executeGoCommand(fields []string) RunCommandResult {
 	if result.WatercraftUsed != "" {
 		craftText = "using " + result.WatercraftUsed
 	}
+	encounterText := ""
+	if len(result.EncounterLogs) > 0 {
+		encounterText = " | Encounters: " + strings.Join(result.EncounterLogs, " ")
+	}
 	return RunCommandResult{
 		Handled:       true,
 		HoursAdvanced: result.HoursSpent,
 		Message: fmt.Sprintf("P%d traveled %.1fkm %s %s at %.1fkm/h (%.1fh). Cost: -%dE -%dH2O %+dM. Total travel %.1fkm.",
-			playerID, result.DistanceKm, result.Direction, craftText, result.TravelSpeedKmph, result.HoursSpent, result.EnergyCost, result.HydrationCost, result.MoraleDelta, s.Travel.TotalKm),
+			playerID, result.DistanceKm, result.Direction, craftText, result.TravelSpeedKmph, result.HoursSpent, result.EnergyCost, result.HydrationCost, result.MoraleDelta, s.Travel.TotalKm) + fmt.Sprintf(" Position: (%d,%d)", s.Travel.PosX, s.Travel.PosY) + encounterText,
 	}
 }
 

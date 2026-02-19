@@ -26,6 +26,9 @@ type RunState struct {
 	PlacedTraps         []PlacedTrap    `json:"placed_traps,omitempty"`
 	FireAttemptCount    int             `json:"fire_attempt_count"`
 	ProcessAttemptCount int             `json:"process_attempt_count"`
+	Topology            WorldTopology   `json:"topology"`
+	FogMask             []bool          `json:"fog_mask,omitempty"`
+	CellStates          []CellState     `json:"cell_states,omitempty"`
 }
 
 func NewRunState(config RunConfig) (RunState, error) {
@@ -62,6 +65,7 @@ func NewRunState(config RunConfig) (RunState, error) {
 	}
 	state.EnsureWeather()
 	state.EnsurePlayerRuntimeStats()
+	state.initTopology()
 
 	return state, nil
 }

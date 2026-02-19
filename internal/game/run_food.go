@@ -3,18 +3,20 @@ package game
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 type HuntResult struct {
-	PlayerID    int
-	Domain      AnimalDomain
-	AnimalID    string
-	AnimalName  string
-	WeightGrams int
-	CarcassID   string
-	CarcassKg   float64
-	StoredAt    string
-	HoursSpent  float64
+	PlayerID      int
+	Domain        AnimalDomain
+	AnimalID      string
+	AnimalName    string
+	WeightGrams   int
+	CarcassID     string
+	CarcassKg     float64
+	StoredAt      string
+	HoursSpent    float64
+	EncounterLogs []string
 }
 
 func carcassIDForDomain(domain AnimalDomain) string {
@@ -68,11 +70,16 @@ func (s *RunState) catchWithSkillBonus(playerID int, domain AnimalDomain) (Catch
 	return catch, player, nil
 }
 
-func (s *RunState) HuntAndCollectCarcass(playerID int, domain AnimalDomain) (HuntResult, error) {
+func (s *RunState) HuntAndCollectCarcass(playerID int, domain AnimalDomain, action string) (HuntResult, error) {
 	catch, player, err := s.catchWithSkillBonus(playerID, domain)
 	if err != nil {
 		return HuntResult{}, err
 	}
+	if strings.TrimSpace(action) == "" {
+		action = "hunt"
+	}
+	x, y := s.CurrentMapPosition()
+	s.applyCellStateAction(x, y, action)
 
 	carcassID := carcassIDForDomain(domain)
 	carcass, ok := carcassCatalog[carcassID]
@@ -116,18 +123,28 @@ func (s *RunState) HuntAndCollectCarcass(playerID int, domain AnimalDomain) (Hun
 	player.Energy = clamp(player.Energy-int(math.Ceil(hours*2.0)), 0, 100)
 	player.Hydration = clamp(player.Hydration-int(math.Ceil(hours*1.4)), 0, 100)
 	player.Morale = clamp(player.Morale+1, 0, 100)
+
+	encounterLogs := make([]string, 0, 2)
+	event, ok := s.RollWildlifeEncounter(playerID, x, y, action, 0)
+	if ok {
+		encounterLogs = append(encounterLogs, event.Message)
+		player.Energy = clamp(player.Energy+event.EnergyDelta, 0, 100)
+		player.Hydration = clamp(player.Hydration+event.HydrationDelta, 0, 100)
+		player.Morale = clamp(player.Morale+event.MoraleDelta, 0, 100)
+	}
 	refreshEffectBars(player)
 
 	return HuntResult{
-		PlayerID:    playerID,
-		Domain:      domain,
-		AnimalID:    catch.Animal.ID,
-		AnimalName:  catch.Animal.Name,
-		WeightGrams: catch.WeightGrams,
-		CarcassID:   carcassID,
-		CarcassKg:   kg,
-		StoredAt:    storedAt,
-		HoursSpent:  hours,
+		PlayerID:      playerID,
+		Domain:        domain,
+		AnimalID:      catch.Animal.ID,
+		AnimalName:    catch.Animal.Name,
+		WeightGrams:   catch.WeightGrams,
+		CarcassID:     carcassID,
+		CarcassKg:     kg,
+		StoredAt:      storedAt,
+		HoursSpent:    hours,
+		EncounterLogs: encounterLogs,
 	}, nil
 }
 

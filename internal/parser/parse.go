@@ -406,6 +406,9 @@ func inferFreeTextIntent(ctx ParseContext, raw string, normalised string) *Inten
 	if containsWord(n, "eat") {
 		return makeIntent(Command, "eat", nil, 0.78)
 	}
+	if containsWord(n, "fish") || containsAnyPhrase(n, "go fishing", "catch fish") {
+		return makeIntent(Command, "fish", nil, 0.8)
+	}
 	if containsWord(n, "drink") {
 		return makeIntent(Command, "drink", nil, 0.78)
 	}

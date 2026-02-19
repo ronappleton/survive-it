@@ -203,6 +203,7 @@ func DefaultRegistry() *Registry {
 		{Canonical: "load", MinArgs: 0, MaxArgs: 0, HandlerKey: "load"},
 		{Canonical: "menu", Aliases: []string{"back"}, MinArgs: 0, MaxArgs: 0, HandlerKey: "menu"},
 		{Canonical: "hunt", Aliases: []string{"catch"}, MinArgs: 1, MaxArgs: 6, HandlerKey: "hunt"},
+		{Canonical: "fish", Aliases: []string{"angling", "cast line"}, MinArgs: 0, MaxArgs: 3, HandlerKey: "fish"},
 		{Canonical: "forage", MinArgs: 0, MaxArgs: 4, HandlerKey: "forage"},
 		{Canonical: "wood", MinArgs: 1, MaxArgs: 5, HandlerKey: "wood"},
 		{Canonical: "resources", MinArgs: 0, MaxArgs: 0, HandlerKey: "resources"},

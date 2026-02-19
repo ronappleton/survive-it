@@ -12,6 +12,8 @@ type TravelState struct {
 	LastStepKm    float64 `json:"last_step_km"`
 	LastStepHours float64 `json:"last_step_hours"`
 	LastDay       int     `json:"last_day"`
+	PosX          int     `json:"pos_x"`
+	PosY          int     `json:"pos_y"`
 }
 
 type TravelResult struct {
@@ -24,6 +26,7 @@ type TravelResult struct {
 	EnergyCost      int
 	HydrationCost   int
 	MoraleDelta     int
+	EncounterLogs   []string
 }
 
 func normalizeDirection(raw string) string {
@@ -38,6 +41,21 @@ func normalizeDirection(raw string) string {
 		return "west"
 	default:
 		return ""
+	}
+}
+
+func directionDelta(direction string) (int, int) {
+	switch normalizeDirection(direction) {
+	case "north":
+		return 0, -1
+	case "south":
+		return 0, 1
+	case "east":
+		return 1, 0
+	case "west":
+		return -1, 0
+	default:
+		return 0, 0
 	}
 }
 
@@ -90,6 +108,7 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 	if s == nil {
 		return TravelResult{}, fmt.Errorf("run state is nil")
 	}
+	s.EnsureTopology()
 	player, ok := s.playerByID(playerID)
 	if !ok {
 		return TravelResult{}, fmt.Errorf("player %d not found", playerID)
@@ -122,8 +141,74 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 		speed *= 1.04
 	}
 
-	hours := clampFloat(requestedKm/speed, 0.1, 14)
-	distance := math.Round(requestedKm*10) / 10
+	dx, dy := directionDelta(direction)
+	if dx == 0 && dy == 0 {
+		return TravelResult{}, fmt.Errorf("direction must be north/south/east/west")
+	}
+	steps := max(1, int(math.Round(requestedKm/0.1)))
+	posX, posY := s.CurrentMapPosition()
+	movedSteps := 0
+	terrainEffort := 0.0
+	encounterLogs := make([]string, 0, 3)
+	for step := 0; step < steps; step++ {
+		nextX := posX + dx
+		nextY := posY + dy
+		if s.Topology.Width > 0 {
+			if nextX < 0 {
+				nextX = s.Topology.Width - 1
+			} else if nextX >= s.Topology.Width {
+				nextX = 0
+			}
+		}
+		if s.Topology.Height > 0 {
+			if nextY < 0 {
+				nextY = s.Topology.Height - 1
+			} else if nextY >= s.Topology.Height {
+				nextY = 0
+			}
+		}
+		fromCell, okFrom := s.TopologyCellAt(posX, posY)
+		toCell, okTo := s.TopologyCellAt(nextX, nextY)
+		if !okFrom || !okTo || (nextX == posX && nextY == posY) {
+			break
+		}
+		slope := int(toCell.Elevation) - int(fromCell.Elevation)
+		terrainMul := 1.0 + float64(toCell.Roughness)*0.09
+		if slope > 0 {
+			terrainMul += float64(slope) * 0.03
+		} else if slope < -6 {
+			terrainMul += 0.04
+		}
+		if toCell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake) != 0 {
+			if watercraftID == "" {
+				terrainMul += 0.8
+			} else {
+				terrainMul += 0.18
+			}
+		}
+		terrainMul = clampFloat(terrainMul, 0.65, 3.2)
+		terrainEffort += terrainMul
+		posX, posY = nextX, nextY
+		movedSteps++
+		s.applyCellStateAction(posX, posY, "move")
+		s.RevealFog(posX, posY, 1)
+		if len(encounterLogs) < 2 {
+			event, ok := s.RollWildlifeEncounter(playerID, posX, posY, "move", step)
+			if ok {
+				encounterLogs = append(encounterLogs, event.Message)
+				player.Energy = clamp(player.Energy+event.EnergyDelta, 0, 100)
+				player.Hydration = clamp(player.Hydration+event.HydrationDelta, 0, 100)
+				player.Morale = clamp(player.Morale+event.MoraleDelta, 0, 100)
+			}
+		}
+	}
+	if movedSteps == 0 {
+		return TravelResult{}, fmt.Errorf("cannot move further in that direction")
+	}
+	distance := math.Round(float64(movedSteps)*0.1*10) / 10
+	avgEffort := terrainEffort / float64(movedSteps)
+	effectiveKm := distance * avgEffort
+	hours := clampFloat(effectiveKm/speed, 0.1, 16)
 	energyCost := clamp(int(math.Ceil(hours*4.0)), 1, 24)
 	hydrationCost := clamp(int(math.Ceil(hours*3.1)), 1, 24)
 	moraleDelta := 0
@@ -139,6 +224,8 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 	applySkillEffort(&player.Gathering, int(math.Round(hours*12)), true)
 	refreshEffectBars(player)
 
+	s.Travel.PosX = posX
+	s.Travel.PosY = posY
 	s.Travel.Direction = direction
 	s.Travel.TotalKm += distance
 	s.Travel.LastStepKm = distance
@@ -156,6 +243,7 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 		EnergyCost:      energyCost,
 		HydrationCost:   hydrationCost,
 		MoraleDelta:     moraleDelta,
+		EncounterLogs:   encounterLogs,
 	}, nil
 }
 

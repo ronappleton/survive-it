@@ -31,6 +31,7 @@ func (s *RunState) AdvanceDay() {
 	}
 	s.progressCampState()
 	s.advanceFoodDegradation()
+	s.decayCellStates()
 }
 
 func applyDailyAilmentPenalties(playerState *PlayerState) {

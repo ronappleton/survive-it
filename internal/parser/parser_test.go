@@ -85,6 +85,14 @@ func TestPreserveSmokeAlias(t *testing.T) {
 	}
 }
 
+func TestFishCommandParses(t *testing.T) {
+	p := New()
+	intent := p.Parse(ParseContext{}, "fish")
+	if intent.Verb != "fish" {
+		t.Fatalf("expected fish verb, got %q", intent.Verb)
+	}
+}
+
 func TestPronounResolutionUseIt(t *testing.T) {
 	p := New()
 	ctx := ParseContext{
