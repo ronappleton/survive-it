@@ -81,3 +81,19 @@ Outputs:
 - `dist/survive-it_<version>_darwin_amd64.app.zip`
 - `dist/survive-it_<version>_darwin_arm64.app.zip`
 - `dist/macos-app-artifacts.txt` (artifact list for CI upload)
+
+### Signing and Notarization (recommended)
+
+Unsigned/ad-hoc-signed apps downloaded from the internet may be blocked by Gatekeeper and shown as "damaged".
+
+The packaging script supports Developer ID signing + notarization via env vars:
+
+- `MACOS_SIGN_IDENTITY` (Developer ID Application identity name)
+- `MACOS_NOTARY_APPLE_ID`
+- `MACOS_NOTARY_TEAM_ID`
+- `MACOS_NOTARY_APP_PASSWORD`
+
+CI workflows also support optional certificate import with:
+
+- `MACOS_CERT_P12_BASE64`
+- `MACOS_CERT_PASSWORD`
