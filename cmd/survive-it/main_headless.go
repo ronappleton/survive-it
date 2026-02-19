@@ -1,5 +1,5 @@
-//go:build cgo
-// +build cgo
+//go:build !cgo
+// +build !cgo
 
 package main
 
@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/appengine-ltd/survive-it/internal/gui"
+	"github.com/appengine-ltd/survive-it/internal/ui"
 )
 
 // version, commit, date are injected at build time (see .goreleaser.yaml).
@@ -33,7 +33,7 @@ func main() {
 		return
 	}
 
-	app := gui.NewApp(gui.AppConfig{
+	app := ui.NewApp(ui.AppConfig{
 		Version:   version,
 		Commit:    commit,
 		BuildDate: date,
