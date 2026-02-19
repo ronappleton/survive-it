@@ -15,7 +15,14 @@ func ShiftPressed() bool {
 }
 
 func ShiftKeyPressed(key int32) bool {
-	return ShiftPressed() && rl.IsKeyPressed(key)
+	if ShiftPressed() && rl.IsKeyPressed(key) {
+		return true
+	}
+	// Accept either key order: Shift then key, or key then Shift.
+	if rl.IsKeyDown(key) && (rl.IsKeyPressed(rl.KeyLeftShift) || rl.IsKeyPressed(rl.KeyRightShift)) {
+		return true
+	}
+	return false
 }
 
 func HotkeysEnabled(uiState *gameUI) bool {
