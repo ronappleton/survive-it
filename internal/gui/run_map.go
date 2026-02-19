@@ -12,6 +12,7 @@ const (
 	runLogSplitRatio = 0.66
 	runLayoutPadding = 16
 	runLayoutGap     = 10
+	miniMapViewCells = 31
 )
 
 type runLayout struct {
@@ -115,29 +116,65 @@ func shadeByElevation(clr rl.Color, elevation int8) rl.Color {
 	)
 }
 
-func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
-	if ui.run == nil {
-		return
-	}
-	ui.run.EnsureTopology()
-	topology := ui.run.Topology
-	if topology.Width <= 0 || topology.Height <= 0 || len(topology.Cells) == 0 {
-		drawWrappedText("No topology data.", rect, 44, 18, colorWarn)
-		return
-	}
-	area := rl.NewRectangle(rect.X+10, rect.Y+36, rect.Width-20, rect.Height-48)
-	if withLegend {
-		area = rl.NewRectangle(rect.X+10, rect.Y+36, rect.Width-182, rect.Height-48)
-	}
-	if area.Width < 20 || area.Height < 20 {
-		return
-	}
+type squareGridGeometry struct {
+	OriginX  float32
+	OriginY  float32
+	CellSize float32
+	Cols     int
+	Rows     int
+	DrawRect rl.Rectangle
+}
 
-	cellW := area.Width / float32(topology.Width)
-	cellH := area.Height / float32(topology.Height)
-	for y := 0; y < topology.Height; y++ {
-		for x := 0; x < topology.Width; x++ {
-			idx := y*topology.Width + x
+func computeSquareGridGeometry(area rl.Rectangle, cols, rows int) (squareGridGeometry, bool) {
+	if cols <= 0 || rows <= 0 || area.Width <= 1 || area.Height <= 1 {
+		return squareGridGeometry{}, false
+	}
+	cellSize := float32(math.Min(float64(area.Width/float32(cols)), float64(area.Height/float32(rows))))
+	if cellSize < 1 {
+		cellSize = 1
+	}
+	drawWidth := cellSize * float32(cols)
+	drawHeight := cellSize * float32(rows)
+	originX := area.X + (area.Width-drawWidth)/2
+	originY := area.Y + (area.Height-drawHeight)/2
+	return squareGridGeometry{
+		OriginX:  originX,
+		OriginY:  originY,
+		CellSize: cellSize,
+		Cols:     cols,
+		Rows:     rows,
+		DrawRect: rl.NewRectangle(originX, originY, drawWidth, drawHeight),
+	}, true
+}
+
+func computeMiniMapWindow(topologyW, topologyH, playerX, playerY, desired int) (startX, startY, cols, rows int) {
+	if topologyW <= 0 || topologyH <= 0 {
+		return 0, 0, 0, 0
+	}
+	if desired < 5 {
+		desired = 5
+	}
+	cols = min(topologyW, desired)
+	rows = min(topologyH, desired)
+	startX = clampInt(playerX-cols/2, 0, max(0, topologyW-cols))
+	startY = clampInt(playerY-rows/2, 0, max(0, topologyH-rows))
+	return startX, startY, cols, rows
+}
+
+func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, rows int) {
+	if ui.run == nil || cols <= 0 || rows <= 0 {
+		return
+	}
+	topology := ui.run.Topology
+	geo, ok := computeSquareGridGeometry(area, cols, rows)
+	if !ok {
+		return
+	}
+	for y := 0; y < rows; y++ {
+		worldY := startY + y
+		for x := 0; x < cols; x++ {
+			worldX := startX + x
+			idx := worldY*topology.Width + worldX
 			cell := topology.Cells[idx]
 			clr := shadeByElevation(topoBiomeColor(cell.Biome), cell.Elevation)
 			if cell.Flags&game.TopoFlagWater != 0 {
@@ -157,33 +194,55 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 					255,
 				)
 			}
-			if ui.run.Config.Mode == game.ModeAlone && !ui.run.IsRevealed(x, y) {
+			if ui.run.Config.Mode == game.ModeAlone && !ui.run.IsRevealed(worldX, worldY) {
 				clr = rl.NewColor(20, 24, 30, 255)
 			}
-			x0 := int32(area.X + float32(x)*cellW)
-			y0 := int32(area.Y + float32(y)*cellH)
-			x1 := int32(area.X + float32(x+1)*cellW)
-			y1 := int32(area.Y + float32(y+1)*cellH)
+			x0 := int32(geo.OriginX + float32(x)*geo.CellSize)
+			y0 := int32(geo.OriginY + float32(y)*geo.CellSize)
+			x1 := int32(geo.OriginX + float32(x+1)*geo.CellSize)
+			y1 := int32(geo.OriginY + float32(y+1)*geo.CellSize)
 			w := max(1, int(x1-x0))
 			h := max(1, int(y1-y0))
 			rl.DrawRectangle(x0, y0, int32(w), int32(h), clr)
 		}
 	}
-	rl.DrawRectangleLinesEx(area, 1.0, rl.Fade(colorBorder, 0.8))
+	rl.DrawRectangleLinesEx(geo.DrawRect, 1.0, rl.Fade(colorBorder, 0.8))
 
 	px, py := ui.run.CurrentMapPosition()
-	if px >= 0 && py >= 0 && px < topology.Width && py < topology.Height {
-		cx := area.X + (float32(px)+0.5)*cellW
-		cy := area.Y + (float32(py)+0.5)*cellH
+	if px >= startX && px < startX+cols && py >= startY && py < startY+rows {
+		localX := px - startX
+		localY := py - startY
+		cx := geo.OriginX + (float32(localX)+0.5)*geo.CellSize
+		cy := geo.OriginY + (float32(localY)+0.5)*geo.CellSize
 		r := float32(3)
-		if cellW > 6 && cellH > 6 {
-			r = float32(math.Min(float64(cellW), float64(cellH))) * 0.35
+		if geo.CellSize > 6 {
+			r = geo.CellSize * 0.35
 		}
 		if r < 2 {
 			r = 2
 		}
 		rl.DrawCircle(int32(cx), int32(cy), r, rl.NewColor(255, 88, 88, 255))
 	}
+}
+
+func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
+	if ui.run == nil {
+		return
+	}
+	ui.run.EnsureTopology()
+	topology := ui.run.Topology
+	if topology.Width <= 0 || topology.Height <= 0 || len(topology.Cells) == 0 {
+		drawWrappedText("No topology data.", rect, 44, 18, colorWarn)
+		return
+	}
+	area := rl.NewRectangle(rect.X+10, rect.Y+36, rect.Width-20, rect.Height-48)
+	if withLegend {
+		area = rl.NewRectangle(rect.X+10, rect.Y+36, rect.Width-182, rect.Height-48)
+	}
+	if area.Width < 20 || area.Height < 20 {
+		return
+	}
+	ui.drawTopologyRegion(area, 0, 0, topology.Width, topology.Height)
 
 	if withLegend {
 		legendX := int32(rect.X + rect.Width - 162)
@@ -220,13 +279,28 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 }
 
 func (ui *gameUI) drawMiniMap(rect rl.Rectangle, withLegend bool) {
-	ui.drawTopologyMap(rect, withLegend)
 	if ui.run == nil {
 		return
 	}
+	ui.run.EnsureTopology()
+	topology := ui.run.Topology
+	if topology.Width <= 0 || topology.Height <= 0 || len(topology.Cells) == 0 {
+		return
+	}
+	// Reserve a bit more room for the footer so the cell text remains readable.
+	area := rl.NewRectangle(rect.X+10, rect.Y+36, rect.Width-20, rect.Height-70)
+	if area.Width < 20 || area.Height < 20 {
+		return
+	}
 	posX, posY := ui.run.CurrentMapPosition()
+	startX, startY, cols, rows := computeMiniMapWindow(topology.Width, topology.Height, posX, posY, miniMapViewCells)
+	ui.drawTopologyRegion(area, startX, startY, cols, rows)
+	if withLegend {
+		legend := fmt.Sprintf("View %dx%d around player", cols, rows)
+		drawText(legend, int32(rect.X+spaceM), int32(rect.Y+spaceS+18), typeScale.Small-1, colorDim)
+	}
 	footer := fmt.Sprintf("Cell (%d,%d) | %.1fkm moved", posX, posY, ui.run.Travel.TotalKm)
-	drawText(footer, int32(rect.X+spaceM), int32(rect.Y+rect.Height)-20, typeScale.Small, colorDim)
+	drawText(footer, int32(rect.X+spaceM), int32(rect.Y+rect.Height)-18, typeScale.Small, colorDim)
 }
 
 func (ui *gameUI) updateRunMap() {

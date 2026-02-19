@@ -123,6 +123,11 @@ type runInventoryState struct {
 	PlayerIndex int
 }
 
+type pendingGoIntent struct {
+	Direction string
+	PlayerID  int
+}
+
 type runSkillSnapshot struct {
 	Hunting      int
 	Fishing      int
@@ -196,6 +201,7 @@ type gameUI struct {
 	skillBaseline      map[int]runSkillSnapshot
 	skillBaselineDay   int
 	skillBaselineBlock string
+	pendingGo          *pendingGoIntent
 
 	cmdParser      *parser.Parser
 	commandSink    CommandSink
@@ -1153,6 +1159,7 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.skillBaseline = nil
 	ui.skillBaselineDay = -1
 	ui.skillBaselineBlock = ""
+	ui.pendingGo = nil
 	ui.pendingClarify = nil
 	ui.pendingOptions = nil
 	ui.status = ""
@@ -1196,6 +1203,7 @@ func (ui *gameUI) updateLoad() {
 		ui.skillBaseline = nil
 		ui.skillBaselineDay = -1
 		ui.skillBaselineBlock = ""
+		ui.pendingGo = nil
 		ui.pendingClarify = nil
 		ui.pendingOptions = nil
 		ui.status = ""
@@ -1655,6 +1663,8 @@ func (ui *gameUI) drawRunCommandLibrary() {
 
 	leftLines := []string{
 		"Core:",
+		"look [left|right|front|back]",
+		"look closer at <plants|trees|insects|water>",
 		"next",
 		"save",
 		"load",
@@ -2047,6 +2057,20 @@ func (ui *gameUI) submitRunInput() {
 		return
 	}
 
+	if ui.pendingGo != nil {
+		selected, ok := ui.resolvePendingGoDistance(commandRaw)
+		if ok {
+			if ui.commandSink != nil {
+				ui.commandSink.EnqueueIntent(selected)
+			}
+			ui.pendingGo = nil
+			ui.status = ""
+			return
+		}
+		ui.status = "Distance required (e.g. 500m, 3km, 5 tiles)."
+		return
+	}
+
 	if ui.pendingClarify != nil {
 		if len(ui.pendingOptions) == 0 {
 			ui.pendingClarify = nil
@@ -2075,11 +2099,102 @@ func (ui *gameUI) submitRunInput() {
 		ui.status = ""
 		return
 	}
+
+	if pending, ok := parsePendingGoStart(intent, commandRaw); ok {
+		ui.pendingGo = pending
+		ui.appendRunMessage("How far? (e.g. 'go north 500m' or 'go north 3km' or 'go north 5 tiles')")
+		ui.status = ""
+		return
+	}
+
 	if ui.commandSink != nil {
 		ui.commandSink.EnqueueIntent(intent)
 		return
 	}
 	ui.status = "Command queue unavailable."
+}
+
+func parsePendingGoStart(intent parser.Intent, raw string) (*pendingGoIntent, bool) {
+	if strings.ToLower(strings.TrimSpace(intent.Verb)) != "go" {
+		return nil, false
+	}
+	if intent.Quantity != nil {
+		return nil, false
+	}
+	direction := ""
+	for _, arg := range intent.Args {
+		if d := mapDirectionToken(arg); d != "" {
+			direction = d
+			break
+		}
+	}
+	if direction == "" {
+		return nil, false
+	}
+	if len(intent.Args) >= 2 {
+		for _, arg := range intent.Args[1:] {
+			if _, ok := game.ParseTravelDistanceInput(arg); ok {
+				return nil, false
+			}
+		}
+	}
+	playerID := findPlayerToken(raw)
+	return &pendingGoIntent{Direction: direction, PlayerID: playerID}, true
+}
+
+func (ui *gameUI) resolvePendingGoDistance(raw string) (parser.Intent, bool) {
+	if ui == nil || ui.pendingGo == nil {
+		return parser.Intent{}, false
+	}
+	km, ok := game.ParseTravelDistanceInput(raw)
+	if !ok || km <= 0 {
+		return parser.Intent{}, false
+	}
+	qraw := strings.ToLower(strings.TrimSpace(raw))
+	if qraw == "" {
+		return parser.Intent{}, false
+	}
+	args := []string{ui.pendingGo.Direction}
+	if ui.pendingGo.PlayerID > 0 {
+		args = append(args, fmt.Sprintf("p%d", ui.pendingGo.PlayerID))
+	}
+	return parser.Intent{
+		Raw:        fmt.Sprintf("go %s %s", ui.pendingGo.Direction, qraw),
+		Normalised: fmt.Sprintf("go %s %s", ui.pendingGo.Direction, qraw),
+		Kind:       parser.Command,
+		Verb:       "go",
+		Args:       args,
+		Quantity:   &parser.Quantity{Raw: qraw, N: int(math.Round(km * 1000)), Unit: "distance"},
+		Confidence: 0.98,
+	}, true
+}
+
+func mapDirectionToken(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "n", "north":
+		return "north"
+	case "s", "south":
+		return "south"
+	case "e", "east":
+		return "east"
+	case "w", "west":
+		return "west"
+	default:
+		return ""
+	}
+}
+
+func findPlayerToken(raw string) int {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(raw)))
+	for _, field := range fields {
+		if len(field) < 2 || field[0] != 'p' {
+			continue
+		}
+		if v, err := strconv.Atoi(strings.TrimPrefix(field, "p")); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 1
 }
 
 func (ui *gameUI) openLoad(returnToRun bool) {

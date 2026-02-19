@@ -186,7 +186,7 @@ func DefaultRegistry() *Registry {
 	commands := []CommandDef{
 		{Canonical: "help", Aliases: []string{"h", "commands", "?"}, MinArgs: 0, MaxArgs: 0, HandlerKey: "help"},
 		{Canonical: "inventory", Aliases: []string{"inv", "bag", "my bag", "check bag", "check my bag"}, MinArgs: 0, MaxArgs: 2, HandlerKey: "inventory"},
-		{Canonical: "look", Aliases: []string{"l", "look around", "where am i"}, MinArgs: 0, MaxArgs: 3, HandlerKey: "look"},
+		{Canonical: "look", Aliases: []string{"l", "look around", "where am i"}, MinArgs: 0, MaxArgs: 6, HandlerKey: "look"},
 		{Canonical: "take", Aliases: []string{"get", "pickup", "pick up", "grab"}, MinArgs: 1, MaxArgs: 6, HandlerKey: "take"},
 		{Canonical: "drop", Aliases: []string{"discard", "leave"}, MinArgs: 1, MaxArgs: 6, HandlerKey: "drop"},
 		{Canonical: "use", Aliases: []string{"apply"}, MinArgs: 1, MaxArgs: 8, HandlerKey: "use"},
@@ -195,7 +195,7 @@ func DefaultRegistry() *Registry {
 		{Canonical: "drink", Aliases: []string{"sip"}, MinArgs: 0, MaxArgs: 6, HandlerKey: "drink"},
 		{Canonical: "sleep", Aliases: []string{"rest", "nap"}, MinArgs: 0, MaxArgs: 3, HandlerKey: "sleep"},
 		{Canonical: "go", Aliases: []string{"walk", "move", "head", "travel"}, MinArgs: 1, MaxArgs: 3, HandlerKey: "go"},
-		{Canonical: "inspect", Aliases: []string{"examine", "check", "chk"}, MinArgs: 1, MaxArgs: 5, HandlerKey: "inspect"},
+		{Canonical: "inspect", Aliases: []string{"examine", "check", "chk"}, MinArgs: 1, MaxArgs: 6, HandlerKey: "inspect"},
 
 		// Existing game/run commands to preserve strict-command behavior.
 		{Canonical: "next", MinArgs: 0, MaxArgs: 0, HandlerKey: "next"},

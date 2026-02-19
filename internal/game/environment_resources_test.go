@@ -450,6 +450,7 @@ func TestGoTravelUsesWatercraftWhenAvailable(t *testing.T) {
 	}
 	run.Players[0].Agility = 1
 	run.Players[0].Endurance = 1
+	startX, startY := run.CurrentMapPosition()
 
 	without, err := run.TravelMove(1, "north", 3)
 	if err != nil {
@@ -457,6 +458,10 @@ func TestGoTravelUsesWatercraftWhenAvailable(t *testing.T) {
 	}
 
 	run.CraftedItems = append(run.CraftedItems, "brush_raft")
+	run.Travel.PosX = startX
+	run.Travel.PosY = startY
+	run.Players[0].Energy = 100
+	run.Players[0].Hydration = 100
 	with, err := run.TravelMove(1, "north", 3)
 	if err != nil {
 		t.Fatalf("travel with watercraft: %v", err)

@@ -48,8 +48,10 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 	case "commands", "help":
 		return RunCommandResult{
 			Handled: true,
-			Message: "Commands: hunt land|fish|air [p#], fish [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], ask <player> <task>, next, save, load, menu.",
+			Message: "Commands: look [left|right|front|back], look closer at <plants|trees|insects|water>, hunt land|fish|air [p#], fish [p#], forage [roots|berries|fruits|vegetables|any] [p#] [grams], trees, plants, wood gather|dry|stock [kg] [p#], resources, collect <resource|any> [qty] [p#], bark strip [tree|any] [qty] [p#], inventory camp|personal|stash|take|add|drop [..], trap list|set|status|check [..], gut <carcass> [kg] [p#], cook <raw_meat> [kg] [p#], preserve <smoke|dry|salt> <meat> [kg] [p#], eat <food_item> [grams|kg] [p#], go <n|s|e|w> [km] [p#], fire status|methods|prep|ember|ignite|build|tend|out, shelter list|build|status, craft list|make|inventory, actions [p#], use <item> <action> [p#], ask <player> <task>, next, save, load, menu.",
 		}
+	case "look", "inspect", "examine":
+		return s.executeLookCommand(fields[0], fields[1:])
 	case "hunt", "catch":
 		return s.executeHuntCommand(fields[1:])
 	case "fish":
@@ -679,19 +681,41 @@ func (s *RunState) executeEatCommand(fields []string) RunCommandResult {
 
 func (s *RunState) executeGoCommand(fields []string) RunCommandResult {
 	if len(fields) == 0 {
-		return RunCommandResult{Handled: true, Message: "Usage: go <north|south|east|west|n|s|e|w> [km] [p#]"}
+		return RunCommandResult{Handled: true, Message: "Usage: go <north|south|east|west|n|s|e|w> <distance> [p#]"}
 	}
-	playerID, amount, hasAmount, rest := parseOptionalPlayerAndNumber(fields)
-	if len(rest) == 0 {
-		return RunCommandResult{Handled: true, Message: "Usage: go <north|south|east|west|n|s|e|w> [km] [p#]"}
+
+	playerID := 1
+	direction := ""
+	distanceTokens := make([]string, 0, 2)
+	for _, field := range fields {
+		token := strings.ToLower(strings.TrimSpace(field))
+		if token == "" {
+			continue
+		}
+		if parsed := parsePlayerToken(token); parsed > 0 {
+			playerID = parsed
+			continue
+		}
+		if direction == "" {
+			if mapped := normalizeDirection(token); mapped != "" {
+				direction = mapped
+				continue
+			}
+		}
+		distanceTokens = append(distanceTokens, token)
 	}
-	direction := normalizeDirection(rest[0])
+
 	if direction == "" {
 		return RunCommandResult{Handled: true, Message: "Direction must be north/south/east/west."}
 	}
-	if !hasAmount {
-		amount = 2.0
+	if len(distanceTokens) == 0 {
+		return RunCommandResult{Handled: true, Message: "How far? (e.g. 'go north 500m' or 'go north 3km' or 'go north 5 tiles')"}
 	}
+	amount, ok := parseTravelDistanceTokens(distanceTokens)
+	if !ok || amount <= 0 {
+		return RunCommandResult{Handled: true, Message: "Distance must be > 0. Use meters (m), kilometers (km), or tiles."}
+	}
+
 	result, err := s.TravelMove(playerID, direction, amount)
 	if err != nil {
 		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Travel failed: %v", err)}
@@ -704,11 +728,21 @@ func (s *RunState) executeGoCommand(fields []string) RunCommandResult {
 	if len(result.EncounterLogs) > 0 {
 		encounterText = " | Encounters: " + strings.Join(result.EncounterLogs, " ")
 	}
+	stopText := ""
+	if strings.TrimSpace(result.StopReason) != "" {
+		stopText = " Stopped: " + result.StopReason + "."
+	}
+	blockText := fmt.Sprintf(" Time block: %s -> %s", result.StartBlock, result.EndBlock)
+	if result.BlocksCrossed > 0 {
+		blockText += fmt.Sprintf(" (crossed %d)", result.BlocksCrossed)
+	}
 	return RunCommandResult{
 		Handled:       true,
 		HoursAdvanced: result.HoursSpent,
-		Message: fmt.Sprintf("P%d traveled %.1fkm %s %s at %.1fkm/h (%.1fh). Cost: -%dE -%dH2O %+dM. Total travel %.1fkm.",
-			playerID, result.DistanceKm, result.Direction, craftText, result.TravelSpeedKmph, result.HoursSpent, result.EnergyCost, result.HydrationCost, result.MoraleDelta, s.Travel.TotalKm) + fmt.Sprintf(" Position: (%d,%d)", s.Travel.PosX, s.Travel.PosY) + encounterText,
+		Message: fmt.Sprintf("Travelling %s %.1fkm... (%d steps). P%d traveled %.1fkm %s at %.1fkm/h (%.1fh). Cost: -%dE -%dH2O %+dM. Total travel %.1fkm.",
+			result.Direction, result.RequestedKm, result.RequestedSteps,
+			playerID, result.DistanceKm, craftText, result.TravelSpeedKmph, result.HoursSpent, result.EnergyCost, result.HydrationCost, result.MoraleDelta, s.Travel.TotalKm) +
+			fmt.Sprintf(" Position: (%d,%d).", s.Travel.PosX, s.Travel.PosY) + blockText + "." + stopText + encounterText + " " + s.describeDirectionalView(playerID, "front", false, ""),
 	}
 }
 

@@ -107,3 +107,81 @@ func TestRunCommandUseRejectsMissingItem(t *testing.T) {
 		t.Fatalf("expected missing-item validation, got: %s", res.Message)
 	}
 }
+
+func TestRunCommandGoWithoutDistancePrompts(t *testing.T) {
+	run := newRunForCommands(t)
+
+	res := run.ExecuteRunCommand("go north")
+	if !res.Handled {
+		t.Fatalf("expected command to be handled")
+	}
+	if !strings.Contains(strings.ToLower(res.Message), "how far?") {
+		t.Fatalf("expected distance prompt, got: %s", res.Message)
+	}
+}
+
+func TestRunCommandGoDistanceUnits(t *testing.T) {
+	run := newRunForCommands(t)
+
+	before := run.Travel.TotalKm
+	beforeClock := run.ClockHours
+	res := run.ExecuteRunCommand("go north 500m")
+	if !res.Handled {
+		t.Fatalf("expected command to be handled")
+	}
+	if run.Travel.TotalKm <= before {
+		t.Fatalf("expected movement for 500m command")
+	}
+	if run.ClockHours <= beforeClock && run.Day == 1 {
+		t.Fatalf("expected clock/day to advance for travel command")
+	}
+
+	before = run.Travel.TotalKm
+	res = run.ExecuteRunCommand("go north 2km")
+	if !res.Handled {
+		t.Fatalf("expected command to be handled")
+	}
+	if run.Travel.TotalKm <= before {
+		t.Fatalf("expected movement for 2km command")
+	}
+}
+
+func TestRunCommandLookLeftProvidesDirectionalInfo(t *testing.T) {
+	run := newRunForCommands(t)
+	run.Travel.Direction = "north"
+
+	res := run.ExecuteRunCommand("look left")
+	if !res.Handled {
+		t.Fatalf("expected look command to be handled")
+	}
+	msg := strings.ToLower(res.Message)
+	if !strings.Contains(msg, "left") && !strings.Contains(msg, "west") {
+		t.Fatalf("expected directional description for look left, got: %s", res.Message)
+	}
+}
+
+func TestRunCommandLookCloserAtPlantsFindsSpecificPlant(t *testing.T) {
+	run := newRunForCommands(t)
+
+	res := run.ExecuteRunCommand("look closer at plants")
+	if !res.Handled {
+		t.Fatalf("expected look closer command to be handled")
+	}
+	msg := strings.ToLower(res.Message)
+	if !strings.Contains(msg, "locate") || !strings.Contains(msg, "plant") {
+		t.Fatalf("expected closer plant detail, got: %s", res.Message)
+	}
+}
+
+func TestGoCommandAppendsForwardViewSummary(t *testing.T) {
+	run := newRunForCommands(t)
+
+	res := run.ExecuteRunCommand("go north 500m")
+	if !res.Handled {
+		t.Fatalf("expected go command to be handled")
+	}
+	msg := strings.ToLower(res.Message)
+	if !strings.Contains(msg, "looking in front of you") && !strings.Contains(msg, "in front of you") {
+		t.Fatalf("expected forward visibility summary after travel, got: %s", res.Message)
+	}
+}

@@ -465,12 +465,44 @@ func (s *RunState) AdvanceActionClock(hours float64) int {
 	if s == nil || hours <= 0 {
 		return 0
 	}
-	s.ClockHours += hours
+	minutes := int(math.Round(hours * 60))
+	if minutes <= 0 {
+		minutes = 1
+	}
+	return s.AdvanceMinutes(minutes)
+}
+
+func (s *RunState) AdvanceMinutes(minutes int) int {
+	if s == nil || minutes <= 0 {
+		return 0
+	}
+	s.EnsurePlayerRuntimeStats()
 	daysAdvanced := 0
-	for s.ClockHours >= 24 {
-		s.ClockHours -= 24
-		s.AdvanceDay()
-		daysAdvanced++
+	remaining := minutes
+	for remaining > 0 {
+		minUntilMidnight := int(math.Ceil((24.0 - s.ClockHours) * 60.0))
+		if minUntilMidnight <= 0 {
+			minUntilMidnight = 1
+		}
+		stepMinutes := remaining
+		if stepMinutes > minUntilMidnight {
+			stepMinutes = minUntilMidnight
+		}
+
+		fraction := float64(stepMinutes) / 1440.0
+		for i := range s.Players {
+			applyMetabolismFraction(&s.Players[i], fraction)
+			applyPhysiologyFraction(&s.Players[i], fraction)
+		}
+		s.MetabolismProgress = clampFloat(s.MetabolismProgress+fraction, 0, 1)
+		s.ClockHours += float64(stepMinutes) / 60.0
+		remaining -= stepMinutes
+
+		for s.ClockHours >= 24.0 {
+			s.ClockHours -= 24.0
+			s.AdvanceDay()
+			daysAdvanced++
+		}
 	}
 	return daysAdvanced
 }
