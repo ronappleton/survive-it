@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func newRunForTravelTime(t *testing.T) RunState {
 	t.Helper()
@@ -90,5 +93,66 @@ func TestTravelMoveCanCrossTimeBlock(t *testing.T) {
 	}
 	if res.EndBlock != run.CurrentTimeBlock() {
 		t.Fatalf("expected end block %s to match run block %s", res.EndBlock, run.CurrentTimeBlock())
+	}
+}
+
+func TestTravelStopsAtShoreWithoutWatercraft(t *testing.T) {
+	run := newRunForTravelTime(t)
+	run.Topology = WorldTopology{
+		Width:  3,
+		Height: 1,
+		Cells: []TopoCell{
+			{Biome: TopoBiomeGrassland},
+			{Biome: TopoBiomeWetland, Flags: TopoFlagWater | TopoFlagLake},
+			{Biome: TopoBiomeGrassland},
+		},
+	}
+	run.CellStates = make([]CellState, 3)
+	run.FogMask = []bool{true, true, true}
+	run.Travel.PosX = 0
+	run.Travel.PosY = 0
+	startClock := run.ClockHours
+
+	res, err := run.TravelMove(1, "east", 0.5)
+	if err != nil {
+		t.Fatalf("travel move: %v", err)
+	}
+	if res.StepsMoved != 0 {
+		t.Fatalf("expected no movement into water without watercraft, moved %d", res.StepsMoved)
+	}
+	if !strings.Contains(strings.ToLower(res.StopReason), "shore") {
+		t.Fatalf("expected shoreline stop reason, got: %q", res.StopReason)
+	}
+	if run.ClockHours != startClock {
+		t.Fatalf("expected no time advance when blocked at shore, before=%.2f after=%.2f", startClock, run.ClockHours)
+	}
+}
+
+func TestTravelCanEnterWaterWithWatercraft(t *testing.T) {
+	run := newRunForTravelTime(t)
+	run.Topology = WorldTopology{
+		Width:  3,
+		Height: 1,
+		Cells: []TopoCell{
+			{Biome: TopoBiomeGrassland},
+			{Biome: TopoBiomeWetland, Flags: TopoFlagWater | TopoFlagLake},
+			{Biome: TopoBiomeGrassland},
+		},
+	}
+	run.CellStates = make([]CellState, 3)
+	run.FogMask = []bool{true, true, true}
+	run.Travel.PosX = 0
+	run.Travel.PosY = 0
+	run.CraftedItems = append(run.CraftedItems, "brush_raft")
+
+	res, err := run.TravelMove(1, "east", 0.1)
+	if err != nil {
+		t.Fatalf("travel move: %v", err)
+	}
+	if res.StepsMoved < 1 {
+		t.Fatalf("expected movement into water with watercraft, moved %d", res.StepsMoved)
+	}
+	if res.WatercraftUsed == "" {
+		t.Fatalf("expected watercraft to be used")
 	}
 }

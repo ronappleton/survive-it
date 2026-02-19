@@ -67,3 +67,21 @@ func TestBuiltInScenariosAreValid(t *testing.T) {
 		}
 	}
 }
+
+func TestAlaskaScenarioHasColdClimateProfile(t *testing.T) {
+	scenario, ok := GetScenario(BuiltInScenarios(), "naa_alaska")
+	if !ok {
+		t.Fatalf("missing naa_alaska scenario")
+	}
+	if scenario.Climate == nil {
+		t.Fatalf("expected naa_alaska climate profile")
+	}
+	if scenario.Climate.FrozenWaterBelowC > 0 {
+		t.Fatalf("expected freezing threshold at or below 0C, got %d", scenario.Climate.FrozenWaterBelowC)
+	}
+	for _, biome := range scenario.Climate.AllowedBiomes {
+		if biome == TopoBiomeDesert {
+			t.Fatalf("alaska profile must not allow desert biome")
+		}
+	}
+}

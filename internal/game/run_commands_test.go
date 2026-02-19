@@ -185,3 +185,33 @@ func TestGoCommandAppendsForwardViewSummary(t *testing.T) {
 		t.Fatalf("expected forward visibility summary after travel, got: %s", res.Message)
 	}
 }
+
+func TestGoCommandStopsAtShorelineAndReportsIt(t *testing.T) {
+	run := newRunForCommands(t)
+	run.Topology = WorldTopology{
+		Width:  3,
+		Height: 1,
+		Cells: []TopoCell{
+			{Biome: TopoBiomeGrassland},
+			{Biome: TopoBiomeWetland, Flags: TopoFlagWater | TopoFlagLake},
+			{Biome: TopoBiomeGrassland},
+		},
+	}
+	run.CellStates = make([]CellState, 3)
+	run.FogMask = []bool{true, true, true}
+	run.Travel.PosX = 0
+	run.Travel.PosY = 0
+	run.Travel.Direction = "east"
+
+	res := run.ExecuteRunCommand("go east 500m")
+	if !res.Handled {
+		t.Fatalf("expected go command handled")
+	}
+	msg := strings.ToLower(res.Message)
+	if !strings.Contains(msg, "shore") {
+		t.Fatalf("expected shoreline stop message, got: %s", res.Message)
+	}
+	if run.Travel.PosX != 0 || run.Travel.PosY != 0 {
+		t.Fatalf("expected player to remain on shore, pos=(%d,%d)", run.Travel.PosX, run.Travel.PosY)
+	}
+}

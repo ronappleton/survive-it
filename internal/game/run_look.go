@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Look/inspect text was built from Scenario.Biome, which could diverge from actual topo cell biome.
+// - Insect/flora snippets were not temperature-aware, causing warm-season text in freezing conditions.
+// - This file now derives descriptions from the viewed cell + season/weather/climate filters.
+
 func (s *RunState) executeLookCommand(command string, fields []string) RunCommandResult {
 	playerID, relative, detailed, subject := parseLookRequest(fields, command == "inspect" || command == "examine")
 	if s == nil {
@@ -75,10 +80,11 @@ func (s *RunState) describeLookOverview(relative, dir string, cell TopoCell, tx,
 		return fmt.Sprintf("Looking %s (%s), you reach the map boundary. Beyond it the terrain drops out of charted range.", posLabel, dir)
 	}
 
+	season, _ := s.CurrentSeason()
 	biome := topoBiomeLabel(cell.Biome)
-	trees := TreesForBiome(s.Scenario.Biome)
-	plants := s.lookPlantsForSeason()
-	insects := InsectsForBiome(s.Scenario.Biome)
+	trees := TreesForBiome(topoBiomeQuery(cell.Biome))
+	plants := s.lookPlantsForCell(cell)
+	insects := s.lookInsectsForCell(cell, season)
 
 	treeSnippet := "a few scattered trees"
 	if len(trees) >= 2 {
@@ -96,7 +102,7 @@ func (s *RunState) describeLookOverview(relative, dir string, cell TopoCell, tx,
 		plantSnippet = fmt.Sprintf("wild plants nearby, including %s", strings.ToLower(p.Name))
 	}
 
-	insectSnippet := "insects stir through the brush"
+	insectSnippet := quietInsectMessage(s.ActiveClimateProfile(), season)
 	if hasInsectType(insects, "ant") {
 		insectSnippet = "an ant colony appears to be moving over a fallen log"
 	} else if len(insects) > 0 {
@@ -105,7 +111,11 @@ func (s *RunState) describeLookOverview(relative, dir string, cell TopoCell, tx,
 
 	waterSnippet := ""
 	if cell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake|TopoFlagCoast) != 0 {
-		waterSnippet = " Water glints through the terrain in that direction."
+		if s.IsWaterCurrentlyFrozen() {
+			waterSnippet = " Frozen water shows an ice sheen in that direction."
+		} else {
+			waterSnippet = " Water glints through the terrain in that direction."
+		}
 	}
 
 	return fmt.Sprintf("Looking %s (%s), you see %s terrain. %s; %s; %s.%s",
@@ -121,7 +131,7 @@ func (s *RunState) describeLookCloser(playerID int, relative, dir, subject strin
 		norm = "plants"
 	}
 	if strings.Contains(norm, "plant") || strings.Contains(norm, "herb") || strings.Contains(norm, "berry") {
-		plants := s.lookPlantsForSeason()
+		plants := s.lookPlantsForCell(cell)
 		if len(plants) == 0 {
 			return fmt.Sprintf("Looking closer at the plants %s, you cannot identify anything edible yet.", lookRelativeLabel(relative))
 		}
@@ -136,7 +146,7 @@ func (s *RunState) describeLookCloser(playerID int, relative, dir, subject strin
 		return fmt.Sprintf("Looking closer at the plants %s, you locate %s (%s).", lookRelativeLabel(relative), p.Name, detail)
 	}
 	if strings.Contains(norm, "tree") || strings.Contains(norm, "wood") || strings.Contains(norm, "log") {
-		trees := TreesForBiome(s.Scenario.Biome)
+		trees := TreesForBiome(topoBiomeQuery(cell.Biome))
 		if len(trees) == 0 {
 			return "Looking closer at the trees, visibility is poor."
 		}
@@ -148,9 +158,10 @@ func (s *RunState) describeLookCloser(playerID int, relative, dir, subject strin
 		return fmt.Sprintf("Looking closer at the trees %s, you identify %s. Bark resource: %s.", lookRelativeLabel(relative), t.Name, bark)
 	}
 	if strings.Contains(norm, "insect") || strings.Contains(norm, "ant") || strings.Contains(norm, "bug") {
-		insects := InsectsForBiome(s.Scenario.Biome)
+		season, _ := s.CurrentSeason()
+		insects := s.lookInsectsForCell(cell, season)
 		if len(insects) == 0 {
-			return "Looking closer, you do not see insect activity."
+			return quietInsectMessage(s.ActiveClimateProfile(), season)
 		}
 		pick := insects[s.lookIndex("insect-close", len(insects), tx, ty)]
 		return fmt.Sprintf("Looking closer at the insect activity %s, you spot %s.", lookRelativeLabel(relative), strings.ToLower(pick))
@@ -159,17 +170,28 @@ func (s *RunState) describeLookCloser(playerID int, relative, dir, subject strin
 		if cell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake|TopoFlagCoast) == 0 {
 			return fmt.Sprintf("Looking closer %s, you do not see open water from this position.", lookRelativeLabel(relative))
 		}
+		if s.IsWaterCurrentlyFrozen() {
+			return fmt.Sprintf("Looking closer %s, you confirm frozen water nearby.", lookRelativeLabel(relative))
+		}
 		return fmt.Sprintf("Looking closer %s, you confirm water access nearby.", lookRelativeLabel(relative))
 	}
 	return fmt.Sprintf("Looking closer %s, you note %s terrain with signs of resources.", lookRelativeLabel(relative), topoBiomeLabel(cell.Biome))
 }
 
-func (s *RunState) lookPlantsForSeason() []PlantSpec {
+func (s *RunState) lookPlantsForCell(cell TopoCell) []PlantSpec {
+	biome := topoBiomeQuery(cell.Biome)
 	season, ok := s.CurrentSeason()
 	if ok {
-		return PlantsForBiomeSeason(s.Scenario.Biome, PlantCategoryAny, season)
+		plants := PlantsForBiomeSeason(biome, PlantCategoryAny, season)
+		return filterPlantsForClimate(plants, s.ActiveClimateProfile(), season, s.Weather.TemperatureC)
 	}
-	return PlantsForBiome(s.Scenario.Biome, PlantCategoryAny)
+	plants := PlantsForBiome(biome, PlantCategoryAny)
+	return filterPlantsForClimate(plants, s.ActiveClimateProfile(), "", s.Weather.TemperatureC)
+}
+
+func (s *RunState) lookInsectsForCell(cell TopoCell, season SeasonID) []string {
+	insects := InsectsForBiome(topoBiomeQuery(cell.Biome))
+	return filterInsectsForClimate(insects, s.ActiveClimateProfile(), season, s.Weather.TemperatureC, cell.Biome)
 }
 
 func (s *RunState) absoluteLookDirection(relative string) string {
@@ -268,13 +290,13 @@ func topoBiomeLabel(biome uint8) string {
 	case TopoBiomeSwamp:
 		return "swamp"
 	case TopoBiomeDesert:
-		return "dry desert"
+		return "arid desert"
 	case TopoBiomeMountain:
-		return "mountainous"
+		return "alpine mountain"
 	case TopoBiomeTundra:
-		return "tundra"
+		return "cold tundra"
 	case TopoBiomeBoreal:
-		return "boreal forest"
+		return "boreal taiga"
 	default:
 		return "mixed terrain"
 	}

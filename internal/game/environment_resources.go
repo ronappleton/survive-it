@@ -216,8 +216,17 @@ func RandomForageForSeason(seed int64, biome string, category PlantCategory, sea
 	return randomForageWithSeason(seed, biome, category, day, actorID, season)
 }
 
+func RandomForageForSeasonWithClimate(seed int64, biome string, category PlantCategory, season SeasonID, day, actorID int, climate *ClimateProfile, tempC int) (ForageResult, error) {
+	return randomForageWithSeasonClimate(seed, biome, category, day, actorID, season, climate, tempC)
+}
+
 func randomForageWithSeason(seed int64, biome string, category PlantCategory, day, actorID int, season SeasonID) (ForageResult, error) {
+	return randomForageWithSeasonClimate(seed, biome, category, day, actorID, season, nil, 0)
+}
+
+func randomForageWithSeasonClimate(seed int64, biome string, category PlantCategory, day, actorID int, season SeasonID, climate *ClimateProfile, tempC int) (ForageResult, error) {
 	pool := filteredPlantsForBiome(biome, category, season)
+	pool = filterPlantsForClimate(pool, climate, season, tempC)
 	if len(pool) == 0 {
 		return ForageResult{}, fmt.Errorf("no plants available in biome %s", biome)
 	}
@@ -259,7 +268,11 @@ func (s *RunState) ForageAndConsume(playerID int, category PlantCategory, grams 
 	if !ok {
 		season = ""
 	}
-	forage, err := RandomForageForSeason(s.Config.Seed, s.Scenario.Biome, category, season, s.Day, playerID)
+	biome := s.CurrentBiomeQuery()
+	if strings.TrimSpace(biome) == "" {
+		biome = s.Scenario.Biome
+	}
+	forage, err := RandomForageForSeasonWithClimate(s.Config.Seed, biome, category, season, s.Day, playerID, s.ActiveClimateProfile(), s.Weather.TemperatureC)
 	if err != nil {
 		return ForageResult{}, err
 	}

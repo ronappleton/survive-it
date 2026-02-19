@@ -669,3 +669,28 @@ func TestAdvanceDayFoodDegradationRawVsPreserved(t *testing.T) {
 		t.Fatalf("expected spoiled meat to accumulate from degradation")
 	}
 }
+
+func TestAlaskaWinterPlantFilteringRemovesWarmSeasonFlora(t *testing.T) {
+	scenario, ok := GetScenario(BuiltInScenarios(), "naa_alaska")
+	if !ok || scenario.Climate == nil {
+		t.Fatalf("expected alaska scenario climate profile")
+	}
+	plants := PlantsForBiomeSeason("tundra", PlantCategoryAny, SeasonWinter)
+	filtered := filterPlantsForClimate(plants, scenario.Climate, SeasonWinter, -18)
+	if len(filtered) == 0 {
+		t.Fatalf("expected some winter-capable flora in tundra")
+	}
+	coldBerrySeen := false
+	for _, plant := range filtered {
+		id := strings.ToLower(plant.ID)
+		if strings.Contains(id, "wild_garlic") {
+			t.Fatalf("unexpected warm-season flora survived cold filter: %s", plant.ID)
+		}
+		if id == "crowberry" || id == "lingonberry" {
+			coldBerrySeen = true
+		}
+	}
+	if !coldBerrySeen {
+		t.Fatalf("expected at least one cold-viable berry in alaska winter filtered plants")
+	}
+}

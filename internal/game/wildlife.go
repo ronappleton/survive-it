@@ -453,6 +453,10 @@ func (s *RunState) RollWildlifeEncounter(playerID, x, y int, action string, roll
 	}
 	cell := s.Topology.Cells[idx]
 	nearWater := s.isNearWater(x, y)
+	season, okSeason := s.CurrentSeason()
+	if !okSeason {
+		season = SeasonAutumn
+	}
 
 	block := s.CurrentTimeBlock()
 	baseChance := baseEncounterChanceForAction(action)
@@ -485,14 +489,25 @@ func (s *RunState) RollWildlifeEncounter(playerID, x, y int, action string, roll
 
 	channels := []string{"mammal", "bird", "fish", "insect"}
 	weights := channelWeightsForEncounter(cell.Biome, action, block, nearWater)
+	if !insectActivityAllowed(s.ActiveClimateProfile(), season, s.Weather.TemperatureC, cell.Biome) {
+		weights[encounterChannelInsect] = 0
+	}
 	channelIdx := pickWeightedIndex(s.Config.Seed, x, y, s.Day, block, action, rollIndex, "channel", weights)
 	if channelIdx < 0 || channelIdx >= len(channels) {
 		return WildlifeEncounter{}, false
 	}
 	channel := channels[channelIdx]
 	species := biomeEncounterList(cell.Biome, channel)
+	species = filterEncounterSpeciesForClimate(species, channel, s.ActiveClimateProfile(), season, s.Weather.TemperatureC, cell.Biome)
 	if len(species) == 0 {
-		return WildlifeEncounter{}, false
+		msg := "It's quiet. No wildlife activity matches these conditions."
+		if channel == "insect" {
+			msg = quietInsectMessage(s.ActiveClimateProfile(), season)
+		}
+		return WildlifeEncounter{
+			Channel: "ambient",
+			Message: msg,
+		}, true
 	}
 	speciesWeights := make([]int, len(species))
 	for i, sp := range species {

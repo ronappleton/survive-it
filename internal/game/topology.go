@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Topology generation is deterministic and already centralized here (including biome assignment).
+// - RunState init routes all map creation through this file, so climate constraints can be enforced once.
+// - Cell biomes are the right source for coherence checks because encounters/rendering index by topo cell.
+
 const (
 	TopoFlagWater uint8 = 1 << iota
 	TopoFlagRiver
@@ -149,7 +154,7 @@ func (s *RunState) initTopology() {
 	if scenarioProfile, ok := LoadScenarioGenProfile(s.Scenario); ok {
 		profile = scenarioProfile
 	}
-	topology := GenerateWorldTopologyWithProfile(s.Config.Seed, s.Scenario.Biome, w, h, profile)
+	topology := GenerateWorldTopologyWithProfileAndClimate(s.Config.Seed, s.Scenario.Biome, w, h, profile, s.Scenario.Climate)
 	s.Topology = topology
 	s.CellStates = make([]CellState, len(topology.Cells))
 	s.FogMask = make([]bool, len(topology.Cells))
@@ -448,6 +453,10 @@ func GenerateWorldTopology(seed int64, biome string, width, height int) WorldTop
 }
 
 func GenerateWorldTopologyWithProfile(seed int64, biome string, width, height int, profile *GenProfile) WorldTopology {
+	return GenerateWorldTopologyWithProfileAndClimate(seed, biome, width, height, profile, nil)
+}
+
+func GenerateWorldTopologyWithProfileAndClimate(seed int64, biome string, width, height int, profile *GenProfile, climate *ClimateProfile) WorldTopology {
 	if profile == nil {
 		profile = DefaultGenProfile()
 	}
@@ -519,6 +528,7 @@ func GenerateWorldTopologyWithProfile(seed int64, biome string, width, height in
 				flags |= TopoFlagWater
 			}
 			b := initialTopoBiome(elevation, moist, temp)
+			b = constrainTopoBiomeForClimate(climate, b, moist, temp)
 			rough := roughnessForBiomeWithProfile(b, rawRough[idx], elevation, profile)
 			cells[idx] = TopoCell{
 				Elevation:   elevation,
@@ -611,6 +621,7 @@ func GenerateWorldTopologyWithProfile(seed int64, biome string, width, height in
 					cell.Biome = TopoBiomeForest
 				}
 			}
+			cell.Biome = constrainTopoBiomeForClimate(climate, cell.Biome, cell.Moisture, cell.Temperature)
 		}
 	}
 

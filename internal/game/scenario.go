@@ -1,10 +1,15 @@
 package game
 
+// Discovery summary:
+// - Scenario is the central config carried into RunState and consumed by weather/topology/resource systems.
+// - LocationMeta is already optional and runtime-only, so climate can be added the same way.
+// - Keeping Climate optional preserves backwards compatibility for custom scenarios.
 type Scenario struct {
 	ID                 ScenarioID
 	Name               string
 	Location           string
 	LocationMeta       *ScenarioLocation `json:"-"`
+	Climate            *ClimateProfile   `json:"-"`
 	Biome              string
 	MapWidthCells      int
 	MapHeightCells     int

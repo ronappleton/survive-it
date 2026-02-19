@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - TravelMove is the single step loop used by go/move command execution.
+// - Water traversal already has watercraft speed modifiers; entry checks belong here.
+// - Shoreline stopping is enforced before stepping into water without watercraft.
+
 type TravelState struct {
 	Direction     string  `json:"direction,omitempty"`
 	TotalKm       float64 `json:"total_km"`
@@ -263,7 +268,10 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 		if !okFrom || !okTo || (nextX == posX && nextY == posY) {
 			break
 		}
-		_ = fromCell
+		if isWaterTravelCell(toCell) && !isWaterTravelCell(fromCell) && watercraftID == "" {
+			stopReason = "Reached shoreline (water ahead; craft/use a raft or boat to cross)"
+			break
+		}
 
 		stepMinutes := TravelMinutesForStep(s, posX, posY, nextX, nextY, player)
 		if toCell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake) != 0 {
@@ -386,6 +394,10 @@ func (s *RunState) TravelMove(playerID int, direction string, requestedKm float6
 		StopReason:      stopReason,
 		EncounterLogs:   encounterLogs,
 	}, nil
+}
+
+func isWaterTravelCell(cell TopoCell) bool {
+	return cell.Flags&(TopoFlagWater|TopoFlagRiver|TopoFlagLake) != 0
 }
 
 func slicesContainsKit(items []KitItem, target KitItem) bool {

@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDeterministicEncounterRollStable(t *testing.T) {
 	a := deterministicEncounterRoll(44, 7, 9, 3, TimeBlockDay, "hunt", 2, "species")
@@ -184,6 +187,91 @@ func TestWildlifeEncounterSpeciesIDsResolveToAnimalCatalog(t *testing.T) {
 	for _, id := range ids {
 		if !animalIDs[id] {
 			t.Fatalf("encounter species id %q missing from AnimalCatalog", id)
+		}
+	}
+}
+
+func TestAlaskaClimateTopologyNeverGeneratesDesert(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeNakedAndAfraid,
+		ScenarioID:  "naa_alaska",
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        6188,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	run.EnsureTopology()
+	for i, cell := range run.Topology.Cells {
+		if cell.Biome == TopoBiomeDesert {
+			t.Fatalf("desert biome generated in alaska climate at cell %d", i)
+		}
+	}
+}
+
+func TestColdWeatherSuppressesMosquitoEncounters(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeNakedAndAfraid,
+		ScenarioID:  "naa_alaska",
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        7782,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	run.Topology = WorldTopology{
+		Width: 1, Height: 1,
+		Cells: []TopoCell{{Biome: TopoBiomeWetland, Flags: TopoFlagWater}},
+	}
+	run.CellStates = make([]CellState, 1)
+	run.FogMask = []bool{true}
+	run.Travel.PosX, run.Travel.PosY = 0, 0
+	run.Day = 2
+	run.ClockHours = 13
+	run.Weather = WeatherState{Day: 2, Type: WeatherSnow, TemperatureC: -18}
+
+	for i := 0; i < 1200; i++ {
+		ev, ok := run.RollWildlifeEncounter(1, 0, 0, "forage", i)
+		if !ok {
+			continue
+		}
+		if strings.Contains(strings.ToLower(ev.Species), "mosquito") {
+			t.Fatalf("unexpected mosquito encounter at -18C: %+v", ev)
+		}
+	}
+}
+
+func TestAlaskaWinterFiltersWarmBirdsFromEncounters(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeNakedAndAfraid,
+		ScenarioID:  "naa_alaska",
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        9122,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	run.Topology = WorldTopology{
+		Width: 1, Height: 1,
+		Cells: []TopoCell{{Biome: TopoBiomeGrassland}},
+	}
+	run.CellStates = make([]CellState, 1)
+	run.FogMask = []bool{true}
+	run.Travel.PosX, run.Travel.PosY = 0, 0
+	run.Day = 3
+	run.ClockHours = 9
+	run.Weather = WeatherState{Day: 3, Type: WeatherSnow, TemperatureC: -14}
+
+	for i := 0; i < 1600; i++ {
+		ev, ok := run.RollWildlifeEncounter(1, 0, 0, "hunt", i)
+		if !ok {
+			continue
+		}
+		if strings.Contains(strings.ToLower(ev.Species), "quail") {
+			t.Fatalf("unexpected warm-season bird encounter in alaska winter: %+v", ev)
 		}
 	}
 }

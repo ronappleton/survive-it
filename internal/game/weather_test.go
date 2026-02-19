@@ -116,3 +116,48 @@ func TestRunStateInitializesAndAdvancesWeather(t *testing.T) {
 		t.Fatalf("expected initialized day-2 weather, got %+v", run.Weather)
 	}
 }
+
+func TestAlaskaWinterClimateStaysMostlyBelowFreezing(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeNakedAndAfraid,
+		ScenarioID:  "naa_alaska",
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        6642,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+
+	aboveFreezing := 0
+	for day := 1; day <= 21; day++ {
+		state := run.weatherStateForDay(day)
+		if state.TemperatureC > 0 {
+			aboveFreezing++
+		}
+	}
+	if aboveFreezing > 2 {
+		t.Fatalf("expected alaska winter to stay below freezing most days, above-freezing days=%d", aboveFreezing)
+	}
+}
+
+func TestColdClimateWaterFreezesBelowThreshold(t *testing.T) {
+	run, err := NewRunState(RunConfig{
+		Mode:        ModeNakedAndAfraid,
+		ScenarioID:  "naa_alaska",
+		PlayerCount: 1,
+		RunLength:   RunLength{Days: 21},
+		Seed:        9921,
+	})
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	run.Weather = WeatherState{Day: 1, Type: WeatherSnow, TemperatureC: -8}
+	if !run.IsWaterCurrentlyFrozen() {
+		t.Fatalf("expected water frozen at -8C")
+	}
+	run.Weather = WeatherState{Day: 1, Type: WeatherSunny, TemperatureC: 3}
+	if run.IsWaterCurrentlyFrozen() {
+		t.Fatalf("expected water unfrozen at 3C")
+	}
+}

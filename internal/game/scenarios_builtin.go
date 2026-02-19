@@ -2,6 +2,10 @@ package game
 
 import "strings"
 
+// Discovery summary:
+// - Built-ins already centralize per-scenario defaults (biome, map size, season sets, location metadata).
+// - This is the safest place to attach optional climate profiles without changing scenario loading flow.
+// - Climate metadata is currently applied to real-world cold scenarios first (Alaska N&A).
 func BuiltInScenarios() []Scenario {
 	aloneSeasons := SeasonSet{
 		ID: SeasonSetAloneDefaultID,
@@ -48,6 +52,7 @@ func BuiltInScenarios() []Scenario {
 			Name:               name,
 			Location:           inferScenarioLocation(name),
 			LocationMeta:       loc,
+			Climate:            builtInScenarioClimateProfile(id),
 			Biome:              biome,
 			MapWidthCells:      mapW,
 			MapHeightCells:     mapH,
@@ -274,6 +279,63 @@ func builtInScenarioLocationMeta(id ScenarioID) *ScenarioLocation {
 	}
 	copyLoc := loc
 	return &copyLoc
+}
+
+var builtInClimateByScenarioID = map[ScenarioID]ClimateProfile{
+	"naa_alaska": {
+		Name:               "Alaska Subarctic Cold",
+		AllowedBiomes:      []uint8{TopoBiomeTundra, TopoBiomeBoreal, TopoBiomeMountain, TopoBiomeWetland, TopoBiomeSwamp, TopoBiomeGrassland},
+		BaseTempC:          -16,
+		TempVarianceC:      9,
+		FrozenWaterBelowC:  0,
+		DisallowTags:       []string{"desert", "tropical"},
+		DefaultInsectMinC:  6,
+		DefaultInsectQuiet: "It's quiet. No insect activity in this cold.",
+		SeasonRules: map[SeasonID]SeasonRule{
+			SeasonWinter: {
+				TempBiasC:           -6,
+				AllowedFloraTags:    []string{"arctic", "subarctic", "tundra", "boreal", "winter_ok"},
+				AllowedFaunaTags:    []string{"arctic", "subarctic", "tundra", "boreal", "cold", "winter_ok", "lake", "river", "coast", "mountain", "forest"},
+				DisallowedFloraTags: []string{"desert", "tropical", "savanna", "warm_season"},
+				DisallowedFaunaTags: []string{"desert", "tropical", "savanna", "temperate_warm", "warm_season"},
+				InsectActivity:      false,
+				InsectMinTempC:      6,
+				InsectQuietMessage:  "It's quiet. No insect activity in this cold.",
+				DisallowWeatherTypes: []WeatherType{
+					WeatherHeatwave,
+					WeatherRain,
+					WeatherHeavyRain,
+				},
+			},
+		},
+	},
+}
+
+func builtInScenarioClimateProfile(id ScenarioID) *ClimateProfile {
+	profile, ok := builtInClimateByScenarioID[id]
+	if !ok {
+		return nil
+	}
+	copyProfile := profile
+	if len(profile.AllowedBiomes) > 0 {
+		copyProfile.AllowedBiomes = append([]uint8(nil), profile.AllowedBiomes...)
+	}
+	if len(profile.DisallowTags) > 0 {
+		copyProfile.DisallowTags = append([]string(nil), profile.DisallowTags...)
+	}
+	if profile.SeasonRules != nil {
+		copyProfile.SeasonRules = make(map[SeasonID]SeasonRule, len(profile.SeasonRules))
+		for season, rule := range profile.SeasonRules {
+			ruleCopy := rule
+			ruleCopy.AllowedFloraTags = append([]string(nil), rule.AllowedFloraTags...)
+			ruleCopy.AllowedFaunaTags = append([]string(nil), rule.AllowedFaunaTags...)
+			ruleCopy.DisallowedFloraTags = append([]string(nil), rule.DisallowedFloraTags...)
+			ruleCopy.DisallowedFaunaTags = append([]string(nil), rule.DisallowedFaunaTags...)
+			ruleCopy.DisallowWeatherTypes = append([]WeatherType(nil), rule.DisallowWeatherTypes...)
+			copyProfile.SeasonRules[season] = ruleCopy
+		}
+	}
+	return &copyProfile
 }
 
 func inferScenarioLocation(name string) string {

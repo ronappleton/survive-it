@@ -3,10 +3,17 @@ package gui
 import (
 	"fmt"
 	"math"
+	"os"
+	"strings"
 
 	"github.com/appengine-ltd/survive-it/internal/game"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// Discovery summary:
+// - Minimap/full-map rendering both route through drawTopologyRegion and share cell color logic.
+// - Water visuals previously ignored runtime temperature, so freezing conditions looked like open water.
+// - A debug env flag now surfaces biome/temp/frozen coherence data without changing default UI flow.
 
 const (
 	runLogSplitRatio = 0.66
@@ -228,6 +235,7 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 		return
 	}
 	topology := ui.run.Topology
+	waterFrozen := ui.run.IsWaterCurrentlyFrozen()
 	detail := topoRenderDetail
 	maxDetailX := int(math.Floor(float64(area.Width) / float64(cols)))
 	maxDetailY := int(math.Floor(float64(area.Height) / float64(rows)))
@@ -257,13 +265,25 @@ func (ui *gameUI) drawTopologyRegion(area rl.Rectangle, startX, startY, cols, ro
 			cell := topology.Cells[idx]
 			clr := topoBiomeColor(cell.Biome)
 			if cell.Flags&game.TopoFlagWater != 0 {
-				clr = rl.NewColor(76, 116, 156, 255)
+				if waterFrozen {
+					clr = rl.NewColor(162, 176, 192, 255)
+				} else {
+					clr = rl.NewColor(76, 116, 156, 255)
+				}
 			}
 			if cell.Flags&game.TopoFlagRiver != 0 {
-				clr = rl.NewColor(95, 141, 185, 255)
+				if waterFrozen {
+					clr = rl.NewColor(174, 186, 202, 255)
+				} else {
+					clr = rl.NewColor(95, 141, 185, 255)
+				}
 			}
 			if cell.Flags&game.TopoFlagLake != 0 {
-				clr = rl.NewColor(88, 133, 176, 255)
+				if waterFrozen {
+					clr = rl.NewColor(166, 180, 198, 255)
+				} else {
+					clr = rl.NewColor(88, 133, 176, 255)
+				}
 			}
 			if cell.Flags&game.TopoFlagCoast != 0 {
 				clr = rl.NewColor(
@@ -389,6 +409,7 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 			{Label: "Desert", Color: topoBiomeColor(game.TopoBiomeDesert)},
 			{Label: "Wetland/Jungle", Color: topoBiomeColor(game.TopoBiomeWetland)},
 			{Label: "Water/River", Color: rl.NewColor(88, 133, 176, 255)},
+			{Label: "Ice (frozen)", Color: rl.NewColor(166, 180, 198, 255)},
 			{Label: "Player", Color: rl.NewColor(255, 88, 88, 255)},
 		}
 		for _, row := range legendRows {
@@ -406,7 +427,7 @@ func (ui *gameUI) drawTopologyMap(rect rl.Rectangle, withLegend bool) {
 		legendY += 18
 		drawText(fmt.Sprintf("Grid: %dx%d", topology.Width, topology.Height), legendX, legendY, typeScale.Small-1, colorDim)
 		legendY += 18
-		drawText("Render: 4x detail + contours", legendX, legendY, typeScale.Small-1, colorDim)
+		drawText(fmt.Sprintf("Render: %dx detail + contours", topoRenderDetail), legendX, legendY, typeScale.Small-1, colorDim)
 	}
 }
 
@@ -433,6 +454,10 @@ func (ui *gameUI) drawMiniMap(rect rl.Rectangle, withLegend bool) {
 	}
 	footer := fmt.Sprintf("Cell (%d,%d) | %.1fkm moved", posX, posY, ui.run.Travel.TotalKm)
 	drawText(footer, int32(rect.X+spaceM), int32(rect.Y+rect.Height)-18, typeScale.Small, colorDim)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SURVIVE_IT_DEBUG_WORLD")), "1") {
+		debugLine := ui.run.CoherenceDebugLine()
+		drawText(debugLine, int32(rect.X+spaceM), int32(rect.Y+rect.Height)-34, typeScale.Small-1, colorAccent)
+	}
 }
 
 func (ui *gameUI) updateRunMap() {

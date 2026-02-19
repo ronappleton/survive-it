@@ -37,6 +37,7 @@ type screen int
 const (
 	screenMenu screen = iota
 	screenSetup
+	screenProfiles
 	screenScenarioPicker
 	screenStatsBuilder
 	screenPlayerConfig
@@ -57,6 +58,7 @@ type menuAction int
 const (
 	actionStart menuAction = iota
 	actionLoad
+	actionProfiles
 	actionScenarioBuilder
 	actionOptions
 	actionInstallUpdate
@@ -121,6 +123,15 @@ type runPlayersState struct {
 
 type runInventoryState struct {
 	PlayerIndex int
+}
+
+type profilesState struct {
+	Cursor     int
+	EditingNew bool
+	EditingID  string
+	NameBuffer string
+	Status     string
+	ReturnTo   screen
 }
 
 type pendingGoIntent struct {
@@ -189,6 +200,7 @@ type gameUI struct {
 	load            loadState
 	rplay           runPlayersState
 	rinv            runInventoryState
+	profilesUI      profilesState
 	customScenarios []game.Scenario
 
 	run         *game.RunState
@@ -218,6 +230,10 @@ type gameUI struct {
 	lastTick     time.Time
 	runPlayedFor time.Duration
 	autoDayHours int
+
+	profiles          []playerProfile
+	selectedProfileID string
+	runProfileID      string
 }
 
 func (a *App) Run() error {
@@ -258,6 +274,9 @@ func newGameUI(cfg AppConfig) *gameUI {
 	ui.customScenarios = custom
 	game.SetExternalScenarios(custom)
 	ui.syncScenarioSelection()
+	ui.ensureSetupPlayers()
+	ui.initPlayerProfiles()
+	ui.applySelectedProfileToSetupPrimary()
 	ui.ensureSetupPlayers()
 	ui.lastTick = time.Now()
 	return ui
@@ -302,6 +321,8 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updateMenu()
 	case screenSetup:
 		ui.updateSetup()
+	case screenProfiles:
+		ui.updateProfiles()
 	case screenScenarioPicker:
 		ui.updateScenarioPicker()
 	case screenStatsBuilder:
@@ -337,6 +358,8 @@ func (ui *gameUI) draw() {
 		ui.drawMenu()
 	case screenSetup:
 		ui.drawSetup()
+	case screenProfiles:
+		ui.drawProfiles()
 	case screenScenarioPicker:
 		ui.drawScenarioPicker()
 	case screenStatsBuilder:
@@ -392,10 +415,14 @@ func (ui *gameUI) updateMenu() {
 			ui.syncScenarioSelection()
 			ui.setup.RunDays = ui.selectedScenario().DefaultDays
 			ui.ensureSetupPlayers()
+			ui.applySelectedProfileToSetupPrimary()
+			ui.ensureSetupPlayers()
 			ui.status = ""
 			ui.screen = screenSetup
 		case actionLoad:
 			ui.openLoad(false)
+		case actionProfiles:
+			ui.openProfilesScreen(screenMenu)
 		case actionScenarioBuilder:
 			ui.openScenarioBuilder()
 		case actionOptions:
@@ -458,6 +485,7 @@ func (ui *gameUI) menuItems() []menuItem {
 	items := []menuItem{
 		{Label: "Play Game", Action: actionStart},
 		{Label: "Load Game", Action: actionLoad},
+		{Label: "Player Profiles", Action: actionProfiles},
 		{Label: "Scenario Builder", Action: actionScenarioBuilder},
 		{Label: "Options", Action: actionOptions},
 	}
@@ -631,10 +659,10 @@ func (ui *gameUI) updateSetup() {
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 8)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor+1, 9)
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
-		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 8)
+		ui.setup.Cursor = wrapIndex(ui.setup.Cursor-1, 9)
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeft) {
@@ -649,15 +677,17 @@ func (ui *gameUI) updateSetup() {
 		case 1:
 			ui.pick.Cursor = ui.setup.ScenarioIndex
 			ui.screen = screenScenarioPicker
-		case 4:
-			ui.openStatsBuilder(screenSetup)
+		case 2:
+			ui.openProfilesScreen(screenSetup)
 		case 5:
+			ui.openStatsBuilder(screenSetup)
+		case 6:
 			ui.preparePlayerConfig()
 			ui.pcfg.ReturnTo = screenSetup
 			ui.screen = screenPlayerConfig
-		case 6:
-			ui.startRunFromConfig()
 		case 7:
+			ui.startRunFromConfig()
+		case 8:
 			ui.enterMenu()
 		}
 	}
@@ -683,8 +713,16 @@ func (ui *gameUI) adjustSetup(delta int) {
 		}
 		ui.setup.RunDays = ui.selectedScenario().DefaultDays
 	case 2:
-		ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount+delta, 1, 8)
+		if len(ui.profiles) == 0 {
+			return
+		}
+		current := ui.selectedProfileIndex()
+		next := wrapIndex(current+delta, len(ui.profiles))
+		ui.selectProfileByIndex(next)
+		ui.applySelectedProfileToSetupPrimary()
 	case 3:
+		ui.setup.PlayerCount = clampInt(ui.setup.PlayerCount+delta, 1, 8)
+	case 4:
 		ui.setup.RunDays = clampInt(ui.setup.RunDays+delta*5, 1, 365)
 	}
 	ui.ensureSetupPlayers()
@@ -702,6 +740,7 @@ func (ui *gameUI) drawSetup() {
 	}{
 		{"Mode", modeLabel(ui.selectedMode())},
 		{"Scenario", ui.selectedScenario().Name},
+		{"Player Profile", ui.selectedProfileSummary()},
 		{"Players", fmt.Sprintf("%d", ui.setup.PlayerCount)},
 		{"Run Length (days)", fmt.Sprintf("%d", ui.setup.RunDays)},
 		{"Configure Player Stats", "Enter"},
@@ -738,7 +777,6 @@ func (ui *gameUI) drawSetup() {
 	drawWrappedText("Temperature Range: "+ui.formatTemperatureRange(tr.MinC, tr.MaxC), right, 522, 20, colorText)
 	wildlife := game.WildlifeForBiome(s.Biome)
 	drawWrappedText("Wildlife: "+strings.Join(wildlife, ", "), right, 558, 20, colorDim)
-	drawWrappedText("Issued kit is auto-selected when game starts.", right, 598, 20, colorText)
 }
 
 func (ui *gameUI) updateScenarioPicker() {
@@ -993,6 +1031,8 @@ func (ui *gameUI) preparePlayerConfig() {
 		for i := range ui.pcfg.Players {
 			ui.pcfg.Players[i] = defaultPlayerConfig(i, ui.selectedMode())
 		}
+		ui.applySelectedProfileToSetupPrimary()
+		ui.ensureSetupPlayers()
 	}
 	ui.pcfg.Cursor = 0
 	ui.pcfg.PlayerIndex = 0
@@ -1137,6 +1177,8 @@ func (ui *gameUI) drawPlayerConfig() {
 
 func (ui *gameUI) startRunFromConfig() {
 	ui.ensureSetupPlayers()
+	ui.applySelectedProfileToSetupPrimary()
+	ui.ensureSetupPlayers()
 	issuedKit := runtimeIssuedKit(ui.selectedMode(), ui.selectedScenario(), ui.pcfg.Players)
 	ui.setup.IssuedKit = issuedKit
 	cfg := game.RunConfig{
@@ -1165,6 +1207,7 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.pendingGo = nil
 	ui.pendingClarify = nil
 	ui.pendingOptions = nil
+	ui.runProfileID = ui.selectedProfileID
 	ui.status = ""
 	ui.appendRunMessage("Run started")
 	ui.appendRunMessage(fmt.Sprintf("Mode: %s | Scenario: %s | Players: %d", modeLabel(run.Config.Mode), run.Scenario.Name, len(run.Players)))
@@ -1210,6 +1253,7 @@ func (ui *gameUI) updateLoad() {
 		ui.pendingGo = nil
 		ui.pendingClarify = nil
 		ui.pendingOptions = nil
+		ui.runProfileID = ui.selectedProfileID
 		ui.status = ""
 		ui.runMessages = nil
 		ui.appendRunMessage("Loaded " + filepath.Base(entry.Path))
@@ -1307,7 +1351,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
-		ui.enterMenu()
+		ui.leaveRunToMenu()
 		return
 	}
 	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyS) {
@@ -1863,7 +1907,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 		ui.updateLastEntityFromIntent(intent, true)
 		return
 	case "menu", "back":
-		ui.enterMenu()
+		ui.leaveRunToMenu()
 		ui.updateLastEntityFromIntent(intent, true)
 		return
 	}
@@ -2469,33 +2513,41 @@ func issuedKitOptionsForMode(mode game.GameMode) []game.KitItem {
 
 func recommendedIssuedKitForScenario(mode game.GameMode, scenario game.Scenario) []game.KitItem {
 	biome := strings.ToLower(strings.TrimSpace(scenario.Biome))
-	kit := make([]game.KitItem, 0, 6)
+	if !scenarioNeedsIssuedKit(biome) {
+		return nil
+	}
+	kit := make([]game.KitItem, 0, 4)
 
 	switch {
 	case strings.Contains(biome, "winter"), strings.Contains(biome, "arctic"), strings.Contains(biome, "tundra"), strings.Contains(biome, "cold"):
 		kit = append(kit, game.KitFerroRod, game.KitThermalLayer, game.KitHatchet, game.KitCookingPot)
-	case strings.Contains(biome, "wet"), strings.Contains(biome, "swamp"), strings.Contains(biome, "jungle"), strings.Contains(biome, "rainforest"):
-		kit = append(kit, game.KitParacord50ft, game.KitTarp, game.KitFerroRod, game.KitMosquitoNet)
-	case strings.Contains(biome, "desert"), strings.Contains(biome, "savanna"), strings.Contains(biome, "dry"):
-		kit = append(kit, game.KitCanteen, game.KitWaterFilter, game.KitHatchet, game.KitParacord50ft)
+	case strings.Contains(biome, "desert"), strings.Contains(biome, "arid"):
+		kit = append(kit, game.KitCanteen, game.KitWaterFilter, game.KitPurificationTablets, game.KitHatchet)
 	default:
-		kit = append(kit, game.KitHatchet, game.KitParacord50ft, game.KitFerroRod, game.KitCookingPot)
+		return nil
 	}
 
-	targetCount := 4
+	targetCount := 2
 	if mode == game.ModeNakedAndAfraid {
-		targetCount = 2
+		targetCount = 1
 	}
 	if mode == game.ModeNakedAndAfraidXL {
-		targetCount = 3
+		targetCount = 1
 	}
 
 	allowed := issuedKitOptionsForMode(mode)
 	filtered := filterKitItemsToAllowed(kit, allowed)
-	if len(filtered) == 0 {
-		filtered = append([]game.KitItem(nil), allowed...)
-	}
+	filtered = uniqueKitItemsList(filtered)
 	return firstNKitItems(filtered, targetCount)
+}
+
+func scenarioNeedsIssuedKit(biome string) bool {
+	return strings.Contains(biome, "winter") ||
+		strings.Contains(biome, "arctic") ||
+		strings.Contains(biome, "tundra") ||
+		strings.Contains(biome, "cold") ||
+		strings.Contains(biome, "desert") ||
+		strings.Contains(biome, "arid")
 }
 
 func firstNKitItems(items []game.KitItem, n int) []game.KitItem {
@@ -2531,7 +2583,7 @@ func filterKitItemsToAllowed(items []game.KitItem, allowed []game.KitItem) []gam
 }
 
 func runtimeIssuedKit(mode game.GameMode, scenario game.Scenario, players []game.PlayerConfig) []game.KitItem {
-	recommended := recommendedIssuedKitForScenario(mode, scenario)
+	recommended := uniqueKitItemsList(recommendedIssuedKitForScenario(mode, scenario))
 	if len(recommended) == 0 {
 		return nil
 	}
@@ -2546,12 +2598,26 @@ func runtimeIssuedKit(mode game.GameMode, scenario game.Scenario, players []game
 		if _, exists := personal[item]; exists {
 			continue
 		}
+		if hasKitItem(filtered, item) {
+			continue
+		}
 		filtered = append(filtered, item)
 	}
-	if len(filtered) == 0 {
-		return recommended
+	return uniqueKitItemsList(filtered)
+}
+
+func uniqueKitItemsList(items []game.KitItem) []game.KitItem {
+	if len(items) == 0 {
+		return nil
 	}
-	return filtered
+	out := make([]game.KitItem, 0, len(items))
+	for _, item := range items {
+		if hasKitItem(out, item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (ui *gameUI) ensureSetupPlayers() {

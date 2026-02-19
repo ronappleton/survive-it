@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// Discovery summary:
+// - Biome-to-weather and biome-to-insect defaults live here and feed day/weather + look text helpers.
+// - Insect lists are now neutral descriptors; temperature/season gating is enforced in climate filters.
+// - This keeps base biome catalogs reusable while avoiding season-only contradictions.
+
 type TemperatureRange struct {
 	MinC int
 	MaxC int
@@ -70,7 +75,7 @@ func InsectsForBiome(biome string) []string {
 	case strings.Contains(b, "desert"), strings.Contains(b, "dry"), strings.Contains(b, "savanna"), strings.Contains(b, "badlands"):
 		return []string{"Flies", "Ants", "Scorpions", "Beetles"}
 	case strings.Contains(b, "arctic"), strings.Contains(b, "tundra"), strings.Contains(b, "winter"):
-		return []string{"Biting Midges", "Mosquitoes (seasonal)"}
+		return []string{"Biting Midges", "Blackflies", "Ticks"}
 	default:
 		return []string{"Mosquitoes", "Ticks", "Flies"}
 	}

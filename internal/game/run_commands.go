@@ -360,7 +360,11 @@ func (s *RunState) executeForageCommand(fields []string) RunCommandResult {
 }
 
 func (s *RunState) executeTreesCommand() RunCommandResult {
-	trees := TreesForBiome(s.Scenario.Biome)
+	biome := s.CurrentBiomeQuery()
+	if strings.TrimSpace(biome) == "" {
+		biome = s.Scenario.Biome
+	}
+	trees := TreesForBiome(biome)
 	if len(trees) == 0 {
 		return RunCommandResult{Handled: true, Message: "No tree resources registered for this biome."}
 	}
@@ -372,7 +376,11 @@ func (s *RunState) executeTreesCommand() RunCommandResult {
 }
 
 func (s *RunState) executePlantsCommand() RunCommandResult {
-	available := ResourcesForBiome(s.Scenario.Biome)
+	biome := s.CurrentBiomeQuery()
+	if strings.TrimSpace(biome) == "" {
+		biome = s.Scenario.Biome
+	}
+	available := ResourcesForBiome(biome)
 	if len(available) == 0 {
 		return RunCommandResult{Handled: true, Message: "No utility plant resources available."}
 	}
@@ -390,7 +398,11 @@ func (s *RunState) executePlantsCommand() RunCommandResult {
 }
 
 func (s *RunState) executeResourcesCommand() RunCommandResult {
-	available := ResourcesForBiome(s.Scenario.Biome)
+	biome := s.CurrentBiomeQuery()
+	if strings.TrimSpace(biome) == "" {
+		biome = s.Scenario.Biome
+	}
+	available := ResourcesForBiome(biome)
 	if len(available) == 0 {
 		return RunCommandResult{Handled: true, Message: "No biome resources available."}
 	}
