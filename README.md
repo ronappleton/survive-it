@@ -67,3 +67,17 @@ go run ./cmd/genprofile --bbox "minLon,minLat,maxLon,maxLat" --out "assets/profi
 ```
 
 Raw downloaded cache is stored in `.cache/genprofile/` and is git-ignored.
+
+## macOS `.app` Packaging
+
+After GoReleaser builds Darwin binaries into `dist/`, package `.app` bundles (including `assets/`) for both `amd64` and `arm64`:
+
+```bash
+./scripts/package-macos-app.sh v1.2.3
+```
+
+Outputs:
+
+- `dist/survive-it_<version>_darwin_amd64.app.zip`
+- `dist/survive-it_<version>_darwin_arm64.app.zip`
+- `dist/macos-app-artifacts.txt` (artifact list for CI upload)

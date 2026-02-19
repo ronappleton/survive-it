@@ -89,3 +89,25 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build macOS .app bundles (amd64 + arm64)
+        if: steps.already.outputs.already == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/package-macos-app.sh
+          ./scripts/package-macos-app.sh "${{ steps.next.outputs.tag }}"
+
+      - name: Upload macOS .app bundles to release
+        if: steps.already.outputs.already == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.next.outputs.tag }}"
+          while IFS= read -r artifact; do
+            [[ -z "$artifact" ]] && continue
+            echo "Uploading $artifact to $TAG"
+            gh release upload "$TAG" "$artifact" --clobber
+          done < dist/macos-app-artifacts.txt
