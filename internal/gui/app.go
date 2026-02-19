@@ -142,7 +142,7 @@ func (a *App) Run() error {
 func newGameUI(cfg AppConfig) *gameUI {
 	ui := &gameUI{
 		cfg:          cfg,
-		width:        1024,
+		width:        1366,
 		height:       768,
 		screen:       screenMenu,
 		autoDayHours: 2,
@@ -161,11 +161,14 @@ func newGameUI(cfg AppConfig) *gameUI {
 }
 
 func (ui *gameUI) Run() error {
-	rl.SetConfigFlags(rl.FlagWindowResizable)
+	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
 	rl.InitWindow(ui.width, ui.height, "survive-it")
 	defer rl.CloseWindow()
 	rl.SetExitKey(0)
 	rl.SetTargetFPS(60)
+	// Slightly soften text edges on scaled/default font rendering.
+	defaultFont := rl.GetFontDefault()
+	rl.SetTextureFilter(defaultFont.Texture, rl.FilterBilinear)
 
 	for !ui.quit && !rl.WindowShouldClose() {
 		now := time.Now()
