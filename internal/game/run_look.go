@@ -122,7 +122,7 @@ func (s *RunState) describeLookOverview(relative, dir string, cell TopoCell, tx,
 		posLabel, dir, biome, treeSnippet, insectSnippet, plantSnippet, waterSnippet)
 }
 
-func (s *RunState) describeLookCloser(playerID int, relative, dir, subject string, cell TopoCell, tx, ty int, inBounds bool) string {
+func (s *RunState) describeLookCloser(_ int, relative, dir, subject string, cell TopoCell, tx, ty int, inBounds bool) string {
 	if !inBounds {
 		return fmt.Sprintf("Looking closer %s (%s), the boundary blocks further detail.", lookRelativeLabel(relative), dir)
 	}

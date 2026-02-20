@@ -27,10 +27,8 @@ type Theme struct {
 }
 
 const (
-	spaceXS = uitheme.PaddingXS
-	spaceS  = uitheme.PaddingS
-	spaceM  = uitheme.PaddingM
-	spaceL  = uitheme.PaddingL
+	spaceS = uitheme.PaddingS
+	spaceM = uitheme.PaddingM
 )
 
 var AppTheme = Theme{
@@ -76,7 +74,6 @@ type PanelVariant = uitheme.PanelVariant
 const (
 	panelVariantDefault = uitheme.PanelStandard
 	panelVariantRaised  = uitheme.PanelLifted
-	panelVariantMuted   = uitheme.PanelMuted
 )
 
 type ButtonState = uitheme.ButtonState
@@ -84,8 +81,6 @@ type ButtonState = uitheme.ButtonState
 const (
 	buttonStateNormal   = uitheme.ButtonNormal
 	buttonStateSelected = uitheme.ButtonSelected
-	buttonStateFocused  = uitheme.ButtonFocused
-	buttonStateDisabled = uitheme.ButtonDisabled
 )
 
 type ListItemState = uitheme.ListItemState
@@ -93,8 +88,6 @@ type ListItemState = uitheme.ListItemState
 const (
 	listStateNormal   = uitheme.ListItemNormal
 	listStateSelected = uitheme.ListItemSelected
-	listStateFocused  = uitheme.ListItemFocused
-	listStateDisabled = uitheme.ListItemDisabled
 )
 
 // ---------------------------------------------------------------------------
@@ -202,10 +195,6 @@ func DrawTelemetryBar(label string, value int, rect rl.Rectangle, thresholds Tel
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-func listRowRect(x, y, width float32) rl.Rectangle {
-	return rl.NewRectangle(x, y, width, uitheme.RowHeight)
-}
 
 func drawListRowFrame(rect rl.Rectangle, selected bool) {
 	state := listStateNormal

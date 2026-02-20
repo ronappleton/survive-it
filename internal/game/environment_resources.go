@@ -737,10 +737,6 @@ type WoodStock struct {
 	Wetness float64  `json:"wetness"` // 0 = fully dry, 1 = soaked
 }
 
-func (s *RunState) addWoodStock(woodType WoodType, kg float64) error {
-	return s.addWoodStockWithWetness(woodType, kg, 0.25)
-}
-
 func (s *RunState) addWoodStockWithWetness(woodType WoodType, kg float64, wetness float64) error {
 	if s == nil || kg <= 0 {
 		return nil

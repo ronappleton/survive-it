@@ -114,10 +114,6 @@ func applyMealNutritionReserves(player *PlayerState, nutrition NutritionTotals) 
 	refreshEffectBars(player)
 }
 
-func applyDailyMetabolism(player *PlayerState) {
-	applyMetabolismFraction(player, 1.0)
-}
-
 func applyMetabolismFraction(player *PlayerState, fraction float64) {
 	if player == nil || fraction <= 0 {
 		return

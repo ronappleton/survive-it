@@ -68,18 +68,6 @@ func (ui *gameUI) openPersonalKitPicker(returnTo screen) {
 	ui.screen = screenKitPicker
 }
 
-func (ui *gameUI) openIssuedKitPicker(returnTo screen) {
-	ui.kit = kitPickerState{
-		Target:      kitTargetIssued,
-		Focus:       kitFocusCategories,
-		ReturnTo:    returnTo,
-		CategoryIdx: 0,
-		ItemIdx:     0,
-	}
-	ui.ensureSetupPlayers()
-	ui.screen = screenKitPicker
-}
-
 func (ui *gameUI) kitPickerItems() []game.KitItem {
 	if ui.kit.Target == kitTargetIssued {
 		items := append([]game.KitItem(nil), issuedKitOptionsForMode(ui.selectedMode())...)
@@ -812,20 +800,6 @@ func animalsPreviewForBiome(biome string, domain game.AnimalDomain) string {
 		parts = append(parts, fmt.Sprintf("+%d more", len(specs)-maxItems))
 	}
 	return strings.Join(parts, ", ")
-}
-
-func (ui *gameUI) customScenariosForMode(mode game.GameMode) []game.Scenario {
-	out := make([]game.Scenario, 0, len(ui.customScenarios))
-	for _, scenario := range ui.customScenarios {
-		for _, supported := range scenario.SupportedModes {
-			if supported == mode {
-				out = append(out, scenario)
-				break
-			}
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }
 
 func supportsMode(s game.Scenario, mode game.GameMode) bool {

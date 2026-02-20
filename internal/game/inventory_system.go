@@ -506,16 +506,3 @@ func (s *RunState) AdvanceMinutes(minutes int) int {
 	}
 	return daysAdvanced
 }
-
-func formatClockFromHours(hours float64) string {
-	if hours < 0 {
-		hours = 0
-	}
-	whole := int(math.Floor(hours)) % 24
-	min := int(math.Round((hours - math.Floor(hours)) * 60))
-	if min >= 60 {
-		min -= 60
-		whole = (whole + 1) % 24
-	}
-	return fmt.Sprintf("%02d:%02d", whole, min)
-}

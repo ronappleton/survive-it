@@ -16,12 +16,12 @@ func TestComputeMiniMapWindowClampsAtBounds(t *testing.T) {
 		t.Fatalf("expected centered window start 40,30 got %d,%d", startX, startY)
 	}
 
-	startX, startY, cols, rows = computeMiniMapWindow(100, 80, 1, 2, 21)
+	startX, startY, _, _ = computeMiniMapWindow(100, 80, 1, 2, 21)
 	if startX != 0 || startY != 0 {
 		t.Fatalf("expected clamped start at origin, got %d,%d", startX, startY)
 	}
 
-	startX, startY, cols, rows = computeMiniMapWindow(100, 80, 99, 79, 21)
+	startX, startY, _, _ = computeMiniMapWindow(100, 80, 99, 79, 21)
 	if startX != 79 || startY != 59 {
 		t.Fatalf("expected clamped end window start 79,59 got %d,%d", startX, startY)
 	}

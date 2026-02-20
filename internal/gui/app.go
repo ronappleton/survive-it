@@ -205,7 +205,6 @@ type gameUI struct {
 	runMessages []string
 	runInput    string
 	status      string
-	runFocus    int
 	lastEntity  string
 
 	skillBaseline      map[int]runSkillSnapshot
@@ -1110,7 +1109,7 @@ func (ui *gameUI) updatePlayerConfig() {
 	}
 }
 
-func (ui *gameUI) adjustPlayerConfig(p *game.PlayerConfig, delta int) {
+func (ui *gameUI) adjustPlayerConfig(_ *game.PlayerConfig, delta int) {
 	switch ui.pcfg.Cursor {
 	case 0:
 		ui.pcfg.PlayerIndex = wrapIndex(ui.pcfg.PlayerIndex+delta, len(ui.pcfg.Players))
@@ -1201,7 +1200,6 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.run = &run
 	ui.runMessages = nil
 	ui.runPlayedFor = 0
-	ui.runFocus = 0
 	ui.runInput = ""
 	ui.lastEntity = ""
 	ui.skillBaseline = nil
@@ -1246,7 +1244,6 @@ func (ui *gameUI) updateLoad() {
 		r.EnsurePlayerRuntimeStats()
 		ui.run = &r
 		ui.runPlayedFor = 0
-		ui.runFocus = 0
 		ui.lastEntity = ""
 		ui.skillBaseline = nil
 		ui.skillBaselineDay = -1
@@ -1313,7 +1310,6 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		return
 	}
 	ui.run.EnsureTopology()
-	ui.runFocus = 0
 	if HotkeysEnabled(ui) && ShiftPressedKey(rl.KeyP) {
 		ui.rplay.Cursor = 0
 		ui.screen = screenRunPlayers
@@ -2633,10 +2629,6 @@ func (ui *gameUI) selectedMode() game.GameMode {
 	return modes[ui.setup.ModeIndex]
 }
 
-func scenariosForMode(mode game.GameMode) []game.Scenario {
-	return scenariosForModeWithCustom(mode, nil)
-}
-
 func scenariosForModeWithCustom(mode game.GameMode, custom []game.Scenario) []game.Scenario {
 	all := append([]game.Scenario{}, game.BuiltInScenarios()...)
 	all = append(all, custom...)
@@ -3251,10 +3243,6 @@ func formatClockFromHours(hours float64) string {
 		whole = (whole + 1) % 24
 	}
 	return fmt.Sprintf("%02d:%02d", whole, minutes)
-}
-
-func drawUILine(x1 float32, y1 float32, x2 float32, y2 float32, thickness float32, clr rl.Color) {
-	rl.DrawLineEx(rl.Vector2{X: x1, Y: y1}, rl.Vector2{X: x2, Y: y2}, thickness, clr)
 }
 
 func drawRunStatBar(rect rl.Rectangle, label string, value int, danger bool) {

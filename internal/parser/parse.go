@@ -421,9 +421,7 @@ func inferFreeTextIntent(ctx ParseContext, raw string, normalised string) *Inten
 		tokens := tokenise(n)
 		if len(tokens) > 1 {
 			entity := strings.Join(tokens[1:], " ")
-			if strings.HasPrefix(entity, "up ") {
-				entity = strings.TrimPrefix(entity, "up ")
-			}
+			entity = strings.TrimPrefix(entity, "up ")
 			if entity != "" {
 				m, confidence, tie := resolveEntity(entity, ctx, "take")
 				if tie && len(m) >= 2 {
