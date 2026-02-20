@@ -41,7 +41,7 @@ func TestSubmitRunInputGoWithoutDistanceQueuesPendingPrompt(t *testing.T) {
 	if !pendingMissingField(ui.pendingIntent, "distance") {
 		t.Fatalf("expected pending missing field to include distance, got %+v", ui.pendingIntent.MissingFields)
 	}
-	if len(ui.runMessages) == 0 || !strings.Contains(strings.ToLower(ui.runMessages[len(ui.runMessages)-1]), "how far?") {
+	if len(ui.runMessages) == 0 || !strings.Contains(strings.ToLower(ui.runMessages[len(ui.runMessages)-1]), "how far") {
 		t.Fatalf("expected distance prompt in message log, got: %+v", ui.runMessages)
 	}
 }

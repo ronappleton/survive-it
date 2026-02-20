@@ -15,6 +15,21 @@ type Quantity struct {
 	Unit string
 }
 
+type MovementCondition string
+
+const (
+	ConditionNone  MovementCondition = ""
+	ConditionDark  MovementCondition = "dark"
+	ConditionTired MovementCondition = "tired"
+)
+
+type MovementScale struct {
+	DistanceMeters  float64
+	DurationMinutes float64
+	Tiles           int
+	Condition       MovementCondition
+}
+
 type Intent struct {
 	Raw        string
 	Normalised string
@@ -22,6 +37,7 @@ type Intent struct {
 	Verb       string
 	Args       []string
 	Quantity   *Quantity
+	Movement   *MovementScale
 	Confidence float64
 	Clarify    *ClarifyQuestion
 }

@@ -42,7 +42,11 @@ type TravelResult struct {
 	EncounterLogs   []string
 }
 
-const travelTileKm = 0.1
+const (
+	travelTileKm  = 0.1
+	WalkSpeedKmph = 3.5
+	RunSpeedKmph  = 6.0
+)
 
 func ParseTravelDistanceInput(raw string) (float64, bool) {
 	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(raw)))
@@ -60,6 +64,13 @@ func parseTravelDistanceTokens(tokens []string) (float64, bool) {
 	if len(filtered) == 0 {
 		return 0, false
 	}
+	// Support looping until condition
+	if len(filtered) == 1 {
+		if filtered[0] == "dark" || filtered[0] == "tired" {
+			return 1000.0, true
+		}
+	}
+
 	if len(filtered) == 1 {
 		return parseTravelDistanceToken(filtered[0])
 	}
@@ -88,6 +99,8 @@ func parseTravelDistanceToken(token string) (float64, bool) {
 		"kilometers", "kilometer", "kms", "km",
 		"meters", "meter", "metres", "metre", "m",
 		"tiles", "tile", "steps", "step",
+		"hours", "hour", "hr", "h",
+		"minutes", "minute", "mins", "min",
 	}
 	for _, suffix := range units {
 		if !strings.HasSuffix(token, suffix) {
@@ -114,6 +127,10 @@ func normaliseTravelUnit(unit string) string {
 		return "m"
 	case "tile", "tiles", "step", "steps":
 		return "tile"
+	case "hours", "hour", "hr", "h":
+		return "h"
+	case "minutes", "minute", "mins", "min":
+		return "min"
 	default:
 		return ""
 	}
@@ -125,6 +142,10 @@ func convertTravelDistance(value float64, unit string) float64 {
 		return value / 1000.0
 	case "tile":
 		return value * travelTileKm
+	case "h":
+		return value * WalkSpeedKmph
+	case "min":
+		return (value / 60.0) * WalkSpeedKmph
 	default:
 		return value
 	}

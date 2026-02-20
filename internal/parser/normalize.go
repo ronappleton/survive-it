@@ -16,7 +16,7 @@ func normaliseInput(raw string) string {
 	var b strings.Builder
 	lastSpace := false
 	for _, r := range raw {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' {
 			b.WriteRune(r)
 			lastSpace = false
 			continue

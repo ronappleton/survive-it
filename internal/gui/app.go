@@ -2155,7 +2155,7 @@ func (ui *gameUI) submitRunInput() {
 
 	ctx := ui.buildParseContext()
 	intent := ui.cmdParser.Parse(ctx, commandRaw)
-	if pending, ok := ui.pendingIntentFromParsedIntent(intent, commandRaw); ok {
+	if pending, ok := ui.pendingIntentFromParsedIntent(intent); ok {
 		ui.setPendingIntent(*pending)
 		return
 	}
@@ -2167,10 +2167,7 @@ func (ui *gameUI) submitRunInput() {
 	ui.status = "The command system is busy. Please try again."
 }
 
-func (ui *gameUI) pendingIntentFromParsedIntent(intent parser.Intent, raw string) (*parser.PendingIntent, bool) {
-	if pending, ok := pendingGoDistanceFromIntent(intent, raw); ok {
-		return pending, true
-	}
+func (ui *gameUI) pendingIntentFromParsedIntent(intent parser.Intent) (*parser.PendingIntent, bool) {
 	if pending, ok := ui.pendingCraftItemFromIntent(intent); ok {
 		return pending, true
 	}
@@ -2184,47 +2181,6 @@ func (ui *gameUI) pendingIntentFromParsedIntent(intent parser.Intent, raw string
 		MissingFields: parseMissingFieldsFromPrompt(intent.Verb, intent.Clarify.Prompt, intent.Clarify.Options),
 		Prompt:        intent.Clarify.Prompt,
 		Options:       append([]parser.Intent(nil), intent.Clarify.Options...),
-	}, true
-}
-
-func pendingGoDistanceFromIntent(intent parser.Intent, raw string) (*parser.PendingIntent, bool) {
-	if strings.ToLower(strings.TrimSpace(intent.Verb)) != "go" {
-		return nil, false
-	}
-	if intent.Clarify != nil {
-		return nil, false
-	}
-	if intent.Quantity != nil {
-		return nil, false
-	}
-	direction := ""
-	for _, arg := range intent.Args {
-		if d := mapDirectionToken(arg); d != "" {
-			direction = d
-			break
-		}
-	}
-	if direction == "" {
-		return nil, false
-	}
-	if len(intent.Args) >= 2 {
-		for _, arg := range intent.Args[1:] {
-			if _, ok := game.ParseTravelDistanceInput(arg); ok {
-				return nil, false
-			}
-		}
-	}
-	playerID := findPlayerToken(raw)
-	filled := []string{direction}
-	if playerID > 0 {
-		filled = append(filled, fmt.Sprintf("p%d", playerID))
-	}
-	return &parser.PendingIntent{
-		OriginalKind:  parser.Command,
-		OriginalVerb:  "go",
-		FilledArgs:    filled,
-		MissingFields: []string{"distance"},
-		Prompt:        "How far? (e.g. '500m', '3km', or '5 tiles')",
 	}, true
 }
 
@@ -2468,34 +2424,6 @@ func pendingMissingField(pending *parser.PendingIntent, want string) bool {
 		}
 	}
 	return false
-}
-
-func mapDirectionToken(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "n", "north":
-		return "north"
-	case "s", "south":
-		return "south"
-	case "e", "east":
-		return "east"
-	case "w", "west":
-		return "west"
-	default:
-		return ""
-	}
-}
-
-func findPlayerToken(raw string) int {
-	fields := strings.Fields(strings.ToLower(strings.TrimSpace(raw)))
-	for _, field := range fields {
-		if len(field) < 2 || field[0] != 'p' {
-			continue
-		}
-		if v, err := strconv.Atoi(strings.TrimPrefix(field, "p")); err == nil && v > 0 {
-			return v
-		}
-	}
-	return 1
 }
 
 func (ui *gameUI) openLoad(returnToRun bool) {

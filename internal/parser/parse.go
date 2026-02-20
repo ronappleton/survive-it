@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/agnivade/levenshtein"
@@ -77,16 +78,23 @@ func (p *Parser) Parse(ctx ParseContext, raw string) Intent {
 	if cmdMatch.Consumed > 0 && len(tokens) >= cmdMatch.Consumed {
 		argsTokens = tokens[cmdMatch.Consumed:]
 	}
-	argsTokens, q := splitQuantity(argsTokens)
+	def, _ := p.registry.command(intent.Verb)
+
+	var q *Quantity
+	if def.Canonical != "go" {
+		argsTokens, q = splitQuantity(argsTokens)
+	}
 	intent.Quantity = q
 
-	def, _ := p.registry.command(intent.Verb)
-	resolvedArgs, clarify, argScore := p.resolveArgs(ctx, def, argsTokens)
+	// resolveArgs now returns an optional MovementScale as well
+	scale, resolvedArgs, clarify, argScore := p.resolveArgs(ctx, def, argsTokens)
 	if clarify != nil {
 		intent.Clarify = clarify
+		intent.Args = resolvedArgs
 		intent.Confidence = 0.45
 		return intent
 	}
+	intent.Movement = scale
 	intent.Args = resolvedArgs
 	intent.Confidence = clampScore((intent.Confidence * 0.75) + (argScore * 0.25))
 
@@ -147,42 +155,55 @@ func splitQuantity(tokens []string) ([]string, *Quantity) {
 	return out, q
 }
 
-func (p *Parser) resolveArgs(ctx ParseContext, def CommandDef, args []string) ([]string, *ClarifyQuestion, float64) {
+func (p *Parser) resolveArgs(ctx ParseContext, def CommandDef, args []string) (*MovementScale, []string, *ClarifyQuestion, float64) {
 	if len(args) == 0 {
-		return nil, nil, 0.9
+		return nil, nil, nil, 0.9
 	}
 
+	var scale *MovementScale
 	resolved := make([]string, 0, len(args))
 	score := 0.9
 	for i := 0; i < len(args); i++ {
 		token := args[i]
 		if isPronoun(token) {
 			if strings.TrimSpace(ctx.LastEntity) == "" {
-				return nil, &ClarifyQuestion{Prompt: "What does that pronoun refer to?"}, 0.4
+				return nil, nil, &ClarifyQuestion{Prompt: "What does that pronoun refer to?"}, 0.4
 			}
 			resolved = append(resolved, normaliseInput(ctx.LastEntity))
 			score -= 0.08
 			continue
 		}
 
-		if def.Canonical == "go" && i == 0 {
-			mapped := mapDirection(token)
-			if mapped == "" {
-				entity, confidence, tie := resolveDirection(token, ctx.KnownDirections)
-				if tie {
-					options := []Intent{
-						{Kind: Command, Verb: "go", Args: []string{entity[0]}, Confidence: confidence},
-						{Kind: Command, Verb: "go", Args: []string{entity[1]}, Confidence: confidence - 0.01},
-					}
-					return nil, &ClarifyQuestion{Prompt: "Which direction?", Options: options}, 0.5
+		if def.Canonical == "go" {
+			if scale == nil {
+				extractedScale, consumedArgs, clarify := extractMovementScale(args)
+				if clarify != nil {
+					return nil, nil, clarify, 0.5
 				}
-				if len(entity) > 0 {
-					mapped = entity[0]
-					score = minScore(score, confidence)
-				}
+				scale = extractedScale
+				args = consumedArgs
 			}
+			if i < len(args) {
+				token = args[i]
+			} else {
+				break
+			}
+			mapped := mapDirection(token)
 			if mapped != "" {
 				resolved = append(resolved, mapped)
+				continue
+			}
+			entity, confidence, tie := resolveDirection(token, ctx.KnownDirections)
+			if tie {
+				options := []Intent{
+					{Kind: Command, Verb: "go", Args: []string{entity[0]}, Confidence: confidence},
+					{Kind: Command, Verb: "go", Args: []string{entity[1]}, Confidence: confidence - 0.01},
+				}
+				return nil, nil, &ClarifyQuestion{Prompt: "Which direction?", Options: options}, 0.5
+			}
+			if len(entity) > 0 {
+				resolved = append(resolved, entity[0])
+				score = minScore(score, confidence)
 				continue
 			}
 		}
@@ -208,7 +229,7 @@ func (p *Parser) resolveArgs(ctx ParseContext, def CommandDef, args []string) ([
 						Confidence: confidence - float64(idx)*0.01,
 					})
 				}
-				return nil, &ClarifyQuestion{
+				return nil, nil, &ClarifyQuestion{
 					Prompt:  fmt.Sprintf("Did you mean %s?", def.Canonical),
 					Options: options,
 				}, 0.52
@@ -223,7 +244,15 @@ func (p *Parser) resolveArgs(ctx ParseContext, def CommandDef, args []string) ([
 		resolved = append(resolved, token)
 		score -= 0.02
 	}
-	return resolved, nil, clampScore(score)
+
+	if def.Canonical == "go" && scale == nil {
+		return nil, resolved, &ClarifyQuestion{Prompt: "How far or how long? (e.g. 500m, 1km, 10min, until dark)"}, 0.5
+	}
+	if def.Canonical == "go" && len(resolved) == 0 {
+		return nil, nil, &ClarifyQuestion{Prompt: "Which direction?"}, 0.5
+	}
+
+	return scale, resolved, nil, clampScore(score)
 }
 
 func expectsEntity(verb string, argPos int) bool {
@@ -278,6 +307,111 @@ func invForVerb(verb string, inv []string) []string {
 	default:
 		return nil
 	}
+}
+
+// --- Movement Scale Extraction ---
+
+func extractMovementScale(tokens []string) (*MovementScale, []string, *ClarifyQuestion) {
+	if len(tokens) == 0 {
+		return nil, nil, nil
+	}
+
+	// Sniff for condition
+	last := strings.ToLower(strings.TrimSpace(tokens[len(tokens)-1]))
+	if last == "dark" || last == "darkness" || last == "nightfall" || last == "night" {
+		if len(tokens) > 1 && strings.ToLower(strings.TrimSpace(tokens[len(tokens)-2])) == "until" {
+			return &MovementScale{Condition: ConditionDark}, tokens[:len(tokens)-2], nil
+		}
+	}
+	if last == "tired" || last == "exhausted" {
+		if len(tokens) > 1 && strings.ToLower(strings.TrimSpace(tokens[len(tokens)-2])) == "until" {
+			return &MovementScale{Condition: ConditionTired}, tokens[:len(tokens)-2], nil
+		}
+	}
+
+	for i := 0; i < len(tokens); i++ {
+		// First try parseScaleSuffix which handles both ["500m"] and ["2", "hours"]
+		if dist, ok, _ := parseScaleSuffix(tokens[i:]); ok {
+			// Strip preceeding "for" if there is one e.g "for 2 hours"
+			endIndex := i
+			if i > 0 && strings.ToLower(strings.TrimSpace(tokens[i-1])) == "for" {
+				endIndex = i - 1
+			}
+			return dist, tokens[:endIndex], nil
+		}
+	}
+
+	for i := len(tokens) - 1; i >= 0; i-- {
+		token := strings.ToLower(strings.TrimSpace(tokens[i]))
+		if isNumeric(token) {
+			return nil, nil, &ClarifyQuestion{Prompt: fmt.Sprintf("%s what: meters, km, tiles, or minutes?", token)}
+		}
+	}
+
+	// No scale found. Will let resolveArgs emit the empty scale prompt.
+	return nil, tokens, nil
+}
+
+func parseScaleSuffix(tokens []string) (*MovementScale, bool, int) {
+	if len(tokens) == 0 {
+		return nil, false, 0
+	}
+
+	valSt, unitSt := "", ""
+	consumed := 0
+
+	// Check for a bare number followed by a unit, e.g. ["2", "hours"]
+	if len(tokens) >= 2 {
+		if isNumeric(tokens[0]) {
+			valSt = tokens[0]
+			unitSt = tokens[1]
+			consumed = 2 // consumed the number and unit
+		}
+	}
+
+	// Check for suffix on the number itself, e.g. ["500m"]
+	if valSt == "" {
+		units := []string{"kilometers", "kilometer", "kms", "km", "meters", "meter", "metres", "metre", "m", "tiles", "tile", "steps", "step", "hours", "hour", "hr", "h", "minutes", "minute", "mins", "min"}
+		for _, u := range units {
+			if strings.HasSuffix(strings.ToLower(tokens[0]), u) {
+				candidate := strings.TrimSuffix(strings.ToLower(tokens[0]), u)
+				if isNumeric(candidate) {
+					valSt = candidate
+					unitSt = u
+					consumed = 1
+					break
+				}
+			}
+		}
+	}
+
+	if valSt == "" || unitSt == "" {
+		return nil, false, 0
+	}
+
+	importStrconv, err := strconv.ParseFloat(valSt, 64)
+	if err != nil || importStrconv <= 0 {
+		return nil, false, 0
+	}
+
+	switch strings.ToLower(unitSt) {
+	case "km", "kms", "kilometer", "kilometers":
+		return &MovementScale{DistanceMeters: importStrconv * 1000}, true, consumed
+	case "m", "meter", "meters", "metre", "metres":
+		return &MovementScale{DistanceMeters: importStrconv}, true, consumed
+	case "tile", "tiles", "step", "steps":
+		return &MovementScale{Tiles: int(importStrconv)}, true, consumed
+	case "hours", "hour", "hr", "h":
+		return &MovementScale{DurationMinutes: importStrconv * 60}, true, consumed
+	case "minutes", "minute", "mins", "min":
+		return &MovementScale{DurationMinutes: importStrconv}, true, consumed
+	}
+	return nil, false, 0
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }
 
 func bestMatches(token string, all []string, nearbyBoost []string, inventoryBoost []string) ([]string, float64, bool) {
@@ -560,6 +694,17 @@ func IntentToCommandString(intent Intent) string {
 	}
 	if intent.Quantity != nil && intent.Quantity.Raw != "" {
 		args = append(args, normaliseInput(intent.Quantity.Raw))
+	}
+	if intent.Movement != nil {
+		if intent.Movement.DistanceMeters > 0 {
+			args = append(args, fmt.Sprintf("%fm", intent.Movement.DistanceMeters))
+		} else if intent.Movement.DurationMinutes > 0 {
+			args = append(args, fmt.Sprintf("%fmin", intent.Movement.DurationMinutes))
+		} else if intent.Movement.Tiles > 0 {
+			args = append(args, fmt.Sprintf("%dtiles", intent.Movement.Tiles))
+		} else if intent.Movement.Condition != ConditionNone {
+			args = append(args, string(intent.Movement.Condition))
+		}
 	}
 	if len(args) == 0 {
 		return verb
