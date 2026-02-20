@@ -40,8 +40,8 @@ func initTypography() {
 	uiType.log = uiType.base
 
 	fontCandidates := []string{
-		filepath.Join("assets", "fonts", "JetBrainsMono-Regular.ttf"),
-		filepath.Join("assets", "fonts", "Iosevka-Regular.ttf"),
+		filepath.Join("assets", "fonts", "OpenSans-Regular.ttf"),
+		filepath.Join("assets", "fonts", "OpenSans-SemiBold.ttf"),
 	}
 	if f, ok := loadFontFromCandidates(fontCandidates, 36); ok {
 		uiType.base = f
