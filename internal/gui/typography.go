@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	uitheme "github.com/appengine-ltd/survive-it/internal/ui/theme"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -40,8 +41,9 @@ func initTypography() {
 	uiType.log = uiType.base
 
 	fontCandidates := []string{
-		filepath.Join("assets", "fonts", "JetBrainsMono-Regular.ttf"),
-		filepath.Join("assets", "fonts", "Iosevka-Regular.ttf"),
+		filepath.Join("assets", "fonts", "Inter-Regular.ttf"),
+		filepath.Join("assets", "fonts", "IBMPlexSans-Regular.ttf"),
+		filepath.Join("assets", "fonts", "NotoSans-Regular.ttf"),
 	}
 	if f, ok := loadFontFromCandidates(fontCandidates, 36); ok {
 		uiType.base = f
@@ -51,6 +53,7 @@ func initTypography() {
 	}
 
 	rl.SetTextureFilter(uiType.base.Texture, rl.FilterBilinear)
+	uitheme.SetTextRenderer(drawText, measureText)
 }
 
 func shutdownTypography() {

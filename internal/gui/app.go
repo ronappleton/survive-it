@@ -468,15 +468,11 @@ func (ui *gameUI) drawMenu() {
 	for i, item := range items {
 		y := int32(menuRect.Y) + 70 + int32(i*72)
 		r := rl.NewRectangle(menuRect.X+36, float32(y), menuRect.Width-72, 52)
+		state := buttonStateNormal
 		if i == ui.menuCursor {
-			rl.DrawRectangleRounded(r, 0.3, 8, rl.Fade(colorAccent, 0.2))
-			rl.DrawRectangleRoundedLinesEx(r, 0.3, 8, 2, colorAccent)
-			drawText(item.Label, int32(r.X)+18, y+14, 28, colorAccent)
-		} else {
-			rl.DrawRectangleRounded(r, 0.3, 8, rl.Fade(colorPanel, 0.7))
-			rl.DrawRectangleRoundedLinesEx(r, 0.3, 8, 1.5, colorBorder)
-			drawText(item.Label, int32(r.X)+18, y+14, 28, colorText)
+			state = buttonStateSelected
 		}
+		DrawButton(r, state, item.Label)
 	}
 
 	hintRect := rl.NewRectangle(20, float32(ui.height-64), float32(ui.width-40), 40)
@@ -988,7 +984,7 @@ func (ui *gameUI) drawStatsBuilder() {
 	for i, row := range rows {
 		y := int32(left.Y) + 52 + int32(i*46)
 		if i == ui.sbuild.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 34, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-6), left.Width-20, 34), true)
 		}
 		drawText(row.label, int32(left.X)+20, y, 20, colorText)
 		drawText(truncateForUI(row.value, 38), int32(left.X)+250, y, 20, colorAccent)
@@ -1020,8 +1016,7 @@ func (ui *gameUI) drawStatsBuilder() {
 
 	if ui.sbuild.Editing {
 		r := rl.NewRectangle(left.X+20, left.Y+left.Height-120, left.Width-40, 88)
-		rl.DrawRectangleRounded(r, 0.2, 8, rl.Fade(colorPanel, 0.95))
-		rl.DrawRectangleRoundedLinesEx(r, 0.2, 8, 2, colorAccent)
+		drawDialogPanel(r)
 		drawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
 		drawText(truncateForUI(ui.sbuild.EditBuffer, 72)+"_", int32(r.X)+12, int32(r.Y)+42, 24, colorText)
 	}
@@ -1141,7 +1136,7 @@ func (ui *gameUI) drawPlayerConfig() {
 	for i, row := range rows {
 		y := int32(left.Y) + 56 + int32(i*52)
 		if i == ui.pcfg.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 36, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-6), left.Width-20, 36), true)
 		}
 		drawText(row.label, int32(left.X)+18, y, 22, colorText)
 		drawText(truncateForUI(row.value, 40), int32(left.X)+290, y, 22, colorAccent)
@@ -1149,8 +1144,7 @@ func (ui *gameUI) drawPlayerConfig() {
 
 	if ui.pcfg.EditingName {
 		r := rl.NewRectangle(left.X+20, left.Y+left.Height-104, left.Width-40, 72)
-		rl.DrawRectangleRounded(r, 0.2, 8, rl.Fade(colorPanel, 0.95))
-		rl.DrawRectangleRoundedLinesEx(r, 0.2, 8, 2, colorAccent)
+		drawDialogPanel(r)
 		drawText("Editing Name", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
 		drawText(truncateForUI(ui.pcfg.NameBuffer, 52)+"_", int32(r.X)+12, int32(r.Y)+34, 24, colorText)
 	}
