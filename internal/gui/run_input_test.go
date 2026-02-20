@@ -156,3 +156,71 @@ func TestSubmitRunInputCancelClearsPendingIntent(t *testing.T) {
 		t.Fatalf("expected cancel feedback in message log, got: %+v", ui.runMessages)
 	}
 }
+
+func TestSubmitRunInputHighRiskMovementPromptsConfirmation(t *testing.T) {
+	ui := newGameUI(AppConfig{NoUpdate: true})
+	ui.run = testRunState(t)
+
+	// Make player highly fatigued and dark out to force high risk
+	ui.run.Players[0].Fatigue = 100
+	ui.run.ClockHours = 2.0
+	// Ensure distance is provided to bypass distance prompt
+	ui.runInput = "go north 2km"
+
+	beforeKm := ui.run.Travel.TotalKm
+
+	ui.submitRunInput()
+	ui.processIntentQueue()
+
+	if ui.pendingIntent == nil {
+		t.Fatalf("expected pending intent for high risk movement")
+	}
+	if !strings.Contains(ui.pendingIntent.Prompt, "Continue? (yes/no)") {
+		t.Fatalf("expected risk confirmation prompt, got: %q", ui.pendingIntent.Prompt)
+	}
+
+	ui.runInput = "yes"
+	ui.submitRunInput()
+
+	if ui.pendingIntent != nil {
+		t.Fatalf("expected pending intent to be cleared after confirmation")
+	}
+	// processIntentQueue is not needed here because resolvePendingIntentAnswer directly enqueues
+	// wait, resolvePendingIntentAnswer returns an Intent which submitRunInput enqueues
+	ui.processIntentQueue()
+	if ui.run.Travel.TotalKm <= beforeKm {
+		t.Fatalf("expected travel progress after confirmation; before %.2f after %.2f", beforeKm, ui.run.Travel.TotalKm)
+	}
+}
+
+func TestSubmitRunInputHighRiskMovementCancel(t *testing.T) {
+	ui := newGameUI(AppConfig{NoUpdate: true})
+	ui.run = testRunState(t)
+
+	ui.run.Players[0].Fatigue = 100
+	ui.run.ClockHours = 2.0
+	ui.runInput = "go north 2km"
+
+	beforeKm := ui.run.Travel.TotalKm
+
+	ui.submitRunInput()
+	ui.processIntentQueue()
+
+	if ui.pendingIntent == nil {
+		t.Fatalf("expected pending intent for high risk movement")
+	}
+
+	ui.runInput = "no"
+	ui.submitRunInput()
+
+	if ui.pendingIntent != nil {
+		t.Fatalf("expected pending intent to be cleared after cancellation")
+	}
+	ui.processIntentQueue()
+	if ui.run.Travel.TotalKm != beforeKm {
+		t.Fatalf("did not expect travel progress after cancellation")
+	}
+	if len(ui.runMessages) == 0 || !strings.Contains(strings.ToLower(ui.runMessages[len(ui.runMessages)-1]), "action cancelled") {
+		t.Fatalf("expected cancel feedback in message log, got: %+v", ui.runMessages)
+	}
+}

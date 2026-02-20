@@ -1913,6 +1913,39 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 		return
 	}
 
+	// Risk Assessment Interception for Movement
+	if verb == "go" && !intent.ConfirmedRisk && ui.run != nil && len(ui.run.Players) > 0 {
+		var player *game.PlayerState
+		playerID := 1
+		for _, arg := range intent.Args {
+			if strings.HasPrefix(arg, "p") {
+				if id, err := strconv.Atoi(strings.TrimPrefix(arg, "p")); err == nil {
+					playerID = id
+				}
+			}
+		}
+		for i := range ui.run.Players {
+			if ui.run.Players[i].ID == playerID {
+				player = &ui.run.Players[i]
+				break
+			}
+		}
+
+		if player != nil {
+			_, tier := game.CalculateMovementRisk(player, ui.run.Weather, ui.run.ClockHours)
+			if tier >= game.RiskHigh {
+				intentCopy := intent
+				ui.setPendingIntent(parser.PendingIntent{
+					OriginalKind:   intent.Kind,
+					OriginalVerb:   "go",
+					OriginalIntent: &intentCopy,
+					Prompt:         fmt.Sprintf("Warning: Travel risk is %s. Continue? (yes/no)", tier.String()),
+				})
+				return
+			}
+		}
+	}
+
 	res := ui.run.ExecuteRunCommand(command)
 	if res.Handled {
 		ui.syncRunPlayedForToMetabolism()
@@ -2091,12 +2124,13 @@ func (ui *gameUI) formatPendingIntentLine() string {
 
 func (ui *gameUI) setPendingIntent(p parser.PendingIntent) {
 	copyPending := parser.PendingIntent{
-		OriginalKind:  p.OriginalKind,
-		OriginalVerb:  strings.ToLower(strings.TrimSpace(p.OriginalVerb)),
-		FilledArgs:    append([]string(nil), p.FilledArgs...),
-		MissingFields: append([]string(nil), p.MissingFields...),
-		Prompt:        strings.TrimSpace(p.Prompt),
-		Options:       append([]parser.Intent(nil), p.Options...),
+		OriginalKind:   p.OriginalKind,
+		OriginalVerb:   strings.ToLower(strings.TrimSpace(p.OriginalVerb)),
+		OriginalIntent: p.OriginalIntent,
+		FilledArgs:     append([]string(nil), p.FilledArgs...),
+		MissingFields:  append([]string(nil), p.MissingFields...),
+		Prompt:         strings.TrimSpace(p.Prompt),
+		Options:        append([]parser.Intent(nil), p.Options...),
 	}
 	ui.pendingIntent = &copyPending
 	if copyPending.Prompt != "" {
@@ -2226,6 +2260,19 @@ func (ui *gameUI) resolvePendingIntentAnswer(raw string) (parser.Intent, bool) {
 			return selected, true
 		}
 	}
+	if pending.OriginalIntent != nil && strings.Contains(pending.Prompt, "Continue? (yes/no)") {
+		ans := strings.ToLower(strings.TrimSpace(raw))
+		if ans == "yes" || ans == "y" {
+			approved := *pending.OriginalIntent
+			approved.ConfirmedRisk = true
+			return approved, true
+		} else if ans == "no" || ans == "n" || ans == "cancel" {
+			ui.appendRunMessage("Action cancelled.")
+			ui.clearPendingIntent()
+			return parser.Intent{}, false
+		}
+	}
+
 	switch strings.ToLower(strings.TrimSpace(pending.OriginalVerb)) {
 	case "go":
 		if pendingMissingField(pending, "distance") {

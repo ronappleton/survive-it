@@ -31,15 +31,16 @@ type MovementScale struct {
 }
 
 type Intent struct {
-	Raw        string
-	Normalised string
-	Kind       IntentKind
-	Verb       string
-	Args       []string
-	Quantity   *Quantity
-	Movement   *MovementScale
-	Confidence float64
-	Clarify    *ClarifyQuestion
+	Raw           string
+	Normalised    string
+	Kind          IntentKind
+	Verb          string
+	Args          []string
+	Quantity      *Quantity
+	Movement      *MovementScale
+	Confidence    float64
+	Clarify       *ClarifyQuestion
+	ConfirmedRisk bool
 }
 
 type ClarifyQuestion struct {
@@ -48,12 +49,13 @@ type ClarifyQuestion struct {
 }
 
 type PendingIntent struct {
-	OriginalKind  IntentKind
-	OriginalVerb  string
-	FilledArgs    []string
-	MissingFields []string
-	Prompt        string
-	Options       []Intent
+	OriginalKind   IntentKind
+	OriginalVerb   string
+	OriginalIntent *Intent
+	FilledArgs     []string
+	MissingFields  []string
+	Prompt         string
+	Options        []Intent
 }
 
 type ParseContext struct {
