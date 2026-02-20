@@ -3,45 +3,53 @@ package gui
 import (
 	"fmt"
 
+	uitheme "github.com/appengine-ltd/survive-it/internal/ui/theme"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type Theme struct {
-	Background    rl.Color
-	Panel         rl.Color
-	Border        rl.Color
-	BorderStrong  rl.Color
-	TextPrimary   rl.Color
-	TextSecondary rl.Color
-	Accent        rl.Color
-	AccentSoft    rl.Color
-	Warning       rl.Color
-	Danger        rl.Color
+	Background      rl.Color
+	Panel           rl.Color
+	PanelRaised     rl.Color
+	Border          rl.Color
+	BorderStrong    rl.Color
+	Divider         rl.Color
+	TextPrimary     rl.Color
+	TextSecondary   rl.Color
+	TextMuted       rl.Color
+	Accent          rl.Color
+	AccentSecondary rl.Color
+	AccentSoft      rl.Color
+	Warning         rl.Color
+	Danger          rl.Color
+	DisabledPanel   rl.Color
+	DisabledText    rl.Color
 }
 
 const (
-	spaceXS = float32(6)
-	spaceS  = float32(10)
-	spaceM  = float32(14)
-	spaceL  = float32(20)
-
-	panelRadius      = float32(0.08)
-	panelSegments    = int32(8)
-	panelBorderThin  = float32(1.0)
-	panelBorderThick = float32(1.8)
+	spaceXS = uitheme.PaddingXS
+	spaceS  = uitheme.PaddingS
+	spaceM  = uitheme.PaddingM
+	spaceL  = uitheme.PaddingL
 )
 
 var AppTheme = Theme{
-	Background:    rl.NewColor(15, 19, 26, 255),
-	Panel:         rl.NewColor(25, 31, 40, 244),
-	Border:        rl.NewColor(74, 92, 108, 220),
-	BorderStrong:  rl.NewColor(110, 137, 162, 240),
-	TextPrimary:   rl.NewColor(224, 232, 238, 255),
-	TextSecondary: rl.NewColor(156, 171, 184, 255),
-	Accent:        rl.NewColor(118, 167, 204, 255),
-	AccentSoft:    rl.NewColor(88, 123, 152, 222),
-	Warning:       rl.NewColor(218, 167, 92, 255),
-	Danger:        rl.NewColor(198, 92, 96, 255),
+	Background:      uitheme.BG,
+	Panel:           uitheme.Panel,
+	PanelRaised:     uitheme.PanelRaised,
+	Border:          uitheme.Border,
+	BorderStrong:    uitheme.AccentForest,
+	Divider:         uitheme.Divider,
+	TextPrimary:     uitheme.TextPrimary,
+	TextSecondary:   uitheme.TextSecondary,
+	TextMuted:       uitheme.TextMuted,
+	Accent:          uitheme.AccentEmber,
+	AccentSecondary: uitheme.AccentForest,
+	AccentSoft:      rl.Fade(uitheme.AccentForest, 0.8),
+	Warning:         uitheme.WarningAmber,
+	Danger:          uitheme.Danger,
+	DisabledPanel:   uitheme.DisabledPanel,
+	DisabledText:    uitheme.DisabledText,
 }
 
 // Compatibility aliases used by existing render code.
@@ -51,8 +59,10 @@ var (
 	colorBorder = AppTheme.Border
 	colorText   = AppTheme.TextPrimary
 	colorDim    = AppTheme.TextSecondary
+	colorMuted  = AppTheme.TextMuted
 	colorAccent = AppTheme.Accent
 	colorWarn   = AppTheme.Warning
+	colorDanger = AppTheme.Danger
 )
 
 type TelemetryThresholds struct {
@@ -61,23 +71,63 @@ type TelemetryThresholds struct {
 	Inverted bool
 }
 
+type PanelVariant = uitheme.PanelVariant
+
+const (
+	panelVariantDefault = uitheme.PanelStandard
+	panelVariantRaised  = uitheme.PanelLifted
+	panelVariantMuted   = uitheme.PanelMuted
+)
+
+type ButtonState = uitheme.ButtonState
+
+const (
+	buttonStateNormal   = uitheme.ButtonNormal
+	buttonStateSelected = uitheme.ButtonSelected
+	buttonStateFocused  = uitheme.ButtonFocused
+	buttonStateDisabled = uitheme.ButtonDisabled
+)
+
+type ListItemState = uitheme.ListItemState
+
+const (
+	listStateNormal   = uitheme.ListItemNormal
+	listStateSelected = uitheme.ListItemSelected
+	listStateFocused  = uitheme.ListItemFocused
+	listStateDisabled = uitheme.ListItemDisabled
+)
+
 func DrawPanel(rect rl.Rectangle, title string, focused bool) {
-	rl.DrawRectangleRounded(rect, panelRadius, panelSegments, AppTheme.Panel)
-	border := AppTheme.Border
-	thickness := panelBorderThin
+	variant := panelVariantDefault
 	if focused {
-		border = AppTheme.BorderStrong
-		thickness = panelBorderThick
+		variant = panelVariantRaised
 	}
-	rl.DrawRectangleRoundedLinesEx(rect, panelRadius, panelSegments, thickness, border)
+	uitheme.DrawPanel(rect, variant)
 	if title != "" {
-		drawText(title, int32(rect.X+spaceM), int32(rect.Y+spaceS), typeScale.Header, AppTheme.TextPrimary)
-		DrawDivider(rect.X+spaceM, rect.Y+spaceS+float32(typeScale.Header)+3, rect.X+rect.Width-spaceM, rect.Y+spaceS+float32(typeScale.Header)+3)
+		DrawHeader(title, int32(rect.X+spaceM), int32(rect.Y+spaceS))
+		dividerY := rect.Y + spaceS + float32(typeScale.Header) + 8
+		DrawDivider(rect.X+spaceM, dividerY, rect.X+rect.Width-spaceM, dividerY)
 	}
 }
 
+func DrawButton(rect rl.Rectangle, state ButtonState, text string) {
+	uitheme.DrawButton(rect, state, text)
+}
+
+func DrawListItem(rect rl.Rectangle, state ListItemState, leftText, rightText string) {
+	uitheme.DrawListItem(rect, state, leftText, rightText)
+}
+
+func DrawHeader(text string, x, y int32) {
+	uitheme.DrawHeader(text, x, y)
+}
+
 func DrawDivider(x1, y1, x2, y2 float32) {
-	drawUILine(x1, y1, x2, y2, 1.0, rl.Fade(AppTheme.Border, 0.7))
+	uitheme.DrawDivider(x1, y1, x2, y2)
+}
+
+func DrawHintText(text string, x, y int32) {
+	uitheme.DrawHintText(text, x, y)
 }
 
 func DrawLabelValue(label, value string, x, y int32, valueColor rl.Color) {
@@ -100,11 +150,28 @@ func DrawTelemetryBar(label string, value int, rect rl.Rectangle, thresholds Tel
 	fill := rl.NewRectangle(track.X+1, track.Y+1, (track.Width-2)*float32(v)/100.0, track.Height-2)
 
 	drawText(fmt.Sprintf("%s %d%%", label, v), int32(rect.X), labelY, typeScale.Small, AppTheme.TextSecondary)
-	rl.DrawRectangleRec(track, rl.Fade(AppTheme.TextSecondary, 0.18))
+	rl.DrawRectangleRec(track, rl.Fade(AppTheme.PanelRaised, 0.9))
 	if fill.Width > 0 {
 		rl.DrawRectangleRec(fill, telemetryFillColor(v, thresholds))
 	}
-	rl.DrawRectangleLinesEx(track, 1.0, rl.Fade(AppTheme.Border, 0.9))
+	rl.DrawRectangleLinesEx(track, 1.0, rl.Fade(AppTheme.Border, 0.95))
+}
+
+func listRowRect(x, y, width float32) rl.Rectangle {
+	return rl.NewRectangle(x, y, width, uitheme.RowHeight)
+}
+
+func drawListRowFrame(rect rl.Rectangle, selected bool) {
+	state := listStateNormal
+	if selected {
+		state = listStateSelected
+	}
+	DrawListItem(rect, state, "", "")
+}
+
+func drawDialogPanel(rect rl.Rectangle) {
+	uitheme.DrawPanel(rect, panelVariantRaised)
+	rl.DrawRectangleRoundedLinesEx(rect, uitheme.CornerRadius, uitheme.CornerSegments, 1.8, rl.Fade(AppTheme.Accent, 0.9))
 }
 
 func telemetryFillColor(value int, thresholds TelemetryThresholds) rl.Color {
@@ -123,7 +190,7 @@ func telemetryFillColor(value int, thresholds TelemetryThresholds) rl.Color {
 		if value >= warning {
 			return AppTheme.Warning
 		}
-		return AppTheme.AccentSoft
+		return AppTheme.AccentSecondary
 	}
 	if value <= danger {
 		return AppTheme.Danger
@@ -131,5 +198,5 @@ func telemetryFillColor(value int, thresholds TelemetryThresholds) rl.Color {
 	if value <= warning {
 		return AppTheme.Warning
 	}
-	return AppTheme.AccentSoft
+	return AppTheme.AccentSecondary
 }

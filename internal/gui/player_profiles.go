@@ -436,43 +436,43 @@ func (ui *gameUI) commitProfileEdit() {
 
 func (ui *gameUI) drawProfiles() {
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.4, float32(ui.height-40))
-	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Player Profiles")
 	drawPanel(right, "Profile Details")
 
-	y := int32(left.Y) + 56
+	y := int32(left.Y) + 60
 	for i, profile := range ui.profiles {
 		if y > int32(left.Y+left.Height)-120 {
 			break
 		}
 		if i == ui.profilesUI.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 34, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-8), left.Width-20, 38), true)
 		}
 		prefix := "  "
 		if profile.ID == ui.selectedProfileID {
 			prefix = "* "
 		}
-		drawText(prefix+profile.Name, int32(left.X)+16, y, 22, colorText)
-		y += 38
+		drawText(prefix+profile.Name, int32(left.X)+16, y, typeScale.Body, colorText)
+		y += 42
 	}
 
 	addRow := len(ui.profiles)
 	backRow := addRow + 1
-	addY := int32(left.Y) + int32(left.Height) - 90
+	addY := int32(left.Y) + int32(left.Height) - 102
 	if ui.profilesUI.Cursor == addRow {
-		rl.DrawRectangle(int32(left.X)+10, addY-6, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
+		drawListRowFrame(rl.NewRectangle(left.X+10, float32(addY-8), left.Width-20, 36), true)
 	}
-	drawText("Add New Profile", int32(left.X)+16, addY, 20, colorAccent)
+	drawText("Add New Profile", int32(left.X)+16, addY, typeScale.Body, colorAccent)
 	if ui.profilesUI.Cursor == backRow {
-		rl.DrawRectangle(int32(left.X)+10, addY+32, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
+		drawListRowFrame(rl.NewRectangle(left.X+10, float32(addY+30), left.Width-20, 36), true)
 	}
-	drawText("Back", int32(left.X)+16, addY+38, 20, colorText)
+	drawText("Back", int32(left.X)+16, addY+38, typeScale.Body, colorText)
 
-	drawText("Enter select | Shift+N new | Shift+R rename | Esc back", int32(left.X)+16, int32(left.Y+left.Height)-28, 17, colorDim)
+	DrawHintText("Enter select | Shift+N new | Shift+R rename | Esc back", int32(left.X)+16, int32(left.Y+left.Height)-30)
 
 	profile, ok := ui.selectedProfile()
 	if !ok {
-		drawWrappedText("No profiles available.", right, 48, 22, colorWarn)
+		drawWrappedText("No profiles available.", right, 48, typeScale.Body, colorWarn)
 		return
 	}
 	lines := []string{
@@ -497,15 +497,14 @@ func (ui *gameUI) drawProfiles() {
 		"Use Enter on a profile to make it active",
 		"for New Run Setup (Player 1 / YOU).",
 	)
-	drawLines(right, 48, 21, lines, colorText)
+	drawLines(right, 50, typeScale.Body, lines, colorText)
 
 	if strings.TrimSpace(ui.profilesUI.Status) != "" {
-		drawWrappedText(ui.profilesUI.Status, right, int32(right.Height)-72, 18, colorAccent)
+		drawWrappedText(ui.profilesUI.Status, right, int32(right.Height)-76, typeScale.Small, colorAccent)
 	}
 	if ui.profilesUI.EditingNew {
-		r := rl.NewRectangle(left.X+20, left.Y+left.Height-170, left.Width-40, 72)
-		rl.DrawRectangleRounded(r, 0.2, 8, rl.Fade(colorPanel, 0.95))
-		rl.DrawRectangleRoundedLinesEx(r, 0.2, 8, 2, colorAccent)
+		r := rl.NewRectangle(left.X+20, left.Y+left.Height-176, left.Width-40, 84)
+		drawDialogPanel(r)
 		title := "New Profile Name"
 		if strings.TrimSpace(ui.profilesUI.EditingID) != "" {
 			title = "Rename Profile"

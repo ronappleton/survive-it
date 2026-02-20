@@ -304,15 +304,15 @@ func (ui *gameUI) drawKitPicker() {
 	if len(categories) == 0 {
 		panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 		drawPanel(panel, "Kit Picker")
-		drawWrappedText("No kit items available.", panel, 60, 22, colorWarn)
+		drawWrappedText("No kit items available.", panel, 60, typeScale.Body, colorWarn)
 		return
 	}
 	ui.normalizeKitPicker(categories)
 
 	outer := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 	left := rl.NewRectangle(outer.X, outer.Y, outer.Width*0.25, outer.Height)
-	mid := rl.NewRectangle(left.X+left.Width+10, outer.Y, outer.Width*0.34, outer.Height)
-	right := rl.NewRectangle(mid.X+mid.Width+10, outer.Y, outer.X+outer.Width-(mid.X+mid.Width+10), outer.Height)
+	mid := rl.NewRectangle(left.X+left.Width+14, outer.Y, outer.Width*0.34, outer.Height)
+	right := rl.NewRectangle(mid.X+mid.Width+14, outer.Y, outer.X+outer.Width-(mid.X+mid.Width+14), outer.Height)
 	drawPanel(left, "Categories")
 	drawPanel(mid, "Items")
 	drawPanel(right, "Selection")
@@ -336,33 +336,33 @@ func (ui *gameUI) drawKitPicker() {
 		selectedCount = len(ui.setup.IssuedKit)
 		subtitle = fmt.Sprintf("Issued Kit (%s)", modeLabel(ui.selectedMode()))
 	}
-	drawText(subtitle, int32(outer.X)+14, int32(outer.Y)-2, 18, colorDim)
+	drawText(subtitle, int32(outer.X)+14, int32(outer.Y)-2, typeScale.Small, colorMuted)
 
-	cy := int32(left.Y) + 48
+	cy := int32(left.Y) + 56
 	for i, category := range categories {
-		if cy > int32(left.Y+left.Height)-34 {
+		if cy > int32(left.Y+left.Height)-44 {
 			break
 		}
 		if i == ui.kit.CategoryIdx {
-			rl.DrawRectangle(int32(left.X)+10, cy-4, int32(left.Width)-20, 28, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(cy-7), left.Width-20, 34), true)
 		}
 		label := fmt.Sprintf("%s (%d)", category.Label, len(category.Items))
 		clr := colorText
 		if i == ui.kit.CategoryIdx && ui.kit.Focus == kitFocusCategories {
 			clr = colorAccent
 		}
-		drawText(label, int32(left.X)+16, cy, 18, clr)
-		cy += 30
+		drawText(label, int32(left.X)+16, cy, typeScale.Small, clr)
+		cy += 34
 	}
 
 	current := categories[ui.kit.CategoryIdx]
-	iy := int32(mid.Y) + 48
+	iy := int32(mid.Y) + 56
 	for i, item := range current.Items {
-		if iy > int32(mid.Y+mid.Height)-34 {
+		if iy > int32(mid.Y+mid.Height)-44 {
 			break
 		}
 		if i == ui.kit.ItemIdx {
-			rl.DrawRectangle(int32(mid.X)+10, iy-4, int32(mid.Width)-20, 28, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(mid.X+10, float32(iy-7), mid.Width-20, 34), true)
 		}
 		prefix := "[ ] "
 		if selected[item] {
@@ -372,8 +372,8 @@ func (ui *gameUI) drawKitPicker() {
 		if i == ui.kit.ItemIdx && ui.kit.Focus == kitFocusItems {
 			clr = colorAccent
 		}
-		drawText(prefix+string(item), int32(mid.X)+16, iy, 18, clr)
-		iy += 30
+		drawText(prefix+string(item), int32(mid.X)+16, iy, typeScale.Small, clr)
+		iy += 34
 	}
 
 	selectedLines := make([]string, 0, selectedCount+8)
@@ -407,12 +407,12 @@ func (ui *gameUI) drawKitPicker() {
 	} else {
 		selectedLines = append(selectedLines, "", "Shift+R resets personal kit")
 	}
-	drawLines(right, 44, 18, selectedLines, colorText)
+	drawLines(right, 48, typeScale.Small, selectedLines, colorText)
 
 	help := "Up/Down move  Left/Right pane  Enter select/toggle  Space toggle  Shift+R reset  Esc back"
-	drawText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30, 17, colorDim)
+	DrawHintText(help, int32(outer.X)+14, int32(outer.Y+outer.Height)-30)
 	if strings.TrimSpace(ui.status) != "" {
-		drawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, 17, colorWarn)
+		drawText(ui.status, int32(outer.X)+14, int32(outer.Y+outer.Height)-52, typeScale.Small, colorWarn)
 	}
 }
 
@@ -653,7 +653,7 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 
 func (ui *gameUI) drawScenarioBuilder() {
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.56, float32(ui.height-40))
-	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Scenario Builder")
 	if ui.sb.PickingScenario {
 		drawPanel(right, "Scenario Browser (ACTIVE)")
@@ -699,31 +699,31 @@ func (ui *gameUI) drawScenarioBuilder() {
 	labelX := int32(left.X) + 16
 	valueX := int32(left.X) + int32(left.Width*0.58)
 	maxValueChars := maxInt(6, int((left.Width*0.40)/8))
-	y := int32(left.Y) + 54
+	y := int32(left.Y) + 58
 	for i, row := range rows {
 		if i == ui.sb.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-5, int32(left.Width)-20, 30, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-8), left.Width-20, 36), true)
 		}
 		value := row.value
 		value = truncateForUI(value, maxValueChars)
-		drawText(row.label, labelX, y, 19, colorText)
-		drawText(value, valueX, y, 19, colorAccent)
-		y += 34
+		drawText(row.label, labelX, y, typeScale.Small, colorText)
+		drawText(value, valueX, y, typeScale.Small, colorAccent)
+		y += 36
 	}
-	drawText("Left/Right change mode/player count/location/biome/days/map size", int32(left.X)+14, int32(left.Y+left.Height)-64, 17, colorDim)
-	drawText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40, 17, colorDim)
+	DrawHintText("Left/Right change mode/player count/location/biome/days/map size", int32(left.X)+14, int32(left.Y+left.Height)-64)
+	DrawHintText("Load Scenario opens right pane browse mode (auto-load while scrolling).", int32(left.X)+14, int32(left.Y+left.Height)-40)
 
 	list := ui.scenarioBuilderEntriesForMode(mode)
-	ly := int32(right.Y) + 52
+	ly := int32(right.Y) + 56
 	if len(list) == 0 {
-		drawText("No scenarios for this mode yet.", int32(right.X)+14, ly, 20, colorWarn)
+		drawText("No scenarios for this mode yet.", int32(right.X)+14, ly, typeScale.Body, colorWarn)
 	} else {
 		for i, entry := range list {
 			if ly > int32(right.Y+right.Height)-48 {
 				break
 			}
 			if i == ui.sb.ListCursor {
-				rl.DrawRectangle(int32(right.X)+10, ly-5, int32(right.Width)-20, 30, rl.Fade(colorAccent, 0.2))
+				drawListRowFrame(rl.NewRectangle(right.X+10, float32(ly-8), right.Width-20, 36), true)
 			}
 			source := "Built-in"
 			if entry.Custom {
@@ -735,8 +735,8 @@ func (ui *gameUI) drawScenarioBuilder() {
 			if ui.sb.PickingScenario && i == ui.sb.ListCursor {
 				clr = colorAccent
 			}
-			drawText(truncateForUI(line, int((right.Width-36)/8)), int32(right.X)+16, ly, 19, clr)
-			ly += 34
+			drawText(truncateForUI(line, int((right.Width-36)/8)), int32(right.X)+16, ly, typeScale.Small, clr)
+			ly += 36
 		}
 		sel := list[clampInt(ui.sb.ListCursor, 0, len(list)-1)].Scenario
 		land := animalsPreviewForBiome(sel.Biome, game.AnimalDomainLand)
@@ -751,18 +751,17 @@ func (ui *gameUI) drawScenarioBuilder() {
 		drawWrappedText("Description: "+safeText(sel.Description), right, int32(right.Height)-90, 18, colorDim)
 	}
 	if ui.sb.PickingScenario {
-		drawText("Right pane browse active: Up/Down scroll, Enter confirm, Esc cancel", int32(right.X)+14, int32(right.Y+right.Height)-20, 17, colorAccent)
+		DrawHintText("Right pane browse active: Up/Down scroll, Enter confirm, Esc cancel", int32(right.X)+14, int32(right.Y+right.Height)-20)
 	}
 
 	if ui.sb.EditingRow >= 0 {
 		r := rl.NewRectangle(left.X+18, left.Y+left.Height-138, left.Width-36, 110)
-		rl.DrawRectangleRounded(r, 0.16, 8, rl.Fade(colorPanel, 0.96))
-		rl.DrawRectangleRoundedLinesEx(r, 0.16, 8, 2, colorAccent)
+		drawDialogPanel(r)
 		drawText("Editing (Enter apply, Esc cancel)", int32(r.X)+12, int32(r.Y)+10, 18, colorAccent)
 		drawWrappedText(ui.sb.EditBuffer+"_", r, 40, 21, colorText)
 	}
 	if strings.TrimSpace(ui.sb.Status) != "" {
-		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-20, 17, colorWarn)
+		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-20, typeScale.Small, colorWarn)
 	}
 }
 
@@ -1309,32 +1308,32 @@ func (ui *gameUI) drawPhaseEditor() {
 	if len(rows) == 0 {
 		panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 		drawPanel(panel, "Phase Builder")
-		drawWrappedText("No phase rows available.", panel, 60, 22, colorWarn)
+		drawWrappedText("No phase rows available.", panel, 60, typeScale.Body, colorWarn)
 		return
 	}
 	ui.phase.Cursor = clampInt(ui.phase.Cursor, 0, len(rows)-1)
 
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.34, float32(ui.height-40))
-	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Phase Builder")
 	drawPanel(right, "Phase Timeline")
 
-	y := int32(left.Y) + 56
+	y := int32(left.Y) + 60
 	for i, row := range rows {
 		if i == ui.phase.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-8), left.Width-20, 36), true)
 		}
 		clr := colorText
 		if !row.Active {
-			clr = colorDim
+			clr = colorMuted
 		}
-		drawText(row.Label, int32(left.X)+18, y, 20, clr)
+		drawText(row.Label, int32(left.X)+18, y, typeScale.Body, clr)
 		if strings.TrimSpace(row.Value) != "" {
-			drawText(row.Value, int32(left.X)+220, y, 20, colorAccent)
+			drawText(row.Value, int32(left.X)+220, y, typeScale.Body, colorAccent)
 		}
-		y += 40
+		y += 42
 	}
-	drawText("Up/Down move  Left/Right season  Enter select  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+	DrawHintText("Up/Down move  Left/Right season  Enter select  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30)
 
 	setIdx := ui.scenarioDefaultSeasonSetIndex()
 	lines := []string{
@@ -1354,9 +1353,9 @@ func (ui *gameUI) drawPhaseEditor() {
 		"When adding a phase, season and days appear on the left.",
 		"Set days to 0 only for the final phase.",
 	)
-	drawLines(right, 44, 20, lines, colorText)
+	drawLines(right, 46, typeScale.Body, lines, colorText)
 
 	if strings.TrimSpace(ui.sb.Status) != "" {
-		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-52, 17, colorWarn)
+		drawText(ui.sb.Status, int32(left.X)+14, int32(left.Y+left.Height)-52, typeScale.Small, colorWarn)
 	}
 }

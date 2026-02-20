@@ -613,7 +613,7 @@ func (ui *gameUI) adjustOptions(delta int) {
 
 func (ui *gameUI) drawOptions() {
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.45, float32(ui.height-40))
-	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
+	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Options")
 	drawPanel(right, "Preview")
 
@@ -627,14 +627,14 @@ func (ui *gameUI) drawOptions() {
 		{"Back", "Enter"},
 	}
 	for i, row := range rows {
-		y := int32(left.Y) + 62 + int32(i*56)
+		y := int32(left.Y) + 70 + int32(i*58)
 		if i == ui.opts.Cursor {
-			rl.DrawRectangle(int32(left.X)+16, y-8, int32(left.Width)-32, 42, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+14, float32(y-10), left.Width-28, 44), true)
 		}
-		drawText(row.label, int32(left.X)+26, y, 24, colorText)
-		drawText(row.value, int32(left.X)+286, y, 24, colorAccent)
+		drawText(row.label, int32(left.X)+28, y, typeScale.Body, colorText)
+		drawText(row.value, int32(left.X)+300, y, typeScale.Body, colorAccent)
 	}
-	drawText("Left/Right adjust values, Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+	DrawHintText("Left/Right adjust values, Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-36)
 
 	exampleC := 7
 	exampleF := celsiusToFahrenheit(exampleC)
@@ -652,7 +652,7 @@ func (ui *gameUI) drawOptions() {
 		"Game sounds controls short ambient cues",
 		"(rain start, weather changes, alerts).",
 	}
-	drawLines(right, 46, 22, lines, colorText)
+	drawLines(right, 50, typeScale.Body, lines, colorText)
 }
 
 func (ui *gameUI) updateSetup() {
@@ -756,18 +756,18 @@ func (ui *gameUI) drawSetup() {
 	rightColX := int32(left.X) + int32(left.Width*0.62)
 	rightColMax := int(left.Width) - int(rightColX-int32(left.X)) - 24
 	for i, row := range rows {
-		y := int32(left.Y) + 58 + int32(i*54)
+		y := int32(left.Y) + 66 + int32(i*56)
 		if i == ui.setup.Cursor {
-			rl.DrawRectangle(int32(left.X)+18, y-8, int32(left.Width)-36, 42, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+16, float32(y-10), left.Width-32, 44), true)
 		}
-		drawText(row.label, leftColX, y, 24, colorText)
+		drawText(row.label, leftColX, y, typeScale.Body, colorText)
 		value := row.value
 		if len(value) > rightColMax/9 {
 			value = value[:maxInt(1, rightColMax/9-3)] + "..."
 		}
-		drawText(value, rightColX, y, 24, colorAccent)
+		drawText(value, rightColX, y, typeScale.Body, colorAccent)
 	}
-	drawText("Left/Right change   Enter select/open", int32(left.X)+26, int32(left.Y+left.Height)-38, 18, colorDim)
+	DrawHintText("Left/Right change   Enter select/open", int32(left.X)+26, int32(left.Y+left.Height)-36)
 
 	s := ui.selectedScenario()
 	drawWrappedText("Name: "+s.Name, right, 30, 25, colorAccent)
