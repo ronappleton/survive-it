@@ -299,6 +299,7 @@ func (ui *gameUI) toggleKitPickerSelection(item game.KitItem) {
 }
 
 func (ui *gameUI) drawKitPicker() {
+	DrawFrame(ui.width, ui.height)
 	ui.ensureSetupPlayers()
 	categories := categorizeKitItems(ui.kitPickerItems())
 	if len(categories) == 0 {
@@ -652,6 +653,7 @@ func (ui *gameUI) adjustScenarioBuilder(delta int) {
 }
 
 func (ui *gameUI) drawScenarioBuilder() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.56, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Scenario Builder")
@@ -1303,6 +1305,7 @@ func (ui *gameUI) updatePhaseEditor() {
 }
 
 func (ui *gameUI) drawPhaseEditor() {
+	DrawFrame(ui.width, ui.height)
 	ui.ensureScenarioSeasonSet()
 	rows := ui.phaseEditorRows()
 	if len(rows) == 0 {

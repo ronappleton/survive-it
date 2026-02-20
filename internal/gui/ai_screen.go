@@ -323,6 +323,7 @@ func (ui *gameUI) refreshAIModelStatus() {
 }
 
 func (ui *gameUI) drawAISettings() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.47, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
 	drawPanel(left, "AI Settings")
@@ -333,7 +334,7 @@ func (ui *gameUI) drawAISettings() {
 	for i, row := range rows {
 		y := int32(left.Y) + 62 + int32(i*56)
 		if i == ui.ai.Cursor {
-			rl.DrawRectangle(int32(left.X)+16, y-8, int32(left.Width)-32, 42, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+16, float32(y-8), left.Width-32, 42), true)
 		}
 		drawText(row.Label, int32(left.X)+26, y, 24, colorText)
 		drawText(row.Value, int32(left.X)+286, y, 24, colorAccent)

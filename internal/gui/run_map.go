@@ -475,6 +475,7 @@ func (ui *gameUI) drawRunMap() {
 	if ui.run == nil {
 		return
 	}
+	DrawFrame(ui.width, ui.height)
 	ui.run.EnsureTopology()
 	panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 	drawPanel(panel, "Topology Map")

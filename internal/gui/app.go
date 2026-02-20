@@ -441,6 +441,7 @@ func (ui *gameUI) updateMenu() {
 }
 
 func (ui *gameUI) drawMenu() {
+	DrawFrame(ui.width, ui.height)
 	titleRect := rl.NewRectangle(20, 20, float32(ui.width-40), 120)
 	drawPanel(titleRect, "SURVIVE IT")
 	drawTextCentered(fmt.Sprintf("v%s (%s) %s", ui.cfg.Version, ui.cfg.Commit, ui.cfg.BuildDate), titleRect, 42, 18, colorDim)
@@ -608,6 +609,7 @@ func (ui *gameUI) adjustOptions(delta int) {
 }
 
 func (ui *gameUI) drawOptions() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.45, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Options")
@@ -728,6 +730,7 @@ func (ui *gameUI) adjustSetup(delta int) {
 }
 
 func (ui *gameUI) drawSetup() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.56, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "New Run Setup")
@@ -805,6 +808,7 @@ func (ui *gameUI) updateScenarioPicker() {
 }
 
 func (ui *gameUI) drawScenarioPicker() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.35, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Scenario List")
@@ -819,7 +823,7 @@ func (ui *gameUI) drawScenarioPicker() {
 		clr := colorText
 		if i == ui.pick.Cursor {
 			clr = colorAccent
-			rl.DrawRectangle(int32(left.X)+12, y-6, int32(left.Width)-24, 28, rl.Fade(colorAccent, 0.18))
+			drawListRowFrame(rl.NewRectangle(left.X+12, float32(y-6), left.Width-24, 28), true)
 		}
 		drawText(scenario.Name, int32(left.X)+22, y, 22, clr)
 	}
@@ -949,6 +953,7 @@ func (ui *gameUI) adjustStatsBuilder(p *game.PlayerConfig, delta int) {
 }
 
 func (ui *gameUI) drawStatsBuilder() {
+	DrawFrame(ui.width, ui.height)
 	if len(ui.pcfg.Players) == 0 {
 		drawWrappedText("No players configured.", rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40)), 50, 22, colorWarn)
 		return
@@ -1113,6 +1118,7 @@ func (ui *gameUI) adjustPlayerConfig(p *game.PlayerConfig, delta int) {
 }
 
 func (ui *gameUI) drawPlayerConfig() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.42, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
 	drawPanel(left, "Player Config")
@@ -1256,6 +1262,7 @@ func (ui *gameUI) updateLoad() {
 }
 
 func (ui *gameUI) drawLoad() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.35, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+16, 20, float32(ui.width)-left.Width-56, float32(ui.height-40))
 	drawPanel(left, "Load Game")
@@ -1273,7 +1280,7 @@ func (ui *gameUI) drawLoad() {
 			break
 		}
 		if i == ui.load.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 32, rl.Fade(colorAccent, 0.2))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-6), left.Width-20, 32), true)
 		}
 		drawText(filepath.Base(entry.Path), int32(left.X)+20, y, 20, colorText)
 	}
@@ -1375,6 +1382,7 @@ func (ui *gameUI) drawRun() {
 	if ui.run == nil {
 		return
 	}
+	DrawFrame(ui.width, ui.height)
 	ui.run.EnsureTopology()
 	layout := runScreenLayout(ui.width, ui.height)
 	drawPanel(layout.TopRect, "Run Status")
@@ -1596,6 +1604,7 @@ func (ui *gameUI) updateRunPlayers() {
 }
 
 func (ui *gameUI) drawRunPlayers() {
+	DrawFrame(ui.width, ui.height)
 	if ui.run == nil || len(ui.run.Players) == 0 {
 		area := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 		drawPanel(area, "Run Players")
@@ -1614,7 +1623,7 @@ func (ui *gameUI) drawRunPlayers() {
 			break
 		}
 		if i == ui.rplay.Cursor {
-			rl.DrawRectangle(int32(left.X)+10, y-6, int32(left.Width)-20, 56, rl.Fade(colorAccent, 0.18))
+			drawListRowFrame(rl.NewRectangle(left.X+10, float32(y-6), left.Width-20, 56), true)
 		}
 		drawText(fmt.Sprintf("%d. %s", p.ID, p.Name), int32(left.X)+18, y, 20, colorAccent)
 		y += 22
@@ -1696,6 +1705,7 @@ func (ui *gameUI) updateRunCommandLibrary() {
 }
 
 func (ui *gameUI) drawRunCommandLibrary() {
+	DrawFrame(ui.width, ui.height)
 	panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 	left := rl.NewRectangle(panel.X+8, panel.Y+38, panel.Width*0.5-14, panel.Height-46)
 	right := rl.NewRectangle(left.X+left.Width+12, panel.Y+38, panel.Width-left.Width-26, panel.Height-46)
@@ -1794,6 +1804,7 @@ func (ui *gameUI) updateRunInventory() {
 }
 
 func (ui *gameUI) drawRunInventory() {
+	DrawFrame(ui.width, ui.height)
 	panel := rl.NewRectangle(20, 20, float32(ui.width-40), float32(ui.height-40))
 	left := rl.NewRectangle(panel.X+8, panel.Y+38, panel.Width*0.52-14, panel.Height-46)
 	right := rl.NewRectangle(left.X+left.Width+12, panel.Y+38, panel.Width-left.Width-26, panel.Height-46)

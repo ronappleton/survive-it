@@ -97,6 +97,22 @@ const (
 	listStateDisabled = uitheme.ListItemDisabled
 )
 
+// ---------------------------------------------------------------------------
+// Frame
+// ---------------------------------------------------------------------------
+
+// DrawFrame paints the wood border around the entire window and returns the
+// inner inset rectangle that all screen content should stay within.
+func DrawFrame(screenW, screenH int32) rl.Rectangle {
+	return uitheme.DrawFrame(screenW, screenH)
+}
+
+// ---------------------------------------------------------------------------
+// Panel
+// ---------------------------------------------------------------------------
+
+// DrawPanel draws a themed panel. If title is non-empty, a header with an
+// ember underline and a divider are drawn inside the panel top.
 func DrawPanel(rect rl.Rectangle, title string, focused bool) {
 	variant := panelVariantDefault
 	if focused {
@@ -110,13 +126,35 @@ func DrawPanel(rect rl.Rectangle, title string, focused bool) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Button
+// ---------------------------------------------------------------------------
+
 func DrawButton(rect rl.Rectangle, state ButtonState, text string) {
 	uitheme.DrawButton(rect, state, text)
 }
 
+// ---------------------------------------------------------------------------
+// List item
+// ---------------------------------------------------------------------------
+
 func DrawListItem(rect rl.Rectangle, state ListItemState, leftText, rightText string) {
 	uitheme.DrawListItem(rect, state, leftText, rightText)
 }
+
+// ---------------------------------------------------------------------------
+// Input field
+// ---------------------------------------------------------------------------
+
+// DrawInputField renders a styled text input field.
+// text is the current buffer; placeholder is shown when text is empty and unfocused.
+func DrawInputField(rect rl.Rectangle, text, placeholder string, focused bool) {
+	uitheme.DrawInput(rect, text, placeholder, focused)
+}
+
+// ---------------------------------------------------------------------------
+// Typography helpers
+// ---------------------------------------------------------------------------
 
 func DrawHeader(text string, x, y int32) {
 	uitheme.DrawHeader(text, x, y)
@@ -134,6 +172,10 @@ func DrawLabelValue(label, value string, x, y int32, valueColor rl.Color) {
 	drawText(label, x, y, typeScale.Body, AppTheme.TextSecondary)
 	drawText(value, x+240, y, typeScale.Body, valueColor)
 }
+
+// ---------------------------------------------------------------------------
+// Telemetry bar
+// ---------------------------------------------------------------------------
 
 func DrawTelemetryBar(label string, value int, rect rl.Rectangle, thresholds TelemetryThresholds) {
 	v := clampInt(value, 0, 100)
@@ -156,6 +198,10 @@ func DrawTelemetryBar(label string, value int, rect rl.Rectangle, thresholds Tel
 	}
 	rl.DrawRectangleLinesEx(track, 1.0, rl.Fade(AppTheme.Border, 0.95))
 }
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 func listRowRect(x, y, width float32) rl.Rectangle {
 	return rl.NewRectangle(x, y, width, uitheme.RowHeight)

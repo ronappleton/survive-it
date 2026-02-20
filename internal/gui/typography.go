@@ -54,9 +54,11 @@ func initTypography() {
 
 	rl.SetTextureFilter(uiType.base.Texture, rl.FilterBilinear)
 	uitheme.SetTextRenderer(drawText, measureText)
+	uitheme.InitSkin()
 }
 
 func shutdownTypography() {
+	uitheme.UnloadSkin()
 	if uiType.ownsLog && uiType.log.Texture.ID != 0 {
 		rl.UnloadFont(uiType.log)
 	}

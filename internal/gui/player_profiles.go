@@ -435,6 +435,7 @@ func (ui *gameUI) commitProfileEdit() {
 }
 
 func (ui *gameUI) drawProfiles() {
+	DrawFrame(ui.width, ui.height)
 	left := rl.NewRectangle(20, 20, float32(ui.width)*0.4, float32(ui.height-40))
 	right := rl.NewRectangle(left.X+left.Width+20, 20, float32(ui.width)-left.Width-60, float32(ui.height-40))
 	drawPanel(left, "Player Profiles")
