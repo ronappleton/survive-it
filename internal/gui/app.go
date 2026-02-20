@@ -136,11 +136,6 @@ type profilesState struct {
 	ReturnTo   screen
 }
 
-type pendingGoIntent struct {
-	Direction string
-	PlayerID  int
-}
-
 type runSkillSnapshot struct {
 	Hunting      int
 	Fishing      int
@@ -216,13 +211,11 @@ type gameUI struct {
 	skillBaseline      map[int]runSkillSnapshot
 	skillBaselineDay   int
 	skillBaselineBlock string
-	pendingGo          *pendingGoIntent
 
-	cmdParser      *parser.Parser
-	commandSink    CommandSink
-	intentQueue    *intentQueue
-	pendingClarify *parser.ClarifyQuestion
-	pendingOptions []parser.Intent
+	cmdParser     *parser.Parser
+	commandSink   CommandSink
+	intentQueue   *intentQueue
+	pendingIntent *parser.PendingIntent
 
 	updateAvailable      bool
 	updateBusy           bool
@@ -1214,9 +1207,7 @@ func (ui *gameUI) startRunFromConfig() {
 	ui.skillBaseline = nil
 	ui.skillBaselineDay = -1
 	ui.skillBaselineBlock = ""
-	ui.pendingGo = nil
-	ui.pendingClarify = nil
-	ui.pendingOptions = nil
+	ui.pendingIntent = nil
 	ui.runProfileID = ui.selectedProfileID
 	ui.status = ""
 	ui.appendRunMessage("Run started")
@@ -1260,9 +1251,7 @@ func (ui *gameUI) updateLoad() {
 		ui.skillBaseline = nil
 		ui.skillBaselineDay = -1
 		ui.skillBaselineBlock = ""
-		ui.pendingGo = nil
-		ui.pendingClarify = nil
-		ui.pendingOptions = nil
+		ui.pendingIntent = nil
 		ui.runProfileID = ui.selectedProfileID
 		ui.status = ""
 		ui.runMessages = nil
@@ -1342,7 +1331,7 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 		ui.screen = screenRunMap
 		return
 	}
-	if ui.handleClarifyHotkeys() {
+	if ui.handlePendingIntentHotkeys() {
 		return
 	}
 	ui.processIntentQueue()
@@ -1505,8 +1494,8 @@ func (ui *gameUI) drawRun() {
 
 	cmdHint := "Shortcuts: Shift+M map  Shift+P players  Shift+H help  Shift+I inventory  Shift+S save  Shift+L load"
 	textY := int32(layout.InputRect.Y) + 18
-	if ui.pendingClarify != nil {
-		clarify := ui.formatClarifyLine()
+	if ui.pendingIntent != nil {
+		clarify := ui.formatPendingIntentLine()
 		lines := wrapText(clarify, 16, int32(layout.InputRect.Width)-28)
 		for _, line := range lines {
 			drawText(line, int32(layout.InputRect.X)+14, textY, 16, colorWarn)
@@ -2019,22 +2008,6 @@ func (ui *gameUI) buildParseContext() parser.ParseContext {
 	return ctx
 }
 
-func (ui *gameUI) handleClarifyHotkeys() bool {
-	if ui.pendingClarify == nil || len(ui.pendingOptions) == 0 {
-		return false
-	}
-	idx := pressedClarifyIndex()
-	if idx < 0 {
-		return false
-	}
-	if idx >= len(ui.pendingOptions) {
-		ui.status = "No such clarify option."
-		return true
-	}
-	ui.selectClarifyOption(idx)
-	return true
-}
-
 func pressedClarifyIndex() int {
 	switch {
 	case rl.IsKeyPressed(rl.KeyOne):
@@ -2060,32 +2033,18 @@ func pressedClarifyIndex() int {
 	}
 }
 
-func (ui *gameUI) selectClarifyOption(index int) {
-	if index < 0 || index >= len(ui.pendingOptions) {
-		return
-	}
-	choice := ui.pendingOptions[index]
-	if ui.commandSink != nil {
-		ui.commandSink.EnqueueIntent(choice)
-	}
-	ui.pendingClarify = nil
-	ui.pendingOptions = nil
-	ui.status = ""
-	ui.appendRunMessage(fmt.Sprintf("Clarified: %s", parser.IntentToCommandString(choice)))
-}
-
-func (ui *gameUI) resolveTypedClarifyInput(raw string) (parser.Intent, bool) {
+func resolveTypedPendingOptionInput(raw string, options []parser.Intent) (parser.Intent, bool) {
 	n := strings.TrimSpace(strings.ToLower(raw))
 	if n == "" {
 		return parser.Intent{}, false
 	}
 	if v, err := strconv.Atoi(n); err == nil {
 		idx := v - 1
-		if idx >= 0 && idx < len(ui.pendingOptions) {
-			return ui.pendingOptions[idx], true
+		if idx >= 0 && idx < len(options) {
+			return options[idx], true
 		}
 	}
-	for _, option := range ui.pendingOptions {
+	for _, option := range options {
 		cmd := parser.IntentToCommandString(option)
 		if n == cmd || strings.HasPrefix(cmd, n) {
 			return option, true
@@ -2094,16 +2053,72 @@ func (ui *gameUI) resolveTypedClarifyInput(raw string) (parser.Intent, bool) {
 	return parser.Intent{}, false
 }
 
-func (ui *gameUI) formatClarifyLine() string {
-	if ui.pendingClarify == nil {
+func (ui *gameUI) handlePendingIntentHotkeys() bool {
+	if ui.pendingIntent == nil || len(ui.pendingIntent.Options) == 0 {
+		return false
+	}
+	idx := pressedClarifyIndex()
+	if idx < 0 {
+		return false
+	}
+	if idx >= len(ui.pendingIntent.Options) {
+		ui.status = "No such option."
+		return true
+	}
+	choice := ui.pendingIntent.Options[idx]
+	if ui.commandSink != nil {
+		ui.commandSink.EnqueueIntent(choice)
+	}
+	ui.appendRunMessage(fmt.Sprintf("Clarified: %s", parser.IntentToCommandString(choice)))
+	ui.clearPendingIntent()
+	ui.status = ""
+	return true
+}
+
+func (ui *gameUI) formatPendingIntentLine() string {
+	if ui.pendingIntent == nil {
 		return ""
 	}
-	parts := make([]string, 0, len(ui.pendingOptions)+1)
-	parts = append(parts, ui.pendingClarify.Prompt)
-	for i, option := range ui.pendingOptions {
+	parts := make([]string, 0, len(ui.pendingIntent.Options)+1)
+	parts = append(parts, ui.pendingIntent.Prompt)
+	for i, option := range ui.pendingIntent.Options {
 		parts = append(parts, fmt.Sprintf("%d) %s", i+1, parser.IntentToCommandString(option)))
 	}
 	return strings.Join(parts, "  ")
+}
+
+func (ui *gameUI) setPendingIntent(p parser.PendingIntent) {
+	copyPending := parser.PendingIntent{
+		OriginalKind:  p.OriginalKind,
+		OriginalVerb:  strings.ToLower(strings.TrimSpace(p.OriginalVerb)),
+		FilledArgs:    append([]string(nil), p.FilledArgs...),
+		MissingFields: append([]string(nil), p.MissingFields...),
+		Prompt:        strings.TrimSpace(p.Prompt),
+		Options:       append([]parser.Intent(nil), p.Options...),
+	}
+	ui.pendingIntent = &copyPending
+	if copyPending.Prompt != "" {
+		ui.appendRunMessage(copyPending.Prompt)
+	}
+	ui.status = ""
+}
+
+func (ui *gameUI) clearPendingIntent() {
+	ui.pendingIntent = nil
+}
+
+func (ui *gameUI) repromptPendingIntent(prompt string, options []parser.Intent) {
+	if ui.pendingIntent == nil {
+		return
+	}
+	ui.pendingIntent.Prompt = strings.TrimSpace(prompt)
+	if options != nil {
+		ui.pendingIntent.Options = append([]parser.Intent(nil), options...)
+	}
+	if ui.pendingIntent.Prompt != "" {
+		ui.appendRunMessage(ui.pendingIntent.Prompt)
+		ui.status = ui.pendingIntent.Prompt
+	}
 }
 
 func (ui *gameUI) submitRunInput() {
@@ -2117,53 +2132,29 @@ func (ui *gameUI) submitRunInput() {
 		return
 	}
 
-	if ui.pendingGo != nil {
-		selected, ok := ui.resolvePendingGoDistance(commandRaw)
-		if ok {
-			if ui.commandSink != nil {
-				ui.commandSink.EnqueueIntent(selected)
-			}
-			ui.pendingGo = nil
-			ui.status = ""
+	if ui.pendingIntent != nil {
+		if strings.EqualFold(commandRaw, "cancel") {
+			ui.clearPendingIntent()
+			ui.status = "Cancelled."
+			ui.appendRunMessage("Cancelled.")
 			return
 		}
-		ui.status = "Distance required (e.g. 500m, 3km, 5 tiles)."
-		return
-	}
-
-	if ui.pendingClarify != nil {
-		if len(ui.pendingOptions) == 0 {
-			ui.pendingClarify = nil
-		}
-	}
-	if ui.pendingClarify != nil {
-		selected, ok := ui.resolveTypedClarifyInput(commandRaw)
+		selected, ok := ui.resolvePendingIntentAnswer(commandRaw)
 		if !ok {
-			ui.status = "Pick a clarify option by number or command text."
 			return
 		}
 		if ui.commandSink != nil {
 			ui.commandSink.EnqueueIntent(selected)
 		}
-		ui.pendingClarify = nil
-		ui.pendingOptions = nil
+		ui.clearPendingIntent()
 		ui.status = ""
 		return
 	}
 
 	ctx := ui.buildParseContext()
 	intent := ui.cmdParser.Parse(ctx, commandRaw)
-	if intent.Clarify != nil {
-		ui.pendingClarify = intent.Clarify
-		ui.pendingOptions = append([]parser.Intent(nil), intent.Clarify.Options...)
-		ui.status = ""
-		return
-	}
-
-	if pending, ok := parsePendingGoStart(intent, commandRaw); ok {
-		ui.pendingGo = pending
-		ui.appendRunMessage("How far? (e.g. 'go north 500m' or 'go north 3km' or 'go north 5 tiles')")
-		ui.status = ""
+	if pending, ok := ui.pendingIntentFromParsedIntent(intent, commandRaw); ok {
+		ui.setPendingIntent(*pending)
 		return
 	}
 
@@ -2174,8 +2165,31 @@ func (ui *gameUI) submitRunInput() {
 	ui.status = "Command queue unavailable."
 }
 
-func parsePendingGoStart(intent parser.Intent, raw string) (*pendingGoIntent, bool) {
+func (ui *gameUI) pendingIntentFromParsedIntent(intent parser.Intent, raw string) (*parser.PendingIntent, bool) {
+	if pending, ok := pendingGoDistanceFromIntent(intent, raw); ok {
+		return pending, true
+	}
+	if pending, ok := ui.pendingCraftItemFromIntent(intent); ok {
+		return pending, true
+	}
+	if intent.Clarify == nil {
+		return nil, false
+	}
+	return &parser.PendingIntent{
+		OriginalKind:  intent.Kind,
+		OriginalVerb:  intent.Verb,
+		FilledArgs:    append([]string(nil), intent.Args...),
+		MissingFields: parseMissingFieldsFromPrompt(intent.Verb, intent.Clarify.Prompt, intent.Clarify.Options),
+		Prompt:        intent.Clarify.Prompt,
+		Options:       append([]parser.Intent(nil), intent.Clarify.Options...),
+	}, true
+}
+
+func pendingGoDistanceFromIntent(intent parser.Intent, raw string) (*parser.PendingIntent, bool) {
 	if strings.ToLower(strings.TrimSpace(intent.Verb)) != "go" {
+		return nil, false
+	}
+	if intent.Clarify != nil {
 		return nil, false
 	}
 	if intent.Quantity != nil {
@@ -2199,34 +2213,259 @@ func parsePendingGoStart(intent parser.Intent, raw string) (*pendingGoIntent, bo
 		}
 	}
 	playerID := findPlayerToken(raw)
-	return &pendingGoIntent{Direction: direction, PlayerID: playerID}, true
+	filled := []string{direction}
+	if playerID > 0 {
+		filled = append(filled, fmt.Sprintf("p%d", playerID))
+	}
+	return &parser.PendingIntent{
+		OriginalKind:  parser.Command,
+		OriginalVerb:  "go",
+		FilledArgs:    filled,
+		MissingFields: []string{"distance"},
+		Prompt:        "How far? (e.g. '500m', '3km', or '5 tiles')",
+	}, true
 }
 
-func (ui *gameUI) resolvePendingGoDistance(raw string) (parser.Intent, bool) {
-	if ui == nil || ui.pendingGo == nil {
+func (ui *gameUI) pendingCraftItemFromIntent(intent parser.Intent) (*parser.PendingIntent, bool) {
+	if strings.ToLower(strings.TrimSpace(intent.Verb)) != "craft" {
+		return nil, false
+	}
+	args := make([]string, 0, len(intent.Args))
+	for _, arg := range intent.Args {
+		n := strings.ToLower(strings.TrimSpace(arg))
+		if n != "" {
+			args = append(args, n)
+		}
+	}
+	if len(args) > 1 {
+		return nil, false
+	}
+	if len(args) == 1 && args[0] != "make" {
+		return nil, false
+	}
+	options := ui.craftPendingOptionsForRun()
+	prompt := "What do you want to craft? Choose a number or type an item id."
+	if len(options) == 0 {
+		prompt = "What do you want to craft? Use 'craft list' for available ids."
+	}
+	return &parser.PendingIntent{
+		OriginalKind:  parser.Command,
+		OriginalVerb:  "craft",
+		FilledArgs:    []string{"make"},
+		MissingFields: []string{"craft_item"},
+		Prompt:        prompt,
+		Options:       options,
+	}, true
+}
+
+func (ui *gameUI) resolvePendingIntentAnswer(raw string) (parser.Intent, bool) {
+	if ui == nil || ui.pendingIntent == nil {
 		return parser.Intent{}, false
 	}
+	pending := ui.pendingIntent
+	if len(pending.Options) > 0 {
+		if selected, ok := resolveTypedPendingOptionInput(raw, pending.Options); ok {
+			return selected, true
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(pending.OriginalVerb)) {
+	case "go":
+		if pendingMissingField(pending, "distance") {
+			return ui.resolvePendingGoDistanceAnswer(raw)
+		}
+	case "craft":
+		if pendingMissingField(pending, "craft_item") {
+			return ui.resolvePendingCraftItemAnswer(raw)
+		}
+	}
+
+	ui.repromptPendingIntent("Please answer the pending prompt or type 'cancel'.", nil)
+	return parser.Intent{}, false
+}
+
+func (ui *gameUI) resolvePendingGoDistanceAnswer(raw string) (parser.Intent, bool) {
+	if ui == nil || ui.pendingIntent == nil {
+		return parser.Intent{}, false
+	}
+	pending := ui.pendingIntent
+	if len(pending.FilledArgs) == 0 {
+		ui.repromptPendingIntent("Direction is missing; re-enter movement command.", nil)
+		return parser.Intent{}, false
+	}
+
 	km, ok := game.ParseTravelDistanceInput(raw)
 	if !ok || km <= 0 {
+		ui.repromptPendingIntent("Distance required (e.g. 500m, 3km, 5 tiles).", nil)
 		return parser.Intent{}, false
 	}
 	qraw := strings.ToLower(strings.TrimSpace(raw))
 	if qraw == "" {
+		ui.repromptPendingIntent("Distance required (e.g. 500m, 3km, 5 tiles).", nil)
 		return parser.Intent{}, false
 	}
-	args := []string{ui.pendingGo.Direction}
-	if ui.pendingGo.PlayerID > 0 {
-		args = append(args, fmt.Sprintf("p%d", ui.pendingGo.PlayerID))
-	}
+	args := append([]string(nil), pending.FilledArgs...)
+	base := "go " + strings.Join(args, " ")
 	return parser.Intent{
-		Raw:        fmt.Sprintf("go %s %s", ui.pendingGo.Direction, qraw),
-		Normalised: fmt.Sprintf("go %s %s", ui.pendingGo.Direction, qraw),
+		Raw:        strings.TrimSpace(base + " " + qraw),
+		Normalised: strings.TrimSpace(base + " " + qraw),
 		Kind:       parser.Command,
 		Verb:       "go",
 		Args:       args,
 		Quantity:   &parser.Quantity{Raw: qraw, N: int(math.Round(km * 1000)), Unit: "distance"},
 		Confidence: 0.98,
 	}, true
+}
+
+func (ui *gameUI) resolvePendingCraftItemAnswer(raw string) (parser.Intent, bool) {
+	if ui == nil || ui.pendingIntent == nil {
+		return parser.Intent{}, false
+	}
+	pending := ui.pendingIntent
+	if selected, ok := resolveTypedPendingOptionInput(raw, pending.Options); ok {
+		return selected, true
+	}
+
+	input := normalizeCraftAnswerInput(raw)
+	if input == "" {
+		ui.repromptPendingIntent("Choose a craft item by number or item id (or type 'cancel').", nil)
+		return parser.Intent{}, false
+	}
+
+	options := game.CraftablesForBiome(ui.run.Scenario.Biome)
+	if len(options) == 0 {
+		ui.repromptPendingIntent("No craftables available here.", nil)
+		return parser.Intent{}, false
+	}
+
+	sort.Slice(options, func(i, j int) bool {
+		return strings.ToLower(options[i].Name) < strings.ToLower(options[j].Name)
+	})
+
+	exact := make([]game.CraftableSpec, 0, 2)
+	prefix := make([]game.CraftableSpec, 0, 4)
+	contains := make([]game.CraftableSpec, 0, 4)
+	for _, spec := range options {
+		id := strings.ToLower(strings.TrimSpace(spec.ID))
+		name := strings.ToLower(strings.TrimSpace(spec.Name))
+		switch {
+		case input == id || input == name:
+			exact = append(exact, spec)
+		case strings.HasPrefix(id, input) || strings.HasPrefix(name, input):
+			prefix = append(prefix, spec)
+		case len(input) >= 3 && (strings.Contains(id, input) || strings.Contains(name, input)):
+			contains = append(contains, spec)
+		}
+	}
+
+	matches := exact
+	if len(matches) == 0 {
+		matches = prefix
+	}
+	if len(matches) == 0 {
+		matches = contains
+	}
+	if len(matches) == 0 {
+		ui.repromptPendingIntent("Unknown craft item. Type an item id or choose a numbered option.", ui.craftPendingOptionsForRun())
+		return parser.Intent{}, false
+	}
+	if len(matches) > 1 {
+		ui.repromptPendingIntent("Multiple craft items match. Choose one by number.", intentsFromCraftables(matches, 6))
+		return parser.Intent{}, false
+	}
+
+	args := append([]string(nil), pending.FilledArgs...)
+	args = append(args, strings.ToLower(strings.TrimSpace(matches[0].ID)))
+	base := strings.TrimSpace("craft " + strings.Join(args, " "))
+	return parser.Intent{
+		Raw:        base,
+		Normalised: base,
+		Kind:       parser.Command,
+		Verb:       "craft",
+		Args:       args,
+		Confidence: 0.93,
+	}, true
+}
+
+func (ui *gameUI) craftPendingOptionsForRun() []parser.Intent {
+	if ui == nil || ui.run == nil {
+		return nil
+	}
+	options := game.CraftablesForBiome(ui.run.Scenario.Biome)
+	return intentsFromCraftables(options, 6)
+}
+
+func intentsFromCraftables(items []game.CraftableSpec, limit int) []parser.Intent {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	options := append([]game.CraftableSpec(nil), items...)
+	sort.Slice(options, func(i, j int) bool {
+		return strings.ToLower(options[i].Name) < strings.ToLower(options[j].Name)
+	})
+	if len(options) > limit {
+		options = options[:limit]
+	}
+	out := make([]parser.Intent, 0, len(options))
+	for _, spec := range options {
+		id := strings.ToLower(strings.TrimSpace(spec.ID))
+		if id == "" {
+			continue
+		}
+		out = append(out, parser.Intent{
+			Kind:       parser.Command,
+			Verb:       "craft",
+			Args:       []string{"make", id},
+			Confidence: 0.9,
+		})
+	}
+	return out
+}
+
+func normalizeCraftAnswerInput(raw string) string {
+	n := strings.ToLower(strings.TrimSpace(raw))
+	n = strings.TrimPrefix(n, "craft make ")
+	n = strings.TrimPrefix(n, "craft ")
+	n = strings.TrimPrefix(n, "make ")
+	return strings.TrimSpace(n)
+}
+
+func parseMissingFieldsFromPrompt(verb, prompt string, options []parser.Intent) []string {
+	v := strings.ToLower(strings.TrimSpace(verb))
+	if v == "craft" {
+		if strings.Contains(strings.ToLower(prompt), "needs at least") || strings.Contains(strings.ToLower(prompt), "what do you want to craft") {
+			return []string{"craft_item"}
+		}
+	}
+	if v == "go" && strings.Contains(strings.ToLower(prompt), "how far") {
+		return []string{"distance"}
+	}
+
+	n := strings.ToLower(strings.TrimSpace(prompt))
+	switch {
+	case strings.Contains(n, "which direction"):
+		return []string{"direction"}
+	case strings.Contains(n, "needs at least"):
+		return []string{"argument"}
+	case strings.Contains(n, "what should i"):
+		return []string{"entity"}
+	case len(options) > 0:
+		return []string{"selection"}
+	default:
+		return []string{"clarification"}
+	}
+}
+
+func pendingMissingField(pending *parser.PendingIntent, want string) bool {
+	if pending == nil {
+		return false
+	}
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, field := range pending.MissingFields {
+		if strings.ToLower(strings.TrimSpace(field)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func mapDirectionToken(raw string) string {

@@ -31,6 +31,15 @@ type ClarifyQuestion struct {
 	Options []Intent
 }
 
+type PendingIntent struct {
+	OriginalKind  IntentKind
+	OriginalVerb  string
+	FilledArgs    []string
+	MissingFields []string
+	Prompt        string
+	Options       []Intent
+}
+
 type ParseContext struct {
 	Inventory       []string
 	Nearby          []string

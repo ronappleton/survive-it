@@ -41,7 +41,7 @@ func HotkeysEnabled(uiState *gameUI) bool {
 		if strings.TrimSpace(uiState.runInput) != "" {
 			return false
 		}
-		if uiState.pendingClarify != nil {
+		if uiState.pendingIntent != nil {
 			return false
 		}
 	}
