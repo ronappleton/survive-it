@@ -1403,7 +1403,7 @@ func (ui *gameUI) drawRun() {
 		nextIn = 0
 	}
 	posX, posY := ui.run.CurrentMapPosition()
-	clockLine := fmt.Sprintf("Clock %s | Auto-Next %s | Position (%d,%d) | Time Block %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock())
+	clockLine := fmt.Sprintf("Time %s | Next auto-day in %s | Map position (%d,%d) | Day phase %s", formatClockFromHours(ui.run.ClockHours), formatClockDuration(nextIn), posX, posY, ui.run.CurrentTimeBlock())
 	clockW := measureText(clockLine, typeScale.Small)
 	clockX := int32(layout.TopRect.X+layout.TopRect.Width) - int32(spaceM) - int32(clockW)
 	minClockX := int32(layout.TopRect.X) + 220
@@ -1492,7 +1492,7 @@ func (ui *gameUI) drawRun() {
 	drawRunMessageLog(layout.LogRect, ui.runMessages)
 	ui.drawMiniMap(layout.MiniMapRect, false)
 
-	cmdHint := "Shortcuts: Shift+M map  Shift+P players  Shift+H help  Shift+I inventory  Shift+S save  Shift+L load"
+	cmdHint := "Shortcuts: Shift+M map  Shift+P team  Shift+H help  Shift+I bags  Shift+S save  Shift+L load"
 	textY := int32(layout.InputRect.Y) + 18
 	if ui.pendingIntent != nil {
 		clarify := ui.formatPendingIntentLine()
@@ -1624,11 +1624,11 @@ func (ui *gameUI) drawRunPlayers() {
 		}
 		drawText(fmt.Sprintf("%d. %s", p.ID, p.Name), int32(left.X)+18, y, 20, colorAccent)
 		y += 22
-		drawText(fmt.Sprintf("E:%d  H2O:%d  M:%d  Hu:%d  Th:%d  Fa:%d  Ail:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments)),
+		drawText(fmt.Sprintf("Energy:%d  Water:%d  Morale:%d  Hunger:%d  Thirst:%d  Fatigue:%d  Ailments:%d", p.Energy, p.Hydration, p.Morale, p.Hunger, p.Thirst, p.Fatigue, len(p.Ailments)),
 			int32(left.X)+20, y, 17, colorText)
 		y += 34
 	}
-	drawText("Up/Down move  Shift+H command library  Shift+I inventory  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
+	drawText("Up/Down move  Shift+H command help  Shift+I bags  Esc back", int32(left.X)+14, int32(left.Y+left.Height)-30, 17, colorDim)
 
 	sel := ui.run.Players[clampInt(ui.rplay.Cursor, 0, len(ui.run.Players)-1)]
 	needs := game.DailyNutritionNeedsForPlayer(sel)
@@ -1638,13 +1638,13 @@ func (ui *gameUI) drawRunPlayers() {
 		fmt.Sprintf("Task: %s", safeText(sel.CurrentTask)),
 		fmt.Sprintf("Sex: %s  Body: %s", sel.Sex, sel.BodyType),
 		fmt.Sprintf("Height: %d ft %d in  Weight: %d kg", sel.HeightFt, sel.HeightIn, sel.WeightKg),
-		fmt.Sprintf("Mods  End:%+d  Bush:%+d  Ment:%+d", sel.Endurance, sel.Bushcraft, sel.Mental),
+		fmt.Sprintf("Base modifiers  Endurance:%+d  Bushcraft:%+d  Mental:%+d", sel.Endurance, sel.Bushcraft, sel.Mental),
 		"",
 		fmt.Sprintf("Energy:%d  Hydration:%d  Morale:%d", sel.Energy, sel.Hydration, sel.Morale),
-		fmt.Sprintf("Reserves: %dkcal  %dgP  %dgF  %dgS", sel.CaloriesReserveKcal, sel.ProteinReserveG, sel.FatReserveG, sel.SugarReserveG),
-		fmt.Sprintf("Needs/day: %dkcal  %dgP  %dgF  %dgS", needs.CaloriesKcal, needs.ProteinG, needs.FatG, needs.SugarG),
-		fmt.Sprintf("Nutrition: %dkcal  %dgP  %dgF  %dgS", sel.Nutrition.CaloriesKcal, sel.Nutrition.ProteinG, sel.Nutrition.FatG, sel.Nutrition.SugarG),
-		fmt.Sprintf("Deficit Streaks  Nutrition:%d  Dehydration:%d", sel.NutritionDeficitDays, sel.DehydrationDays),
+		fmt.Sprintf("Food reserves: %d kcal  Protein %dg  Fat %dg  Sugar %dg", sel.CaloriesReserveKcal, sel.ProteinReserveG, sel.FatReserveG, sel.SugarReserveG),
+		fmt.Sprintf("Daily needs: %d kcal  Protein %dg  Fat %dg  Sugar %dg", needs.CaloriesKcal, needs.ProteinG, needs.FatG, needs.SugarG),
+		fmt.Sprintf("Today eaten: %d kcal  Protein %dg  Fat %dg  Sugar %dg", sel.Nutrition.CaloriesKcal, sel.Nutrition.ProteinG, sel.Nutrition.FatG, sel.Nutrition.SugarG),
+		fmt.Sprintf("Low-resource streaks  Food:%d  Dehydration:%d", sel.NutritionDeficitDays, sel.DehydrationDays),
 	}
 	drawLines(right, 42, 18, lines, colorText)
 
@@ -1686,7 +1686,7 @@ func (ui *gameUI) drawRunPlayers() {
 	drawWrappedText("Ailments: "+ailments, right, 360, 18, colorWarn)
 	drawWrappedText("Personal Kit: "+personalKit, right, 430, 18, colorText)
 	drawWrappedText("Issued Kit: "+issuedKit, right, 500, 18, colorDim)
-	drawWrappedText(fmt.Sprintf("Try: actions p%d   |   hunt fish p%d", sel.ID, sel.ID), right, int32(right.Height)-44, 17, colorDim)
+	drawWrappedText(fmt.Sprintf("Try: actions p%d  or  hunt fish p%d", sel.ID, sel.ID), right, int32(right.Height)-44, 17, colorDim)
 }
 
 func (ui *gameUI) updateRunCommandLibrary() {
@@ -1706,11 +1706,11 @@ func (ui *gameUI) drawRunCommandLibrary() {
 	left := rl.NewRectangle(panel.X+8, panel.Y+38, panel.Width*0.5-14, panel.Height-46)
 	right := rl.NewRectangle(left.X+left.Width+12, panel.Y+38, panel.Width-left.Width-26, panel.Height-46)
 	drawPanel(panel, "Command Library")
-	drawPanel(left, "Run Commands")
-	drawPanel(right, "Actions & Shortcuts")
+	drawPanel(left, "Command Cheat Sheet")
+	drawPanel(right, "Examples & Shortcuts")
 
 	leftLines := []string{
-		"Core:",
+		"Core basics:",
 		"look [left|right|front|back]",
 		"look closer at <plants|trees|insects|water>",
 		"next",
@@ -1718,12 +1718,12 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"load",
 		"menu",
 		"",
-		"Hunting:",
+		"Food and hunting:",
 		"hunt land|fish|air [p#]",
 		"fish [p#]",
 		"forage [roots|berries|fruits|vegetables|any] [p#] [grams]",
 		"",
-		"Camp Systems:",
+		"Camp systems:",
 		"trees",
 		"wood gather|dry|stock",
 		"resources",
@@ -1743,7 +1743,7 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"ask <player> <task>",
 	}
 	rightLines := []string{
-		"Equipment Actions:",
+		"Equipment actions:",
 		"actions [p#]",
 		"use <item> <action> [p#]",
 		"Example: use paracord tie sticks together p1",
@@ -1751,17 +1751,18 @@ func (ui *gameUI) drawRunCommandLibrary() {
 		"Example: use rations eat p1",
 		"",
 		"Shortcuts:",
-		"Shift+P  open player UX",
+		"Shift+P  open team view",
 		"Shift+H  open command library",
-		"Shift+I  open inventory UX",
+		"Shift+I  open bags view",
 		"Shift+M  open topology map",
 		"Shift+S  save",
 		"Shift+L  load",
-		"Esc       back/menu",
+		"Esc       back to run",
 		"",
 		"Tip:",
-		"Use 'help' or 'commands' in the run input",
-		"to print the full command reference to history.",
+		"Use 'help' or 'commands' in the input bar",
+		"to print the full command list to the log.",
+		"'p#' means player number, for example p1.",
 	}
 	drawLines(left, 44, 17, leftLines, colorText)
 	drawLines(right, 44, 17, rightLines, colorText)
@@ -1807,7 +1808,7 @@ func (ui *gameUI) drawRunInventory() {
 	drawPanel(right, "Personal Carry")
 
 	campLines := []string{
-		fmt.Sprintf("Day %d  Clock %s", ui.run.Day, formatClockFromHours(ui.run.ClockHours)),
+		fmt.Sprintf("Day %d  Time %s", ui.run.Day, formatClockFromHours(ui.run.ClockHours)),
 		ui.run.CampInventorySummary(),
 		"",
 		"Traps:",
@@ -1827,7 +1828,7 @@ func (ui *gameUI) drawRunInventory() {
 			campLines = append(campLines, fmt.Sprintf("#%d %s (%s) cond:%d%% %s%s", i+1, trap.Name, trap.Quality, trap.Condition, state, pending))
 		}
 	}
-	campLines = append(campLines, "", "Quick commands:", "inventory camp", "inventory personal p#", "inventory stash/take ...", "trap check")
+	campLines = append(campLines, "", "Helpful commands:", "inventory camp", "inventory personal p# (player number)", "inventory stash/take ...", "trap check")
 	drawLines(left, 44, 18, campLines, colorText)
 
 	if len(ui.run.Players) == 0 {
@@ -1845,16 +1846,16 @@ func (ui *gameUI) drawRunInventory() {
 		fmt.Sprintf("Player %d/%d: %s", idx+1, len(ui.run.Players), player.Name),
 		personal,
 		"",
-		"Crafted items (recipes unlocked):",
+		"Items you have crafted:",
 		crafted,
 		"",
-		fmt.Sprintf("Carry stats  Str:%+d End:%+d Agi:%+d", player.Strength, player.Endurance, player.Agility),
-		fmt.Sprintf("Skills  Hunt:%d Fish:%d Forage:%d Trap:%d Fire:%d", player.Hunting, player.Fishing, player.Foraging, player.Trapping, player.Firecraft),
-		fmt.Sprintf("         Build:%d Cook:%d Nav:%d Craft:%d Gather:%d", player.Sheltercraft, player.Cooking, player.Navigation, player.Crafting, player.Gathering),
+		fmt.Sprintf("Carry stats  Strength:%+d  Endurance:%+d  Agility:%+d", player.Strength, player.Endurance, player.Agility),
+		fmt.Sprintf("Skills  Hunt:%d  Fish:%d  Forage:%d  Trap:%d  Fire:%d", player.Hunting, player.Fishing, player.Foraging, player.Trapping, player.Firecraft),
+		fmt.Sprintf("        Shelter:%d  Cook:%d  Navigate:%d  Craft:%d  Gather:%d", player.Sheltercraft, player.Cooking, player.Navigation, player.Crafting, player.Gathering),
 		"",
-		"Up/Down or Shift+Tab cycle players",
-		"Shift+P player detail",
-		"Shift+H command library",
+		"Up/Down or Shift+Tab to switch players",
+		"Shift+P open team details",
+		"Shift+H open command help",
 		"Esc back",
 	}
 	drawLines(right, 44, 18, rightLines, colorText)
@@ -1879,7 +1880,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 	}
 	command := parser.IntentToCommandString(intent)
 	if command == "" {
-		ui.status = "No command to execute."
+		ui.status = "No action to run."
 		return
 	}
 	verb := strings.ToLower(strings.TrimSpace(intent.Verb))
@@ -1917,7 +1918,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 		ui.status = ""
 		ui.appendRunMessage(res.Message)
 		if res.HoursAdvanced > 0 {
-			ui.appendRunMessage(fmt.Sprintf("Action time +%.1fh | Clock %s -> %s", res.HoursAdvanced, formatClockFromHours(prevClock), formatClockFromHours(ui.run.ClockHours)))
+			ui.appendRunMessage(fmt.Sprintf("Time spent: +%.1f hours | %s -> %s", res.HoursAdvanced, formatClockFromHours(prevClock), formatClockFromHours(ui.run.ClockHours)))
 		}
 		if ui.run.Day != prevDay {
 			weather := game.WeatherLabel(ui.run.Weather.Type)
@@ -1926,7 +1927,7 @@ func (ui *gameUI) executeIntent(intent parser.Intent) {
 		ui.updateLastEntityFromIntent(intent, true)
 		return
 	}
-	ui.status = "Unknown command"
+	ui.status = "I couldn't match that command."
 	ui.updateLastEntityFromIntent(intent, false)
 }
 
@@ -2162,7 +2163,7 @@ func (ui *gameUI) submitRunInput() {
 		ui.commandSink.EnqueueIntent(intent)
 		return
 	}
-	ui.status = "Command queue unavailable."
+	ui.status = "The command system is busy. Please try again."
 }
 
 func (ui *gameUI) pendingIntentFromParsedIntent(intent parser.Intent, raw string) (*parser.PendingIntent, bool) {

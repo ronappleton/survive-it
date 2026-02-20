@@ -78,10 +78,10 @@ func (ui *gameUI) openAISettings() {
 
 	if cfg.AIEnabled && !downloaded {
 		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: modelID})
-		ui.ai.Status = "AI disabled because selected model is not downloaded."
+		ui.ai.Status = "AI was turned off because the selected model is not downloaded yet."
 	}
 	if len(packs) == 0 {
-		ui.ai.Status = "No model packs configured."
+		ui.ai.Status = "No AI models are set up yet."
 	}
 	if configPathErr != nil {
 		ui.ai.ConfigPath = "(unavailable)"
@@ -92,13 +92,13 @@ func (ui *gameUI) openAISettings() {
 
 	switch {
 	case cfgErr != nil:
-		ui.ai.Status = "Config load failed: " + cfgErr.Error()
+		ui.ai.Status = "Could not load AI settings: " + cfgErr.Error()
 	case configPathErr != nil:
-		ui.ai.Status = "Config path unavailable: " + configPathErr.Error()
+		ui.ai.Status = "Could not find AI settings path: " + configPathErr.Error()
 	case modelPathErr != nil:
-		ui.ai.Status = "Model path unavailable: " + modelPathErr.Error()
+		ui.ai.Status = "Could not find model path: " + modelPathErr.Error()
 	case modelErr != nil:
-		ui.ai.Status = "Model status check failed: " + modelErr.Error()
+		ui.ai.Status = "Could not check model status: " + modelErr.Error()
 	}
 
 	ui.screen = screenAISettings
@@ -192,15 +192,15 @@ func (ui *gameUI) currentAIModelPack() (ai.ModelPack, bool) {
 func (ui *gameUI) toggleAIEnabled() {
 	next := !ui.ai.Enabled
 	if next && !ui.ai.Downloaded {
-		ui.ai.Status = "Download the selected model before enabling AI."
+		ui.ai.Status = "Please download the selected model before turning AI on."
 		return
 	}
 	if err := ai.SaveConfig(ai.Config{AIEnabled: next, ModelID: ui.ai.ModelID}); err != nil {
-		ui.ai.Status = "Failed to save config: " + err.Error()
+		ui.ai.Status = "Could not save AI settings: " + err.Error()
 		return
 	}
 	ui.ai.Enabled = next
-	ui.ai.Status = "AI enabled setting saved."
+	ui.ai.Status = "AI setting saved."
 }
 
 func (ui *gameUI) adjustAIModel(delta int) {
@@ -213,29 +213,29 @@ func (ui *gameUI) adjustAIModel(delta int) {
 	if ui.ai.Enabled && !ui.ai.Downloaded {
 		ui.ai.Enabled = false
 		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: ui.ai.ModelID})
-		ui.ai.Status = "AI disabled because selected model is not downloaded."
+		ui.ai.Status = "AI was turned off because this model is not downloaded."
 		return
 	}
 	if err := ai.SaveConfig(ai.Config{AIEnabled: ui.ai.Enabled, ModelID: ui.ai.ModelID}); err != nil {
-		ui.ai.Status = "Failed to save model selection: " + err.Error()
+		ui.ai.Status = "Could not save model choice: " + err.Error()
 		return
 	}
-	ui.ai.Status = "Model selection saved."
+	ui.ai.Status = "Model choice saved."
 }
 
 func (ui *gameUI) deleteAIModel() {
 	if err := ai.DeleteModel(ui.ai.ModelID); err != nil {
-		ui.ai.Status = "Delete failed: " + err.Error()
+		ui.ai.Status = "Could not delete model: " + err.Error()
 		return
 	}
 	ui.refreshAIModelStatus()
 	if ui.ai.Enabled {
 		ui.ai.Enabled = false
 		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: ui.ai.ModelID})
-		ui.ai.Status = "Model deleted. AI disabled."
+		ui.ai.Status = "Model deleted. AI turned off."
 		return
 	}
-	ui.ai.Status = "Model file deleted."
+	ui.ai.Status = "Model deleted."
 }
 
 func (ui *gameUI) startAIDownload() {
@@ -243,7 +243,7 @@ func (ui *gameUI) startAIDownload() {
 		return
 	}
 	if _, ok := ui.currentAIModelPack(); !ok {
-		ui.ai.Status = "No model pack selected."
+		ui.ai.Status = "Select a model first."
 		return
 	}
 	ui.ai.Downloading = true
@@ -295,7 +295,7 @@ doneProgress:
 			ui.ai.Status = "Download failed: " + err.Error()
 			return
 		}
-		ui.ai.Status = "Model downloaded."
+		ui.ai.Status = "Model download complete."
 	default:
 	}
 }
@@ -305,14 +305,14 @@ func (ui *gameUI) refreshAIModelStatus() {
 	if pathErr != nil {
 		ui.ai.ModelPath = "(unavailable)"
 		ui.ai.Downloaded = false
-		ui.ai.Status = "Model path unavailable: " + pathErr.Error()
+		ui.ai.Status = "Could not read model path: " + pathErr.Error()
 		return
 	}
 	ui.ai.ModelPath = modelPath
 
 	downloaded, err := ai.ModelExists(ui.ai.ModelID)
 	if err != nil {
-		ui.ai.Status = "Model status check failed: " + err.Error()
+		ui.ai.Status = "Could not check model status: " + err.Error()
 		ui.ai.Downloaded = false
 		return
 	}
@@ -335,7 +335,7 @@ func (ui *gameUI) drawAISettings() {
 		drawText(row.Label, int32(left.X)+26, y, 24, colorText)
 		drawText(row.Value, int32(left.X)+286, y, 24, colorAccent)
 	}
-	drawText("Left/Right adjust or Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+	drawText("Left/Right to change, Enter to select, Esc to go back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
 
 	packName := "(none)"
 	packURL := ""
@@ -348,7 +348,7 @@ func (ui *gameUI) drawAISettings() {
 	if ui.ai.Downloaded {
 		modelIndicator = "✓"
 	}
-	drawText(fmt.Sprintf("Model: %s %s", modelIndicator, truncateForUI(packName, 30)), int32(right.X)+24, int32(right.Y)+56, 24, colorText)
+	drawText(fmt.Sprintf("Selected: %s %s", modelIndicator, truncateForUI(packName, 34)), int32(right.X)+24, int32(right.Y)+52, 22, colorText)
 
 	progressColor := colorDim
 	progressText := "Idle"
@@ -356,13 +356,18 @@ func (ui *gameUI) drawAISettings() {
 		progressText = formatAIDownloadProgress(ui.ai.DownloadedBytes, ui.ai.DownloadTotal)
 		progressColor = colorAccent
 	}
-	drawText(progressText, int32(right.X)+24, int32(right.Y)+96, 20, progressColor)
+	drawText(progressText, int32(right.X)+24, int32(right.Y)+82, 18, progressColor)
 
-	drawWrappedText("Model Path: "+ui.ai.ModelPath, right, 136, 16, colorDim)
-	drawWrappedText("Config Path: "+ui.ai.ConfigPath, right, 178, 16, colorDim)
-	if strings.TrimSpace(packURL) != "" {
-		drawWrappedText("URL: "+packURL, right, 220, 15, colorDim)
+	if pack, ok := ui.currentAIModelPack(); ok {
+		drawWrappedText("Why pick this one: "+pack.Summary, right, 110, 16, colorText)
 	}
+
+	drawWrappedText("Model path: "+ui.ai.ModelPath, right, 166, 15, colorDim)
+	drawWrappedText("Settings file: "+ui.ai.ConfigPath, right, 196, 15, colorDim)
+	if strings.TrimSpace(packURL) != "" {
+		drawWrappedText("Download link: "+packURL, right, 226, 14, colorDim)
+	}
+	nextY := ui.drawAIModelComparisonTable(right, 260)
 
 	if strings.TrimSpace(ui.ai.Status) != "" {
 		statusColor := colorAccent
@@ -370,8 +375,86 @@ func (ui *gameUI) drawAISettings() {
 		if strings.Contains(statusLower, "failed") || strings.Contains(statusLower, "error") {
 			statusColor = colorWarn
 		}
-		drawWrappedText(ui.ai.Status, right, 282, 19, statusColor)
+		drawWrappedText(ui.ai.Status, right, nextY+8, 18, statusColor)
 	}
+}
+
+func (ui *gameUI) drawAIModelComparisonTable(panel rl.Rectangle, y int32) int32 {
+	packs := ui.modelComparisonPacks()
+	if len(packs) == 0 {
+		drawWrappedText("No model choices are available.", panel, y, 16, colorWarn)
+		return y + 28
+	}
+
+	tableTop := int32(panel.Y) + y
+	leftX := int32(panel.X) + 16
+	rowH := int32(30)
+	usableW := int32(panel.Width) - 32
+	colModel := leftX + 8
+	colSize := leftX + int32(float32(usableW)*0.42)
+	colSpeed := leftX + int32(float32(usableW)*0.55)
+	colQuality := leftX + int32(float32(usableW)*0.69)
+	colBestFor := leftX + int32(float32(usableW)*0.82)
+
+	drawText("Model comparison (selected model is listed first)", leftX, tableTop, 17, colorAccent)
+	tableTop += 26
+
+	headerRect := rl.NewRectangle(float32(leftX), float32(tableTop), panel.Width-32, float32(rowH))
+	rl.DrawRectangleRounded(headerRect, 0.2, 8, rl.Fade(colorBorder, 0.25))
+	drawText("Model", colModel, tableTop+7, 16, colorText)
+	drawText("Size", colSize, tableTop+7, 16, colorText)
+	drawText("Speed", colSpeed, tableTop+7, 16, colorText)
+	drawText("Quality", colQuality, tableTop+7, 16, colorText)
+	drawText("Best for", colBestFor, tableTop+7, 16, colorText)
+	tableTop += rowH + 4
+
+	maxRows := 6
+	for i, pack := range packs {
+		if i >= maxRows {
+			break
+		}
+		rowRect := rl.NewRectangle(float32(leftX), float32(tableTop), panel.Width-32, float32(rowH))
+		if i == 0 {
+			rl.DrawRectangleRounded(rowRect, 0.2, 8, rl.Fade(colorAccent, 0.2))
+			rl.DrawRectangleRoundedLinesEx(rowRect, 0.2, 8, 1, colorAccent)
+		} else {
+			rl.DrawRectangleRounded(rowRect, 0.2, 8, rl.Fade(colorPanel, 0.55))
+			rl.DrawRectangleRoundedLinesEx(rowRect, 0.2, 8, 1, rl.Fade(colorBorder, 0.7))
+		}
+
+		name := truncateForUI(pack.Name, 30)
+		if i == 0 {
+			name = "Current: " + truncateForUI(pack.Name, 21)
+		}
+		drawText(name, colModel, tableTop+7, 15, colorText)
+		drawText(fmt.Sprintf("%.2f GB", pack.SizeGB), colSize, tableTop+7, 15, colorText)
+		drawText(pack.Speed, colSpeed, tableTop+7, 15, colorText)
+		drawText(pack.Quality, colQuality, tableTop+7, 15, colorText)
+		drawText(truncateForUI(pack.BestFor, 24), colBestFor, tableTop+7, 15, colorText)
+		tableTop += rowH + 4
+	}
+	return int32(float32(tableTop - int32(panel.Y)))
+}
+
+func (ui *gameUI) modelComparisonPacks() []ai.ModelPack {
+	if len(ui.ai.ModelPacks) == 0 {
+		return nil
+	}
+	selectedID := strings.ToLower(strings.TrimSpace(ui.ai.ModelID))
+	out := make([]ai.ModelPack, 0, len(ui.ai.ModelPacks))
+	for _, pack := range ui.ai.ModelPacks {
+		if strings.ToLower(strings.TrimSpace(pack.ID)) == selectedID {
+			out = append(out, pack)
+			break
+		}
+	}
+	for _, pack := range ui.ai.ModelPacks {
+		if strings.ToLower(strings.TrimSpace(pack.ID)) == selectedID {
+			continue
+		}
+		out = append(out, pack)
+	}
+	return out
 }
 
 func modelPackIndexByID(packs []ai.ModelPack, id string) int {
