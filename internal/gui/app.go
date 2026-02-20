@@ -1344,6 +1344,12 @@ func (ui *gameUI) updateRun(delta time.Duration) {
 			weather := game.WeatherLabel(ui.run.Weather.Type)
 			ui.appendRunMessage(fmt.Sprintf("Day %d started | Weather: %s | Temp: %s", ui.run.Day, weather, ui.formatTemperature(ui.run.Weather.TemperatureC)))
 		}
+
+		if events := ui.run.ProcessContestantSimulation(dayDuration); len(events) > 0 {
+			for _, event := range events {
+				ui.appendRunMessage(event)
+			}
+		}
 	}
 
 	if rl.IsKeyPressed(rl.KeyEscape) {
@@ -1411,6 +1417,9 @@ func (ui *gameUI) drawRun() {
 	drawText(clockLine, clockX, int32(layout.TopRect.Y)+int32(spaceS), typeScale.Small, colorText)
 
 	header := fmt.Sprintf("Mode: %s | Scenario: %s | Day: %d | Season: %s | Weather: %s | Temp: %s", modeLabel(ui.run.Config.Mode), ui.run.Scenario.Name, ui.run.Day, season, weather, ui.formatTemperature(ui.run.Weather.TemperatureC))
+	if focus.MicroLocation == game.LocationInsideShelter {
+		header += " | [Inside Shelter]"
+	}
 	drawText(header, int32(layout.TopRect.X)+14, int32(layout.TopRect.Y)+40, typeScale.Body, colorAccent)
 
 	barInset := float32(14)

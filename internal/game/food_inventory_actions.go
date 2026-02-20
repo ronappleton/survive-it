@@ -197,7 +197,7 @@ func (s *RunState) GutCarcass(playerID int, carcassID string, kg float64) (GutRe
 		spoiledKg = math.Round(kg*0.04*100) / 100
 	}
 	if meatKg+spoiledKg > kg {
-		spoiledKg = max(0, kg-meatKg)
+		spoiledKg = maxFloat64(0, kg-meatKg)
 	}
 	inedibleKg := math.Round((kg-meatKg-spoiledKg)*100) / 100
 	if inedibleKg < 0 {
@@ -339,7 +339,7 @@ func (s *RunState) PreserveFood(playerID int, method string, itemID string, kg f
 		return PreserveResult{}, fmt.Errorf("no %s available", itemID)
 	}
 	if kg <= 0 || kg > total {
-		kg = min(total, 0.8)
+		kg = minFloat64(total, 0.8)
 	}
 	consumed, source, err := s.consumeItemForPlayer(playerID, itemID, kg, true)
 	if err != nil {
@@ -356,7 +356,7 @@ func (s *RunState) PreserveFood(playerID int, method string, itemID string, kg f
 			yield += kg * 0.04
 			hours -= 0.6
 		}
-		s.Fire.FuelKg = max(0, s.Fire.FuelKg-(kg*0.18))
+		s.Fire.FuelKg = maxFloat64(0, s.Fire.FuelKg-(kg*0.18))
 	case "dry":
 		yield = kg * 0.62
 		hours = 6.4 + (kg * 7.2)
@@ -442,7 +442,7 @@ func (s *RunState) CookFood(playerID int, rawID string, kg float64) (CookResult,
 		return CookResult{}, fmt.Errorf("no %s available", rawID)
 	}
 	if kg <= 0 || kg > total {
-		kg = min(total, 0.6)
+		kg = minFloat64(total, 0.6)
 	}
 	consumed, source, err := s.consumeItemForPlayer(playerID, rawID, kg, true)
 	if err != nil {
@@ -477,7 +477,7 @@ func (s *RunState) CookFood(playerID int, rawID string, kg float64) (CookResult,
 	player.Energy = clamp(player.Energy-int(math.Ceil(hours*1.2)), 0, 100)
 	player.Hydration = clamp(player.Hydration-int(math.Ceil(hours*0.8)), 0, 100)
 	player.Morale = clamp(player.Morale+1, 0, 100)
-	s.Fire.FuelKg = max(0, s.Fire.FuelKg-(kg*0.12))
+	s.Fire.FuelKg = maxFloat64(0, s.Fire.FuelKg-(kg*0.12))
 	if s.Fire.FuelKg <= 0.05 {
 		s.ExtinguishFire()
 	}
@@ -523,7 +523,7 @@ func (s *RunState) EatFood(playerID int, itemID string, amount float64) (EatResu
 		consumeKg = totalKg
 	}
 	if consumeKg <= 0 {
-		consumeKg = min(totalKg, 0.2)
+		consumeKg = minFloat64(totalKg, 0.2)
 	}
 	consumed, _, err := s.consumeItemForPlayer(playerID, itemID, consumeKg, true)
 	if err != nil {

@@ -97,15 +97,15 @@ func (s *RunState) campUsedKg() float64 {
 	}
 	used := 0.0
 	for _, wood := range s.WoodStock {
-		used += max(0, wood.Kg)
+		used += maxFloat64(0, wood.Kg)
 	}
 	for _, stock := range s.ResourceStock {
 		spec, ok := s.findResourceForBiome(stock.ID)
 		if ok {
-			used += max(0, stock.Qty) * defaultUnitWeightKg(spec.Unit)
+			used += maxFloat64(0, stock.Qty) * defaultUnitWeightKg(spec.Unit)
 			continue
 		}
-		used += max(0, stock.Qty) * defaultUnitWeightKg(stock.Unit)
+		used += maxFloat64(0, stock.Qty) * defaultUnitWeightKg(stock.Unit)
 	}
 	for _, item := range s.CampInventory {
 		if item.Qty <= 0 {
@@ -121,7 +121,7 @@ func (s *RunState) campUsedKg() float64 {
 }
 
 func (s *RunState) campFreeKg() float64 {
-	return max(0.0, s.campCapacityKg()-s.campUsedKg())
+	return maxFloat64(0.0, s.campCapacityKg()-s.campUsedKg())
 }
 
 func (s *RunState) canStoreAtCamp(weightKg float64) bool {
@@ -200,7 +200,7 @@ func consumeInventory(items []InventoryItem, id string, qty float64) ([]Inventor
 		if remaining <= 0 {
 			break
 		}
-		take := min(items[idx].Qty, remaining)
+		take := minFloat64(items[idx].Qty, remaining)
 		items[idx].Qty = normalizeInventoryQty(items[idx].Unit, items[idx].Qty-take)
 		remaining -= take
 	}
@@ -227,7 +227,7 @@ func inventoryTotalQtyByID(items []InventoryItem, id string) float64 {
 		if item.ID != id {
 			continue
 		}
-		total += max(0, item.Qty)
+		total += maxFloat64(0, item.Qty)
 	}
 	return total
 }

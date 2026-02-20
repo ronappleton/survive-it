@@ -215,3 +215,57 @@ func TestGoCommandStopsAtShorelineAndReportsIt(t *testing.T) {
 		t.Fatalf("expected player to remain on shore, pos=(%d,%d)", run.Travel.PosX, run.Travel.PosY)
 	}
 }
+
+func TestRunCommandEnterShelter(t *testing.T) {
+	run := newRunForCommands(t)
+
+	// Fails when no shelter is built
+	res := run.ExecuteRunCommand("enter shelter")
+	if !res.Handled || !strings.Contains(res.Message, "no shelter built here") {
+		t.Fatalf("expected to fail entering missing shelter, got: %s", res.Message)
+	}
+
+	// Build a shelter
+	run.Shelter.Type = "debris_hut"
+	run.Shelter.Durability = 100
+
+	res = run.ExecuteRunCommand("enter shelter")
+	if !res.Handled || !strings.Contains(res.Message, "crawls inside") {
+		t.Fatalf("expected to enter shelter smoothly, got: %s", res.Message)
+	}
+
+	if run.Players[0].MicroLocation != LocationInsideShelter {
+		t.Fatalf("expected micro-location to be inside")
+	}
+
+	// Fails when already inside
+	res = run.ExecuteRunCommand("enter shelter")
+	if !res.Handled || !strings.Contains(res.Message, "already inside") {
+		t.Fatalf("expected error while already inside, got: %s", res.Message)
+	}
+}
+
+func TestRunCommandExitShelter(t *testing.T) {
+	run := newRunForCommands(t)
+	run.Shelter.Type = "debris_hut"
+	run.Shelter.Durability = 100
+
+	// Fails when already outside
+	res := run.ExecuteRunCommand("exit shelter")
+	if !res.Handled || !strings.Contains(res.Message, "already outside") {
+		t.Fatalf("expected error when exiting while outside, got: %s", res.Message)
+	}
+
+	// Move inside
+	run.Players[0].MicroLocation = LocationInsideShelter
+
+	// Succeeds exiting
+	res = run.ExecuteRunCommand("exit shelter")
+	if !res.Handled || !strings.Contains(res.Message, "steps outside") {
+		t.Fatalf("expected to exit shelter smoothly, got: %s", res.Message)
+	}
+
+	if run.Players[0].MicroLocation != LocationOutside {
+		t.Fatalf("expected micro-location to be outside")
+	}
+}

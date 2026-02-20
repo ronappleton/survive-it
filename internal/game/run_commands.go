@@ -58,6 +58,10 @@ func (s *RunState) ExecuteRunCommand(raw string) RunCommandResult {
 		return s.executeFishCommand(fields[1:])
 	case "forage":
 		return s.executeForageCommand(fields[1:])
+	case "enter":
+		return s.executeEnterCommand(fields[1:])
+	case "exit", "leave":
+		return s.executeExitCommand(fields[1:])
 	case "trees":
 		return s.executeTreesCommand()
 	case "plants":
@@ -1006,6 +1010,57 @@ func (s *RunState) executeShelterCommand(fields []string) RunCommandResult {
 	default:
 		return RunCommandResult{Handled: true, Message: "Usage: shelter list | shelter build <id> [p#] | shelter status"}
 	}
+}
+
+func (s *RunState) executeEnterCommand(fields []string) RunCommandResult {
+	playerID := 1
+	for _, field := range fields {
+		if parsed := parsePlayerToken(field); parsed > 0 {
+			playerID = parsed
+		}
+	}
+
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Player %d not found.", playerID)}
+	}
+
+	if s.Shelter.Type == "" || s.Shelter.Durability <= 0 {
+		return RunCommandResult{Handled: true, Message: "There is no shelter built here."}
+	}
+
+	if player.MicroLocation == LocationInsideShelter {
+		return RunCommandResult{Handled: true, Message: "You are already inside the shelter."}
+	}
+
+	player.MicroLocation = LocationInsideShelter
+	spec, ok := shelterByID(s.Shelter.Type)
+	name := string(s.Shelter.Type)
+	if ok {
+		name = spec.Name
+	}
+	return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d crawls inside the %s, out of the elements.", playerID, name)}
+}
+
+func (s *RunState) executeExitCommand(fields []string) RunCommandResult {
+	playerID := 1
+	for _, field := range fields {
+		if parsed := parsePlayerToken(field); parsed > 0 {
+			playerID = parsed
+		}
+	}
+
+	player, ok := s.playerByID(playerID)
+	if !ok {
+		return RunCommandResult{Handled: true, Message: fmt.Sprintf("Player %d not found.", playerID)}
+	}
+
+	if player.MicroLocation == LocationOutside {
+		return RunCommandResult{Handled: true, Message: "You are already outside."}
+	}
+
+	player.MicroLocation = LocationOutside
+	return RunCommandResult{Handled: true, Message: fmt.Sprintf("P%d steps outside into the camp.", playerID)}
 }
 
 func (s *RunState) executeCraftCommand(fields []string) RunCommandResult {

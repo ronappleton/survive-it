@@ -23,6 +23,13 @@ const (
 	BodyTypeFemale  BodyType = "female"
 )
 
+type MicroLocation string
+
+const (
+	LocationOutside       MicroLocation = ""
+	LocationInsideShelter MicroLocation = "inside_shelter"
+)
+
 type TraitModifier struct {
 	Name     string `json:"name"`
 	Modifier int    `json:"modifier"`
@@ -84,6 +91,7 @@ type PlayerState struct {
 	Cooking        int             `json:"cooking"`
 	Navigation     int             `json:"navigation"`
 	CurrentTask    string          `json:"current_task"`
+	MicroLocation  MicroLocation   `json:"micro_location"`
 	Traits         []TraitModifier `json:"traits,omitempty"`
 	KitLimit       int             `json:"kit_limit"`
 	Kit            []KitItem       `json:"kit"`

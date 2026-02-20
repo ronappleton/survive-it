@@ -168,7 +168,7 @@ func (s *RunState) HuntAndCollectCarcass(playerID int, domain AnimalDomain, acti
 	if !ok {
 		return HuntResult{}, fmt.Errorf("no carcass profile for domain %s", domain)
 	}
-	kg := math.Round(max(0.1, float64(catch.WeightGrams)/1000.0)*10) / 10
+	kg := math.Round(maxFloat64(0.1, float64(catch.WeightGrams)/1000.0)*10) / 10
 	item := InventoryItem{
 		ID:       carcassID,
 		Name:     carcass.Name,
@@ -197,7 +197,7 @@ func (s *RunState) HuntAndCollectCarcass(playerID int, domain AnimalDomain, acti
 					return true
 				}
 			}
-			personalFreeKg := max(0.0, s.playerCarryLimitKg(player)-inventoryWeightKg(player.PersonalItems))
+			personalFreeKg := maxFloat64(0.0, s.playerCarryLimitKg(player)-inventoryWeightKg(player.PersonalItems))
 			maxPersonalQty := math.Floor((personalFreeKg/item.WeightKg)*10) / 10
 			if maxPersonalQty >= 0.1 {
 				partial := item

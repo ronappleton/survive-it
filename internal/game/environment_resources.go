@@ -985,24 +985,24 @@ func (s *RunState) StripBark(playerID int, treeID string, requestedQty float64) 
 		requestedQty = 6
 	}
 	primaryQty := requestedQty
-	fiberQty := max(1.0, math.Round(requestedQty*0.8))
+	fiberQty := max(1, int(math.Round(float64(requestedQty)*0.8)))
 	if primary.Unit == "kg" {
-		primaryQty = math.Round(requestedQty*10) / 10
+		primaryQty = float64(math.Round(float64(requestedQty)*10) / 10)
 	}
 
 	if err := s.addResourceStock(primary, primaryQty); err != nil {
 		return BarkStripResult{}, err
 	}
-	if err := s.addResourceStock(fiber, fiberQty); err != nil {
+	if err := s.addResourceStock(fiber, float64(fiberQty)); err != nil {
 		_ = s.consumeResourceStock(primary.ID, primaryQty)
 		return BarkStripResult{}, err
 	}
 
 	score := float64(player.Bushcraft+player.Agility+player.Crafting/25) + float64(sumTraitModifier(player.Traits))/2
 	quality := qualityFromScore(score)
-	applySkillEffort(&player.Gathering, int(math.Round(primaryQty*10)), true)
-	applySkillEffort(&player.Crafting, int(math.Round(fiberQty*8)), true)
-	hours := clampFloat(0.35+(requestedQty*0.18)-qualityTimeReduction(quality), 0.2, 2.5)
+	applySkillEffort(&player.Gathering, int(math.Round(float64(primaryQty)*10)), true)
+	applySkillEffort(&player.Crafting, int(math.Round(float64(fiberQty)*8)), true)
+	hours := clampFloat(0.35+(float64(requestedQty)*0.18)-qualityTimeReduction(quality), 0.2, 2.5)
 	player.Energy = clamp(player.Energy-int(math.Ceil(hours*3)), 0, 100)
 	player.Hydration = clamp(player.Hydration-int(math.Ceil(hours*2)), 0, 100)
 	refreshEffectBars(player)
@@ -1011,7 +1011,7 @@ func (s *RunState) StripBark(playerID int, treeID string, requestedQty float64) 
 		Tree:        tree,
 		Primary:     primary,
 		PrimaryQty:  primaryQty,
-		FiberQty:    fiberQty,
+		FiberQty:    float64(fiberQty),
 		HoursSpent:  hours,
 		Quality:     quality,
 		QualityText: string(quality),
@@ -1540,7 +1540,7 @@ func (s *RunState) currentShelterMetrics() (shelterMetrics, bool) {
 	metrics.Comfort += loc.Comfort
 	metrics.DrynessProtection += loc.DrynessProtection
 	metrics.Stealth += loc.Stealth
-	metrics.StorageCapacityKg = max(8.0, metrics.StorageCapacityKg+loc.StorageCapacityKg)
+	metrics.StorageCapacityKg = maxFloat64(8.0, metrics.StorageCapacityKg+loc.StorageCapacityKg)
 	metrics.DurabilityPerDay = max(1, metrics.DurabilityPerDay-loc.Maintenance/2)
 	metrics = s.applyShelterUpgradeModifiers(metrics)
 	return metrics, true

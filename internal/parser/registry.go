@@ -205,6 +205,8 @@ func DefaultRegistry() *Registry {
 		{Canonical: "hunt", Aliases: []string{"catch"}, MinArgs: 1, MaxArgs: 6, HandlerKey: "hunt"},
 		{Canonical: "fish", Aliases: []string{"angling", "cast line"}, MinArgs: 0, MaxArgs: 3, HandlerKey: "fish"},
 		{Canonical: "forage", MinArgs: 0, MaxArgs: 4, HandlerKey: "forage"},
+		{Canonical: "enter", Aliases: []string{"go inside", "get in", "crawl in", "enter shelter"}, MinArgs: 0, MaxArgs: 2, HandlerKey: "enter"},
+		{Canonical: "exit", Aliases: []string{"go outside", "leave", "step out", "exit shelter"}, MinArgs: 0, MaxArgs: 2, HandlerKey: "exit"},
 		{Canonical: "wood", MinArgs: 1, MaxArgs: 5, HandlerKey: "wood"},
 		{Canonical: "resources", MinArgs: 0, MaxArgs: 0, HandlerKey: "resources"},
 		{Canonical: "collect", MinArgs: 1, MaxArgs: 4, HandlerKey: "collect"},

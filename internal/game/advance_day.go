@@ -123,6 +123,23 @@ func (s *RunState) EvaluateRun() RunOutcome {
 		}
 	}
 
-	// 3) Ongoing
+	// 3) ModeAlone Victory Condition
+	if s.Config.Mode == ModeAlone && len(s.Contestants) > 0 {
+		allOut := true
+		for _, c := range s.Contestants {
+			if c.Status == ContestantActive {
+				allOut = false
+				break
+			}
+		}
+		if allOut {
+			return RunOutcome{
+				Status:  RunOutcomeCompleted,
+				Message: "All other contestants have tapped out or perished. You have outlasted them all.",
+			}
+		}
+	}
+
+	// 4) Ongoing
 	return RunOutcome{Status: RunOutcomeOngoing}
 }

@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type RunState struct {
 	Day         int
 	ClockHours  float64
 	Players     []PlayerState
+	Contestants []ContestantState `json:"contestants,omitempty"`
 	Weather     WeatherState
 
 	MetabolismProgress  float64         `json:"metabolism_progress"`
@@ -63,6 +65,13 @@ func NewRunState(config RunConfig) (RunState, error) {
 		ClockHours:  7,
 		Players:     CreatePlayers(resolvedConfig),
 	}
+
+	if resolvedConfig.Mode == ModeAlone {
+		numCompetitors := 10 - resolvedConfig.PlayerCount
+		if numCompetitors > 0 {
+			state.Contestants = initialContestants(numCompetitors, resolvedConfig.Seed)
+		}
+	}
 	state.EnsureWeather()
 	state.EnsurePlayerRuntimeStats()
 	state.initTopology()
@@ -78,4 +87,18 @@ func GetScenario(scenarios []Scenario, id ScenarioID) (Scenario, bool) {
 	}
 
 	return Scenario{}, false
+}
+
+func (s *RunState) ProcessContestantSimulation(delta time.Duration) []string {
+	if s.Config.Mode != ModeAlone || len(s.Contestants) == 0 {
+		return nil
+	}
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var messages []string
+	for i := range s.Contestants {
+		if hasEvent, msg := s.Contestants[i].processMacroTick(delta, s.Weather, r); hasEvent {
+			messages = append(messages, msg)
+		}
+	}
+	return messages
 }
