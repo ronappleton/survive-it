@@ -45,6 +45,7 @@ const (
 	screenScenarioBuilder
 	screenPhaseEditor
 	screenOptions
+	screenAISettings
 	screenLoad
 	screenRun
 	screenRunMap
@@ -60,6 +61,7 @@ const (
 	actionLoad
 	actionProfiles
 	actionScenarioBuilder
+	actionAI
 	actionOptions
 	actionInstallUpdate
 	actionQuit
@@ -201,6 +203,7 @@ type gameUI struct {
 	rplay           runPlayersState
 	rinv            runInventoryState
 	profilesUI      profilesState
+	ai              aiSettingsState
 	customScenarios []game.Scenario
 
 	run         *game.RunState
@@ -337,6 +340,8 @@ func (ui *gameUI) update(delta time.Duration) {
 		ui.updatePhaseEditor()
 	case screenOptions:
 		ui.updateOptions()
+	case screenAISettings:
+		ui.updateAISettings()
 	case screenLoad:
 		ui.updateLoad()
 	case screenRun:
@@ -374,6 +379,8 @@ func (ui *gameUI) draw() {
 		ui.drawPhaseEditor()
 	case screenOptions:
 		ui.drawOptions()
+	case screenAISettings:
+		ui.drawAISettings()
 	case screenLoad:
 		ui.drawLoad()
 	case screenRun:
@@ -425,6 +432,8 @@ func (ui *gameUI) updateMenu() {
 			ui.openProfilesScreen(screenMenu)
 		case actionScenarioBuilder:
 			ui.openScenarioBuilder()
+		case actionAI:
+			ui.openAISettings()
 		case actionOptions:
 			ui.screen = screenOptions
 		case actionInstallUpdate:
@@ -487,6 +496,7 @@ func (ui *gameUI) menuItems() []menuItem {
 		{Label: "Load Game", Action: actionLoad},
 		{Label: "Player Profiles", Action: actionProfiles},
 		{Label: "Scenario Builder", Action: actionScenarioBuilder},
+		{Label: "AI", Action: actionAI},
 		{Label: "Options", Action: actionOptions},
 	}
 	if ui.updateAvailable && !ui.cfg.NoUpdate {
