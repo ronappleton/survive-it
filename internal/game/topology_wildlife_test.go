@@ -115,7 +115,7 @@ func TestTopologySizeForScenarioClampsByMode(t *testing.T) {
 		MapHeightCells: 9,
 	})
 	if w != 46 || h != 28 {
-		t.Fatalf("expected alone clamp to 46x28, got %dx%d", w, h)
+		t.Fatalf("expected isolation_protocol clamp to 46x28, got %dx%d", w, h)
 	}
 }
 

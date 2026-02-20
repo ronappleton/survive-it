@@ -18,7 +18,7 @@ func TestRecommendedIssuedKitForScenarioOnlyHarshBiomes(t *testing.T) {
 		t.Fatalf("expected issued kit for harsh biome")
 	}
 	if len(kit) > 2 {
-		t.Fatalf("expected alone issued kit to stay compact, got %d", len(kit))
+		t.Fatalf("expected isolation_protocol issued kit to stay compact, got %d", len(kit))
 	}
 }
 

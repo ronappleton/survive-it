@@ -1,6 +1,6 @@
 {
   "id": "florida_everglades",
-  "name": "Florida Everglades (NAA)",
+  "name": "Florida Everglades (Paired Exposure)",
   "cell_meters": 100,
   "elev_p10": -2.063,
   "elev_p50": 0.1,

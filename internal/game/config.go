@@ -7,9 +7,9 @@ import (
 type GameMode string
 
 const (
-	ModeNakedAndAfraid   GameMode = "naked_and_afraid"
-	ModeNakedAndAfraidXL GameMode = "naked_and_afraid_xl"
-	ModeAlone            GameMode = "alone"
+	ModeNakedAndAfraid   GameMode = "paired_exposure"
+	ModeNakedAndAfraidXL GameMode = "expedition_survival"
+	ModeAlone            GameMode = "isolation_protocol"
 )
 
 type RunConfig struct {

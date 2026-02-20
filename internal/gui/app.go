@@ -2987,11 +2987,11 @@ func defaultPlayerConfig(i int, mode game.GameMode) game.PlayerConfig {
 func modeLabel(mode game.GameMode) string {
 	switch mode {
 	case game.ModeAlone:
-		return "Alone"
+		return "Isolation Protocol"
 	case game.ModeNakedAndAfraid:
-		return "Naked and Afraid"
+		return "Paired Exposure"
 	case game.ModeNakedAndAfraidXL:
-		return "Naked and Afraid XL"
+		return "Expedition Survival"
 	default:
 		return string(mode)
 	}

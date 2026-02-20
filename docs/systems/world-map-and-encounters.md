@@ -54,7 +54,7 @@ Notes:
 
 Sizing function: `topologySizeForScenario`.
 
-- `Alone`: default `36x36` (clamped `28..46` per axis)
+- `Isolation Protocol`: default `36x36` (clamped `28..46` per axis)
 - `Naked & Afraid`: default `100x100` (clamped `88..125`)
 - `Naked & Afraid XL`: default `125x125` (clamped `100..150`)
 
@@ -78,8 +78,8 @@ Scenario-level fields:
 ## Fog of War
 
 - Fog mask is stored in `RunState.FogMask`.
-- `Alone`: unrevealed at start, reveal persists permanently.
-- `N&A` and `N&A XL`: fully revealed.
+- `Isolation Protocol`: unrevealed at start, reveal persists permanently.
+- `Paired Exposure` and `Expedition Survival`: fully revealed.
 - Reveal call: `RevealFog(x,y,radius)`.
 
 ## Movement + Terrain Cost
