@@ -15,6 +15,10 @@ type aiSettingsState struct {
 	Enabled    bool
 	Downloaded bool
 
+	ModelID    string
+	ModelIndex int
+	ModelPacks []ai.ModelPack
+
 	Downloading     bool
 	DownloadedBytes int64
 	DownloadTotal   int64
@@ -31,6 +35,7 @@ type aiRowAction int
 
 const (
 	aiRowToggle aiRowAction = iota
+	aiRowModel
 	aiRowDownload
 	aiRowDelete
 	aiRowBack
@@ -43,19 +48,41 @@ type aiSettingsRow struct {
 }
 
 func (ui *gameUI) openAISettings() {
+	packs := ai.AvailableModelPacks()
 	cfg, cfgErr := ai.LoadConfig()
 	configPath, configPathErr := ai.ConfigPath()
-	modelPath, modelPathErr := ai.ModelPath()
-	downloaded, modelErr := ai.ModelExists()
+
+	modelID := ai.NormalizeModelID(cfg.ModelID)
+	modelIndex := modelPackIndexByID(packs, modelID)
+	if modelIndex < 0 {
+		modelIndex = 0
+		if len(packs) > 0 {
+			modelID = packs[0].ID
+		}
+	}
+
+	modelPath, modelPathErr := ai.ModelPathForID(modelID)
+	downloaded, modelErr := ai.ModelExists(modelID)
+	enabled := cfg.AIEnabled && downloaded
 
 	ui.ai = aiSettingsState{
 		Cursor:     0,
-		Enabled:    cfg.AIEnabled,
+		Enabled:    enabled,
 		Downloaded: downloaded,
+		ModelID:    modelID,
+		ModelIndex: modelIndex,
+		ModelPacks: packs,
 		ModelPath:  modelPath,
 		ConfigPath: configPath,
 	}
 
+	if cfg.AIEnabled && !downloaded {
+		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: modelID})
+		ui.ai.Status = "AI disabled because selected model is not downloaded."
+	}
+	if len(packs) == 0 {
+		ui.ai.Status = "No model packs configured."
+	}
 	if configPathErr != nil {
 		ui.ai.ConfigPath = "(unavailable)"
 	}
@@ -100,14 +127,23 @@ func (ui *gameUI) updateAISettings() {
 		ui.ai.Cursor = wrapIndex(ui.ai.Cursor-1, len(rows))
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyRight) {
-		if rows[ui.ai.Cursor].Action == aiRowToggle {
+		delta := -1
+		if rl.IsKeyPressed(rl.KeyRight) {
+			delta = 1
+		}
+		switch rows[ui.ai.Cursor].Action {
+		case aiRowToggle:
 			ui.toggleAIEnabled()
+		case aiRowModel:
+			ui.adjustAIModel(delta)
 		}
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		switch rows[ui.ai.Cursor].Action {
 		case aiRowToggle:
 			ui.toggleAIEnabled()
+		case aiRowModel:
+			ui.adjustAIModel(1)
 		case aiRowDownload:
 			ui.startAIDownload()
 		case aiRowDelete:
@@ -119,12 +155,14 @@ func (ui *gameUI) updateAISettings() {
 }
 
 func (ui *gameUI) aiRows() []aiSettingsRow {
+	modelLabel := "(none)"
+	if pack, ok := ui.currentAIModelPack(); ok {
+		modelLabel = pack.Name
+	}
+
 	rows := []aiSettingsRow{
-		{
-			Label:  "AI Enabled",
-			Value:  map[bool]string{true: "On", false: "Off"}[ui.ai.Enabled],
-			Action: aiRowToggle,
-		},
+		{Label: "AI Enabled", Value: map[bool]string{true: "On", false: "Off"}[ui.ai.Enabled], Action: aiRowToggle},
+		{Label: "Model", Value: truncateForUI(modelLabel, 24), Action: aiRowModel},
 	}
 	if !ui.ai.Downloading {
 		if ui.ai.Downloaded {
@@ -137,9 +175,27 @@ func (ui *gameUI) aiRows() []aiSettingsRow {
 	return rows
 }
 
+func (ui *gameUI) currentAIModelPack() (ai.ModelPack, bool) {
+	if len(ui.ai.ModelPacks) == 0 {
+		return ai.ModelPack{}, false
+	}
+	if ui.ai.ModelIndex >= 0 && ui.ai.ModelIndex < len(ui.ai.ModelPacks) {
+		return ui.ai.ModelPacks[ui.ai.ModelIndex], true
+	}
+	pack, ok := ai.ModelPackByID(ui.ai.ModelID)
+	if ok {
+		return pack, true
+	}
+	return ui.ai.ModelPacks[0], true
+}
+
 func (ui *gameUI) toggleAIEnabled() {
 	next := !ui.ai.Enabled
-	if err := ai.SaveConfig(ai.Config{AIEnabled: next}); err != nil {
+	if next && !ui.ai.Downloaded {
+		ui.ai.Status = "Download the selected model before enabling AI."
+		return
+	}
+	if err := ai.SaveConfig(ai.Config{AIEnabled: next, ModelID: ui.ai.ModelID}); err != nil {
 		ui.ai.Status = "Failed to save config: " + err.Error()
 		return
 	}
@@ -147,17 +203,47 @@ func (ui *gameUI) toggleAIEnabled() {
 	ui.ai.Status = "AI enabled setting saved."
 }
 
+func (ui *gameUI) adjustAIModel(delta int) {
+	if ui.ai.Downloading || len(ui.ai.ModelPacks) == 0 {
+		return
+	}
+	ui.ai.ModelIndex = wrapIndex(ui.ai.ModelIndex+delta, len(ui.ai.ModelPacks))
+	ui.ai.ModelID = ui.ai.ModelPacks[ui.ai.ModelIndex].ID
+	ui.refreshAIModelStatus()
+	if ui.ai.Enabled && !ui.ai.Downloaded {
+		ui.ai.Enabled = false
+		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: ui.ai.ModelID})
+		ui.ai.Status = "AI disabled because selected model is not downloaded."
+		return
+	}
+	if err := ai.SaveConfig(ai.Config{AIEnabled: ui.ai.Enabled, ModelID: ui.ai.ModelID}); err != nil {
+		ui.ai.Status = "Failed to save model selection: " + err.Error()
+		return
+	}
+	ui.ai.Status = "Model selection saved."
+}
+
 func (ui *gameUI) deleteAIModel() {
-	if err := ai.DeleteModel(); err != nil {
+	if err := ai.DeleteModel(ui.ai.ModelID); err != nil {
 		ui.ai.Status = "Delete failed: " + err.Error()
 		return
 	}
 	ui.refreshAIModelStatus()
+	if ui.ai.Enabled {
+		ui.ai.Enabled = false
+		_ = ai.SaveConfig(ai.Config{AIEnabled: false, ModelID: ui.ai.ModelID})
+		ui.ai.Status = "Model deleted. AI disabled."
+		return
+	}
 	ui.ai.Status = "Model file deleted."
 }
 
 func (ui *gameUI) startAIDownload() {
 	if ui.ai.Downloading {
+		return
+	}
+	if _, ok := ui.currentAIModelPack(); !ok {
+		ui.ai.Status = "No model pack selected."
 		return
 	}
 	ui.ai.Downloading = true
@@ -169,16 +255,17 @@ func (ui *gameUI) startAIDownload() {
 	doneCh := make(chan error, 1)
 	ui.ai.downloadProgressCh = progressCh
 	ui.ai.downloadDoneCh = doneCh
+	modelID := ui.ai.ModelID
 
-	go func(progressCh chan<- ai.Progress, doneCh chan<- error) {
-		err := ai.DownloadModel(context.Background(), func(p ai.Progress) {
+	go func(progressCh chan<- ai.Progress, doneCh chan<- error, modelID string) {
+		err := ai.DownloadModel(context.Background(), modelID, func(p ai.Progress) {
 			select {
 			case progressCh <- p:
 			default:
 			}
 		})
 		doneCh <- err
-	}(progressCh, doneCh)
+	}(progressCh, doneCh, modelID)
 }
 
 func (ui *gameUI) pollAIDownloadEvents() {
@@ -214,7 +301,16 @@ doneProgress:
 }
 
 func (ui *gameUI) refreshAIModelStatus() {
-	downloaded, err := ai.ModelExists()
+	modelPath, pathErr := ai.ModelPathForID(ui.ai.ModelID)
+	if pathErr != nil {
+		ui.ai.ModelPath = "(unavailable)"
+		ui.ai.Downloaded = false
+		ui.ai.Status = "Model path unavailable: " + pathErr.Error()
+		return
+	}
+	ui.ai.ModelPath = modelPath
+
+	downloaded, err := ai.ModelExists(ui.ai.ModelID)
 	if err != nil {
 		ui.ai.Status = "Model status check failed: " + err.Error()
 		ui.ai.Downloaded = false
@@ -239,13 +335,20 @@ func (ui *gameUI) drawAISettings() {
 		drawText(row.Label, int32(left.X)+26, y, 24, colorText)
 		drawText(row.Value, int32(left.X)+286, y, 24, colorAccent)
 	}
-	drawText("Left/Right or Enter to toggle, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+	drawText("Left/Right adjust or Enter select, Esc back", int32(left.X)+22, int32(left.Y+left.Height)-38, 18, colorDim)
+
+	packName := "(none)"
+	packURL := ""
+	if pack, ok := ui.currentAIModelPack(); ok {
+		packName = pack.Name
+		packURL = pack.URL
+	}
 
 	modelIndicator := "☐"
 	if ui.ai.Downloaded {
 		modelIndicator = "✓"
 	}
-	drawText(fmt.Sprintf("Model: %s ai-pack-v1.gguf", modelIndicator), int32(right.X)+24, int32(right.Y)+56, 24, colorText)
+	drawText(fmt.Sprintf("Model: %s %s", modelIndicator, truncateForUI(packName, 30)), int32(right.X)+24, int32(right.Y)+56, 24, colorText)
 
 	progressColor := colorDim
 	progressText := "Idle"
@@ -257,6 +360,9 @@ func (ui *gameUI) drawAISettings() {
 
 	drawWrappedText("Model Path: "+ui.ai.ModelPath, right, 136, 16, colorDim)
 	drawWrappedText("Config Path: "+ui.ai.ConfigPath, right, 178, 16, colorDim)
+	if strings.TrimSpace(packURL) != "" {
+		drawWrappedText("URL: "+packURL, right, 220, 15, colorDim)
+	}
 
 	if strings.TrimSpace(ui.ai.Status) != "" {
 		statusColor := colorAccent
@@ -264,8 +370,18 @@ func (ui *gameUI) drawAISettings() {
 		if strings.Contains(statusLower, "failed") || strings.Contains(statusLower, "error") {
 			statusColor = colorWarn
 		}
-		drawWrappedText(ui.ai.Status, right, 234, 19, statusColor)
+		drawWrappedText(ui.ai.Status, right, 282, 19, statusColor)
 	}
+}
+
+func modelPackIndexByID(packs []ai.ModelPack, id string) int {
+	id = strings.ToLower(strings.TrimSpace(id))
+	for i, pack := range packs {
+		if strings.ToLower(strings.TrimSpace(pack.ID)) == id {
+			return i
+		}
+	}
+	return -1
 }
 
 func formatAIDownloadProgress(downloaded, total int64) string {

@@ -31,8 +31,8 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func ModelExists() (bool, error) {
-	path, err := ModelPath()
+func ModelExists(modelID string) (bool, error) {
+	path, err := ModelPathForID(modelID)
 	if err != nil {
 		return false, err
 	}
@@ -46,8 +46,8 @@ func ModelExists() (bool, error) {
 	return !info.IsDir(), nil
 }
 
-func DeleteModel() error {
-	path, err := ModelPath()
+func DeleteModel(modelID string) error {
+	path, err := ModelPathForID(modelID)
 	if err != nil {
 		return err
 	}
@@ -58,12 +58,17 @@ func DeleteModel() error {
 	return err
 }
 
-func DownloadModel(ctx context.Context, onProgress func(Progress)) error {
-	if strings.TrimSpace(ModelURL) == "" {
+func DownloadModel(ctx context.Context, modelID string, onProgress func(Progress)) error {
+	pack, ok := ModelPackByID(NormalizeModelID(modelID))
+	if !ok {
+		return errors.New("model pack not found")
+	}
+	url := strings.TrimSpace(pack.URL)
+	if url == "" {
 		return errors.New("model URL is empty")
 	}
 
-	modelPath, err := ModelPath()
+	modelPath, err := ModelPathForID(pack.ID)
 	if err != nil {
 		return err
 	}
@@ -72,7 +77,7 @@ func DownloadModel(ctx context.Context, onProgress func(Progress)) error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ModelURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}

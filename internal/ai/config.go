@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	AIEnabled bool `json:"ai_enabled"`
+	AIEnabled bool   `json:"ai_enabled"`
+	ModelID   string `json:"model_id,omitempty"`
 }
 
 func LoadConfig() (Config, error) {
@@ -19,7 +20,7 @@ func LoadConfig() (Config, error) {
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return Config{}, nil
+		return Config{ModelID: DefaultModelID()}, nil
 	}
 	if err != nil {
 		return Config{}, err
@@ -28,10 +29,13 @@ func LoadConfig() (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
+	cfg.ModelID = NormalizeModelID(cfg.ModelID)
 	return cfg, nil
 }
 
 func SaveConfig(cfg Config) error {
+	cfg.ModelID = NormalizeModelID(cfg.ModelID)
+
 	path, err := ConfigPath()
 	if err != nil {
 		return err
